@@ -22,7 +22,7 @@ pub struct Args {
     pub sections: bool,
 
     /// Regulax expresion to filter the Sections to display
-    #[arg(long, default_value = "")]
+    #[arg(long, default_value = ".*")]
     pub sections_filter: String,
 
     /// Dumps the Sections data along with the headers

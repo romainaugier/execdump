@@ -15,9 +15,24 @@ Arguments:
   <FILE_PATH>
 
 Options:
-      --dos-header       Dumps the legacy MS-DOS compatible header
-      --nt-header        Dumps the NT Header (most recent)
-      --optional-header  Dumps the Optional (either 32/64) header
-  -h, --help             Print help
-  -V, --version          Print version
+      --dos-header
+          Dumps the legacy MS-DOS compatible header
+      --nt-header
+          Dumps the NT Header (most recent)
+      --optional-header
+          Dumps the Optional (either 32/64) header
+      --sections
+          Dumps the Sections
+      --sections-filter <SECTIONS_FILTER>
+          Regulax expresion to filter the Sections to display [default: ".*"]
+      --sections-data
+          Dumps the Sections data along with the headers
+      --disasm
+          Disassemble the code found in the sections
+      --padding-size <PADDING_SIZE>
+          Padding size to apply when dumping information for better readability [default: 4]
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```

@@ -27,11 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.sections {
-        let sections_filter_regex = if args.sections_filter.len() > 0 {
-            Regex::new(&args.sections_filter.as_str())
-        } else {
-            Regex::new(".*")
-        }.expect("Invalid regular expression");
+        let sections_filter_regex = Regex::new(&args.sections_filter.as_str()).expect("Invalid regular expression");
 
         println!("Sections ({})", pe.get_number_of_sections());
         println!("");
