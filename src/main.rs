@@ -1,3 +1,4 @@
+use crate::dump::dump_label;
 use crate::pe::parse_pe;
 use crate::args::Args;
 
@@ -8,6 +9,7 @@ use regex::Regex;
 pub mod pe;
 pub mod dump;
 pub mod args;
+pub mod disasm;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -37,6 +39,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 section.dump(0, args.padding_size, &args);
             }
         }
+    }
+
+    if args.debug {
+        if let Some(dd) = pe.debug_directory {
+            dd.dump(0, args.padding_size);
+        } else {
+            dump_label("Debug", 0);
+            dump_label("No debug information found in PE", args.padding_size);
+        }
+    }
+
+    if args.exception {
+        if let Some(et) = pe.exception_table {
+            et.dump(0, args.padding_size);
+        } else {
+            dump_label("Exception", 0);
+            dump_label("No exception information found in PE", args.padding_size);
+        }
+
     }
 
     return Ok(());

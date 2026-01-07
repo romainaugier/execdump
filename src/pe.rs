@@ -10,7 +10,8 @@ use strum_macros::{EnumIter, IntoStaticStr};
 use capstone::prelude::*;
 
 use crate::args::Args;
-use crate::dump::{dump_field, dump_instruction};
+use crate::disasm::is_padding_instruction;
+use crate::dump::*;
 
 /*
  * https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
@@ -341,7 +342,11 @@ impl COFFHeader {
         );
         dump_field(
             "TimeDateStamp",
-            format!("{:#x}", self.time_date_stamp),
+            format!(
+                "{:#x} ({})",
+                self.time_date_stamp,
+                dump_u32_as_ctime(self.time_date_stamp)
+            ),
             field_pad,
             field_align,
         );
@@ -439,6 +444,337 @@ impl ImageDataDirectory {
         idd.size = cursor.read_u32::<LittleEndian>()?;
 
         return Ok(idd);
+    }
+}
+
+/*
+ * Import Table
+ */
+
+#[derive(Default, Clone, Debug)]
+#[repr(C)]
+pub struct ImportTable {}
+
+/*
+ * Debug Directory
+ */
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum DebugType {
+    Unknown = 0,               // An unknown value that is ignored by all tools.
+    Coff = 1, // The COFF debug information (line numbers, symbol table, and string table). This type of debug information is also pointed to by fields in the file headers.
+    CodeView = 2, // The Visual C++ debug information.
+    Fpo = 3, // The frame pointer omission (FPO) information. This information tells the debugger how to interpret nonstandard stack frames, which use the EBP register for a purpose other than as a frame pointer.
+    Misc = 4, // The location of DBG file.
+    Exception = 5, // A copy of .pdata section.
+    FixUp = 6, // Reserved.
+    OMapToSrc = 7, // The mapping from an RVA in image to an RVA in source image.
+    OMapFromSrc = 8, // The mapping from an RVA in source image to an RVA in image.
+    Borland = 9, // Reserved for Borland.
+    Reserved10 = 10, // Reserved.
+    CLSid = 11, // Reserved.
+    Repro = 16, // PE determinism or reproducibility.
+    EmbeddedAtPtrd = 17, // Debugging information is embedded in the PE file at location specified by PointerToRawData.
+    StoresCryptoHashCnt = 19, // Stores crypto hash for the content of the symbol file used to build the PE/COFF file.
+    ExDLLCharacteristics = 20, // Extended DLL characteristics bits.
+}
+
+impl From<u32> for DebugType {
+    fn from(value: u32) -> Self {
+        match value {
+            v if v == DebugType::Unknown as u32 => DebugType::Unknown,
+            v if v == DebugType::Coff as u32 => DebugType::Coff,
+            v if v == DebugType::CodeView as u32 => DebugType::CodeView,
+            v if v == DebugType::Fpo as u32 => DebugType::Fpo,
+            v if v == DebugType::Misc as u32 => DebugType::Misc,
+            v if v == DebugType::Exception as u32 => DebugType::Exception,
+            v if v == DebugType::FixUp as u32 => DebugType::FixUp,
+            v if v == DebugType::OMapToSrc as u32 => DebugType::OMapToSrc,
+            v if v == DebugType::OMapFromSrc as u32 => DebugType::OMapFromSrc,
+            v if v == DebugType::Borland as u32 => DebugType::Borland,
+            v if v == DebugType::Reserved10 as u32 => DebugType::Reserved10,
+            v if v == DebugType::CLSid as u32 => DebugType::CLSid,
+            v if v == DebugType::Repro as u32 => DebugType::Repro,
+            v if v == DebugType::EmbeddedAtPtrd as u32 => DebugType::EmbeddedAtPtrd,
+            v if v == DebugType::StoresCryptoHashCnt as u32 => DebugType::StoresCryptoHashCnt,
+            v if v == DebugType::ExDLLCharacteristics as u32 => DebugType::ExDLLCharacteristics,
+            _ => DebugType::Unknown,
+        }
+    }
+}
+
+impl DebugType {
+    pub fn as_static_str(&self) -> &'static str {
+        return self.into();
+    }
+}
+
+#[derive(Default, Clone, Debug)]
+#[repr(C)]
+pub struct DebugDirectory {
+    characteristics: u32,
+    time_date_stamp: u32,
+    major_version: u16,
+    minor_version: u16,
+    debug_type: u32,
+    size_of_data: u32,
+    address_of_raw_data: u32,
+    pointer_to_raw_data: u32,
+}
+
+impl DebugDirectory {
+    pub fn new() -> DebugDirectory {
+        return DebugDirectory::default();
+    }
+
+    pub fn from_parser(
+        cursor: &mut io::Cursor<&Vec<u8>>,
+    ) -> Result<DebugDirectory, Box<dyn std::error::Error>> {
+        let mut dd = DebugDirectory::new();
+
+        dd.characteristics = cursor.read_u32::<LittleEndian>()?;
+        dd.time_date_stamp = cursor.read_u32::<LittleEndian>()?;
+        dd.major_version = cursor.read_u16::<LittleEndian>()?;
+        dd.minor_version = cursor.read_u16::<LittleEndian>()?;
+        dd.debug_type = cursor.read_u32::<LittleEndian>()?;
+        dd.size_of_data = cursor.read_u32::<LittleEndian>()?;
+        dd.address_of_raw_data = cursor.read_u32::<LittleEndian>()?;
+        dd.pointer_to_raw_data = cursor.read_u32::<LittleEndian>()?;
+
+        return Ok(dd);
+    }
+
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        dump_label("Debug Directory", pad * pad_sz);
+
+        let fields_pad = (pad + 1) * pad_sz;
+        let fields_align = 17;
+
+        dump_field(
+            "Characteristics",
+            format!("{:#x}", self.characteristics),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "TimeDateStamp",
+            format!(
+                "{:#x} ({})",
+                self.time_date_stamp,
+                dump_u32_as_ctime(self.time_date_stamp)
+            ),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "MajorVersion",
+            format!("{:#x}", self.major_version),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "MinorVersion",
+            format!("{:#x}", self.minor_version),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "DebugType",
+            format!(
+                "{:#x} ({})",
+                self.debug_type,
+                DebugType::from(self.debug_type).as_static_str()
+            ),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "SizeOfData",
+            format!("{:#x} ({} bytes)", self.size_of_data, self.size_of_data),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "AddressOfRawData",
+            format!("{:#x}", self.address_of_raw_data),
+            fields_pad,
+            fields_align,
+        );
+        dump_field(
+            "PointerToRawData",
+            format!("{:#x}", self.pointer_to_raw_data),
+            fields_pad,
+            fields_align,
+        );
+
+        println!("");
+    }
+}
+
+/*
+ * Exception Table
+ * https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#the-pdata-section
+ */
+
+/// 32-bit MIPS images
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Mips32ExcFunctionEntry {
+    begin_address: u32,
+    end_address: u32,
+    exception_handler: u32,
+    handler_data: u32,
+    prolog_end_address: u32,
+}
+
+impl Mips32ExcFunctionEntry {
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        dump_label("Function Entry", pad * pad_sz);
+
+        let fields_pad = (pad + 1) * pad_sz;
+        let fields_align = 17;
+
+        dump_field("BeginAddress", format!("{:#x}", self.begin_address), fields_pad, fields_align);
+        dump_field("EndAddress", format!("{:#x}", self.end_address), fields_pad, fields_align);
+        dump_field("ExceptionHandler", format!("{:#x}", self.exception_handler), fields_pad, fields_align);
+        dump_field("HandlerData", format!("{:#x}", self.handler_data), fields_pad, fields_align);
+        dump_field("PrologEndAddress", format!("{:#x}", self.prolog_end_address), fields_pad, fields_align);
+    }
+}
+
+/// x64 and Itanium platforms
+#[derive(Debug, Clone, Copy, Default)]
+pub struct X64ExcFunctionEntry {
+    begin_address: u32,
+    end_address: u32,
+    unwind_information: u32,
+}
+
+impl X64ExcFunctionEntry {
+    pub fn from_parser(
+        cursor: &mut io::Cursor<&Vec<u8>>,
+    ) -> Result<X64ExcFunctionEntry, Box<dyn std::error::Error>> {
+        let mut entry = X64ExcFunctionEntry::default();
+
+        entry.begin_address = cursor.read_u32::<LittleEndian>()?;
+        entry.end_address = cursor.read_u32::<LittleEndian>()?;
+        entry.unwind_information = cursor.read_u32::<LittleEndian>()?;
+
+        return Ok(entry);
+    }
+
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        dump_label("Function Entry", pad * pad_sz);
+
+        let fields_pad = (pad + 1) * pad_sz;
+        let fields_align = 18;
+
+        dump_field("BeginAddress", format!("{:#x}", self.begin_address), fields_pad, fields_align);
+        dump_field("EndAddress", format!("{:#x}", self.end_address), fields_pad, fields_align);
+        dump_field("UnwindInformation", format!("{:#x}", self.unwind_information), fields_pad, fields_align);
+    }
+}
+
+/// ARM, PowerPC, SH3/SH4 Windows CE platforms
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OtherExcFunctionEntry {
+    begin_address: u32,
+    prolog_length: u8,
+    function_length: u32,
+    flag_32bit: bool,
+    flag_exception: bool,
+}
+
+impl OtherExcFunctionEntry {
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        dump_label("Function Entry", pad * pad_sz);
+
+        let fields_pad = (pad + 1) * pad_sz;
+        let fields_align = 15;
+
+        dump_field("BeginAddress", format!("{:#x}", self.begin_address), fields_pad, fields_align);
+        dump_field("PrologLength", format!("{:#x}", self.prolog_length), fields_pad, fields_align);
+        dump_field("FunctionLength", format!("{:#x}", self.function_length), fields_pad, fields_align);
+        dump_field("32-bit Flag", format!("{}", self.flag_32bit), fields_pad, fields_align);
+        dump_field("Exception Flag", format!("{}", self.flag_exception), fields_pad, fields_align);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExcFunctionEntry {
+    Mips32(Mips32ExcFunctionEntry),
+    X64(X64ExcFunctionEntry),
+    Other(OtherExcFunctionEntry),
+}
+
+impl Default for ExcFunctionEntry {
+    fn default() -> Self {
+        return ExcFunctionEntry::X64(X64ExcFunctionEntry::default());
+    }
+}
+
+impl ExcFunctionEntry {
+    pub fn from_parser(
+        cursor: &mut io::Cursor<&Vec<u8>>,
+        machine_type: MachineType,
+    ) -> Result<ExcFunctionEntry, Box<dyn std::error::Error>> {
+        match machine_type {
+            MachineType::AMD64 | MachineType::I386 => Ok(ExcFunctionEntry::X64(
+                X64ExcFunctionEntry::from_parser(cursor)?,
+            )),
+            _ => Err("Cannot parse Exception Function Entry, unsupported platform".into()),
+            /* TODO: implement other machine types */
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            ExcFunctionEntry::Mips32(_) => 20,
+            ExcFunctionEntry::X64(_) => 12,
+            ExcFunctionEntry::Other(_) => 8,
+        }
+    }
+
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        match self {
+            ExcFunctionEntry::Mips32(e) => e.dump(pad, pad_sz),
+            ExcFunctionEntry::X64(e) => e.dump(pad, pad_sz),
+            ExcFunctionEntry::Other(e) => e.dump(pad, pad_sz),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ExceptionTable {
+    entries: Vec<ExcFunctionEntry>,
+}
+
+impl ExceptionTable {
+    pub fn from_parser(
+        cursor: &mut io::Cursor<&Vec<u8>>,
+        size: usize,
+        machine_type: MachineType,
+    ) -> Result<ExceptionTable, Box<dyn std::error::Error>> {
+        let mut et = ExceptionTable::default();
+
+        let mut parsed_sz = 0 as usize;
+
+        while parsed_sz < size {
+            let entry = ExcFunctionEntry::from_parser(cursor, machine_type)?;
+            parsed_sz += entry.len();
+            et.entries.push(entry);
+        }
+
+        return Ok(et);
+    }
+
+    pub fn dump(&self, pad: usize, pad_sz: usize) {
+        dump_label(format!("Exception Table ({} entries)", self.entries.len()).as_str(), pad * pad_sz);
+
+        for entry in self.entries.iter() {
+            entry.dump(pad + 1, pad_sz);
+        }
     }
 }
 
@@ -1483,6 +1819,104 @@ impl OptionalHeader {
             OptionalHeader::PE64(h) => h.dump(pad, pad_sz),
         }
     }
+
+    pub fn get_export_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.export_table,
+            Self::PE64(h) => &h.export_table,
+        }
+    }
+
+    pub fn get_import_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.import_table,
+            Self::PE64(h) => &h.import_table,
+        }
+    }
+
+    pub fn get_resource_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.resource_table,
+            Self::PE64(h) => &h.resource_table,
+        }
+    }
+
+    pub fn get_exception_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.exception_table,
+            Self::PE64(h) => &h.exception_table,
+        }
+    }
+
+    pub fn get_certificate_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.certificate_table,
+            Self::PE64(h) => &h.certificate_table,
+        }
+    }
+
+    pub fn get_base_relocation_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.base_relocation_table,
+            Self::PE64(h) => &h.base_relocation_table,
+        }
+    }
+
+    pub fn get_debug_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.debug,
+            Self::PE64(h) => &h.debug,
+        }
+    }
+
+    pub fn get_global_ptr_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.global_ptr,
+            Self::PE64(h) => &h.global_ptr,
+        }
+    }
+
+    pub fn get_tls_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.tls_table,
+            Self::PE64(h) => &h.tls_table,
+        }
+    }
+
+    pub fn get_load_config_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.load_config_table,
+            Self::PE64(h) => &h.load_config_table,
+        }
+    }
+
+    pub fn get_bound_import_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.bound_import,
+            Self::PE64(h) => &h.bound_import,
+        }
+    }
+
+    pub fn get_import_address_table_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.import_address_table,
+            Self::PE64(h) => &h.import_address_table,
+        }
+    }
+
+    pub fn get_delay_import_descriptor_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.delay_import_descriptor,
+            Self::PE64(h) => &h.delay_import_descriptor,
+        }
+    }
+
+    pub fn get_clr_runtime_header_idd(&self) -> &ImageDataDirectory {
+        match self {
+            Self::PE32(h) => &h.clr_runtime_header,
+            Self::PE64(h) => &h.clr_runtime_header,
+        }
+    }
 }
 
 /*
@@ -1617,6 +2051,14 @@ impl SectionHeader {
         return Ok(header);
     }
 
+    pub fn data_size(&self) -> usize {
+        if self.virtual_size != self.size_of_raw_data {
+            return self.virtual_size as usize;
+        } else {
+            return self.size_of_raw_data as usize;
+        }
+    }
+
     pub fn dump(&self, pad: usize, pad_sz: usize) {
         let label_pad = pad * pad_sz;
 
@@ -1730,11 +2172,6 @@ impl Section {
 
         self.header.dump(pad + 1, pad_sz);
 
-        if options.sections_data {
-            dump_field("Section Data", "", pad + 1, pad_sz);
-            println!("{:?}", self.data);
-        }
-
         if options.disasm {
             if self.header.characteristics & SectionFlags::CntCode as u32 > 0 {
                 let label_pad = (pad + 1) * pad_sz;
@@ -1750,11 +2187,20 @@ impl Section {
                     .build()
                     .expect("Failed to initialized Capstone disasm");
 
-                let instructions = cs.disasm_all(&self.data, 0x0).expect("Failed to disassemble");
+                let instructions = cs
+                    .disasm_all(&self.data, self.header.virtual_address as u64)
+                    .expect("Failed to disassemble");
 
                 for instruction in instructions.as_ref() {
+                    if is_padding_instruction(&instruction) {
+                        continue;
+                    }
+
                     dump_instruction(instruction, instruction_pad);
                 }
+            } else if options.sections_data {
+                dump_field("Section Data", "", pad + 1, pad_sz);
+                println!("{:?}", self.data);
             }
         }
 
@@ -1919,6 +2365,8 @@ pub struct PE {
     pub import_descriptors: Vec<ImageImportDescriptor>,
     pub dll_names: Vec<String>,
     pub data: Vec<u8>,
+    pub debug_directory: Option<DebugDirectory>,
+    pub exception_table: Option<ExceptionTable>,
 }
 
 impl PE {
@@ -2078,11 +2526,17 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
 
     let mut cursor = io::Cursor::new(&pe.data);
 
+    // DOS Header
+
     let dos_header = DOSHeader::from_parser(&mut cursor)?;
+
+    // NT Header
 
     cursor.set_position(dos_header.e_lfanew as u64);
 
     let nt_header = NTHeader::from_parser(&mut cursor)?;
+
+    // Optional Header
 
     let optional_magic: u16 = cursor.read_u16::<LittleEndian>()?;
     cursor.set_position(cursor.position() - 2);
@@ -2116,6 +2570,8 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
     let end_of_optional_position = cursor.position();
     let optional_size = end_of_optional_position - start_of_optional_position;
 
+    // Sections
+
     cursor.set_position(cursor.position() + (pe.get_size_of_optional_header() - optional_size));
 
     for _ in 0..pe.get_number_of_sections() {
@@ -2123,7 +2579,7 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
 
         let previous_position = cursor.position();
 
-        let mut section_data: Vec<u8> = vec![0; section_header.size_of_raw_data as usize];
+        let mut section_data: Vec<u8> = vec![0; section_header.data_size()];
 
         cursor.set_position(section_header.ptr_to_raw_data as u64);
         cursor.read_exact(&mut section_data)?;
@@ -2137,6 +2593,45 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
         );
 
         cursor.set_position(previous_position);
+    }
+
+    // Data Directories
+
+    // Debug Directory
+    let debug_va = pe.get_optional_header().get_debug_idd().virtual_address;
+
+    if debug_va > 0 {
+        let debug_fo = pe.convert_rva_to_file_offset(debug_va);
+
+        if let Some(dfo) = debug_fo {
+            cursor.set_position(dfo as u64);
+
+            let debug_directory = DebugDirectory::from_parser(&mut cursor)?;
+
+            pe.debug_directory = Some(debug_directory);
+        }
+    }
+
+    // Exception Table
+    let exception_va = pe
+        .get_optional_header()
+        .get_exception_table_idd()
+        .virtual_address;
+
+    if exception_va > 0 {
+        let exception_fo = pe.convert_rva_to_file_offset(exception_va);
+
+        if let Some(efo) = exception_fo {
+            cursor.set_position(efo as u64);
+
+            let exception_table = ExceptionTable::from_parser(
+                &mut cursor,
+                pe.get_optional_header().get_exception_table_idd().size as usize,
+                pe.get_nt_header().coff_header.machine.into(),
+            )?;
+
+            pe.exception_table = Some(exception_table);
+        }
     }
 
     pe.import_descriptors = parse_import_descriptors(&pe, &mut cursor)?;

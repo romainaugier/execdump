@@ -29,9 +29,17 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub sections_data: bool,
 
-    /// Disassemble the code found in the sections
+    /// Disassemble the code found in the Sections containing code
     #[arg(long, default_value_t = false)]
     pub disasm: bool,
+
+    /// Dump the debug information, if any
+    #[arg(long, default_value_t = false)]
+    pub debug: bool,
+
+    /// Dump the exception information, if any
+    #[arg(long, default_value_t = false)]
+    pub exception: bool,
 
     /// Padding size to apply when dumping information for better readability
     #[arg(long, default_value_t = 4)]
