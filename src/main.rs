@@ -1,27 +1,13 @@
-use clap::Parser;
-use crate::pe::{parse_pe, OptionalHeader};
+use crate::pe::parse_pe;
+use crate::args::Args;
 
-use std::path::PathBuf;
+use clap::Parser;
+
+use regex::Regex;
 
 pub mod pe;
-
-#[derive(Parser, Debug)]
-#[command(version, about = "Parser/Dumper for portable executable files on Windows")]
-struct Args {
-    /// Dumps the legacy MS-DOS compatible header
-    #[arg(long, default_value_t = false)]
-    dos_header: bool,
-
-    /// Dumps the NT Header (most recent)
-    #[arg(long, default_value_t = false)]
-    nt_header: bool,
-
-    /// Dumps the Optional (either 32/64) header
-    #[arg(long, default_value_t = false)]
-    optional_header: bool,
-
-    file_path: PathBuf,
-}
+pub mod dump;
+pub mod args;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -29,17 +15,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pe = parse_pe(&args.file_path)?;
 
     if args.dos_header {
-        println!("{:#?}", pe.get_dos_header());
+        pe.get_dos_header().dump(0, args.padding_size);
     }
 
     if args.nt_header {
-        println!("{:#?}", pe.get_nt_header());
+        pe.get_nt_header().dump(0, args.padding_size);
     }
 
     if args.optional_header {
-        match pe.get_optional_header() {
-            OptionalHeader::PE32(header) => println!("{:#?}", header),
-            OptionalHeader::PE64(header) => println!("{:#?}", header),
+        pe.get_optional_header().dump(0, args.padding_size);
+    }
+
+    if args.sections {
+        let sections_filter_regex = if args.sections_filter.len() > 0 {
+            Regex::new(&args.sections_filter.as_str())
+        } else {
+            Regex::new(".*")
+        }.expect("Invalid regular expression");
+
+        println!("Sections ({})", pe.get_number_of_sections());
+        println!("");
+
+        for (_, section) in pe.sections {
+            if sections_filter_regex.is_match(section.header.name.as_str()) {
+                section.dump(0, args.padding_size, &args);
+            }
         }
     }
 
