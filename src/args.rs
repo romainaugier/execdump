@@ -5,6 +5,10 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(version, about = "Parser/Dumper for portable executable files on Windows")]
 pub struct Args {
+    /// Opens the PE in the terminal-based user interface for exploration
+    #[arg(long, short, default_value_t = false)]
+    pub tui: bool,
+
     /// Dumps the legacy MS-DOS compatible header
     #[arg(long, default_value_t = false)]
     pub dos_header: bool,

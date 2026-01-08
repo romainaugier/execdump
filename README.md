@@ -1,20 +1,24 @@
-# pedump
+# execdump
 
-pedump is a command-line tool that helps you analyze Windows's Portable Executable files by parsing and printing the required information about them.
+execdump is a command-line tool that helps you analyze Windows's PE and Linux's ELF files by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
 
 This project is currently a work in progress so not everything is supported, and it might be broken.
 
-pedump might evolve into a library later, instead of just being a standalone command-line tool.
+The goal is to provide a fast, reliable and cross-platform reverse-engineering application.
+
+execdump might evolve into a library later, instead of just being a standalone command-line tool.
 
 ## Usage
 
 ```
-Usage: pedump.exe [OPTIONS] <FILE_PATH>
+Usage: execdump.exe [OPTIONS] <FILE_PATH>
 
 Arguments:
   <FILE_PATH>
 
 Options:
+  -t, --tui
+          Opens the PE in the terminal-based user interface for exploration
       --dos-header
           Dumps the legacy MS-DOS compatible header
       --nt-header
@@ -51,6 +55,8 @@ Options:
 
 ## Features
 
+### PE
+
 Headers:
 
 - :heavy_check_mark: DOS
@@ -76,3 +82,32 @@ Sections:
 Code:
 
 - :heavy_check_mark: Basic disassembly of the code sections
+
+### ELF
+
+Not supported yet.
+
+### Core
+
+Utilities:
+  - :x: C++ Symbol Demangler
+
+PE/ELF Disasm:
+  - :x: Replace call addresses with symbols
+  - :x: Structure program
+  - :x: Easily find system calls
+
+### TUI
+
+Viewers:
+  - :heavy_check_mark: Headers
+  - :clock9: PE Sections
+  - :x: ELF Sections
+  - :heavy_check_mark: Hex Viewer
+  - :x: Disasm Viewer
+
+## Acknowledgement
+
+This tool is based on several amazing open-source projects (go check them out!) :
+ - [Capstone](https://github.com/capstone-engine/capstone)
+ - [Ratatui](https://ratatui.rs/)
