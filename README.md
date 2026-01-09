@@ -18,13 +18,13 @@ Arguments:
 
 Options:
   -t, --tui
-          Opens the PE in the terminal-based user interface for exploration
-      --dos-header
-          Dumps the legacy MS-DOS compatible header
-      --nt-header
-          Dumps the NT Header (most recent)
-      --optional-header
-          Dumps the Optional (either 32/64) header
+          Opens the executable in the terminal-based user interface for exploration
+      --pe-dos-header
+          Dumps the PE legacy MS-DOS compatible header
+      --pe-nt-header
+          Dumps the PE NT Header (most recent)
+      --pe-optional-header
+          Dumps the PE Optional (either 32/64) header
       --sections
           Dumps the Sections
       --sections-filter <SECTIONS_FILTER>
@@ -33,17 +33,17 @@ Options:
           Dumps the Sections data along with the headers
       --disasm
           Disassemble the code found in the Sections containing code
-      --import
-          Dump all the data related to imports, if any
-      --import-directory-table
+      --pe-import
+          Dump all the PE data related to imports, if any
+      --pe-import-directory-table
           Dump the Import Directory Table, if any
-      --hint-name-table
+      --pe-hint-name-table
           Dump the Hint/Name Table, if any
-      --dlls
+      --pe-dlls
           Dump the DLLs names imported, if any
-      --debug
+      --pe-debug-directory
           Dump the debug information from the Debug Directory, if any
-      --exception
+      --pe-exc-table
           Dump the exception information from the Exception Table, if any
       --padding-size <PADDING_SIZE>
           Padding size to apply when dumping information for better readability [default: 4]

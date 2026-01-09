@@ -22,7 +22,8 @@ use crate::dump::*;
  */
 
 /* Magic number for MS-DOS executable */
-const DOS_MAGIC: u16 = 0x5a4d;
+pub const DOS_MAGIC: u16 = 0x5a4d;
+pub const DOS_MAGIC_ARRAY: [u8; 2] = [b'M', b'Z'];
 
 #[derive(Default, Clone, Debug)]
 #[repr(C)]
@@ -1104,8 +1105,12 @@ impl Section {
         };
     }
 
+    pub fn contains_code(&self) -> bool {
+        return (self.header.characteristics & (SectionFlags::CntCode as u32)) > 0;
+    }
+
     pub fn dump(&self, disasm_code: bool) -> Dump {
-        let mut dump = Dump::new("Section");
+        let mut dump = Dump::new_with_string(format!("Section ({})", self.header.name));
 
         dump.push_child(self.header.dump());
 
@@ -1138,6 +1143,8 @@ impl Section {
             } else {
                 dump.set_raw_data(DumpRawData::Bytes(self.data.clone()));
             }
+        } else {
+            dump.set_raw_data(DumpRawData::Bytes(self.data.clone()));
         }
 
         return dump;
