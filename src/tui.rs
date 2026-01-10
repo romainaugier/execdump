@@ -19,8 +19,9 @@ use crossterm::{
 use serde::{Deserialize, Serialize};
 use std::{error::Error, io, path::PathBuf, cmp::min};
 
-use crate::dump::{Dump, DumpRawData};
+use crate::{char_utils, dump::{Dump, DumpRawData}, x86_64::starts_with_type_qualifier};
 use crate::exec::Exec;
+use crate::x86_64::{is_x86_64_register, is_type_qualifier};
 
 #[derive(Clone, Debug)]
 struct Theme {
@@ -36,7 +37,14 @@ struct Theme {
     hex_data: Color,
     hex_ascii: Color,
     comment: Color,
-    string: Color,
+
+    /// Disassembly Syntax Highlighting
+    asm_address: Color,
+    asm_instruction: Color,
+    asm_register: Color,
+    asm_immediate: Color,
+    asm_label: Color,
+    asm_separator: Color,
 }
 
 impl Theme {
@@ -54,7 +62,12 @@ impl Theme {
             hex_data: Color::Rgb(181, 206, 168),
             hex_ascii: Color::Rgb(206, 145, 120),
             comment: Color::Rgb(70, 70, 70),
-            string: Color::Rgb(124, 227, 139),
+            asm_address: Color::Rgb(128, 128, 128),
+            asm_instruction: Color::Rgb(86, 156, 214),
+            asm_register: Color::Rgb(156, 220, 254),
+            asm_immediate: Color::Rgb(181, 206, 168),
+            asm_label: Color::Rgb(220, 220, 170),
+            asm_separator: Color::Rgb(212, 212, 212),
         }
     }
 }
@@ -96,14 +109,15 @@ impl Default for KeyBindings {
 impl KeyBindings {
     fn load() -> Self {
         if let Some(home) = dirs::home_dir() {
-            let config_path = home.join(".pedumprc");
+            let config_path = home.join(".execdumprc");
             if let Ok(contents) = std::fs::read_to_string(config_path) {
                 if let Ok(bindings) = toml::from_str(&contents) {
                     return bindings;
                 }
             }
         }
-        KeyBindings::default()
+
+        return KeyBindings::default();
     }
 }
 
@@ -568,6 +582,10 @@ impl App {
         return Text::from(self.lines_from_dump(dump, 0, indent));
     }
 
+    /*
+     * Hex Viewer
+     */
+
     fn render_section_hex(&self, name: &str, data: &[u8]) -> Text<'_> {
         let mut lines = vec![
             Line::from(Span::styled(
@@ -628,6 +646,110 @@ impl App {
         return Text::from(lines);
     }
 
+    /*
+     * Disassembly Viewer
+     */
+
+     #[rustfmt::skip]
+     fn highlight_disasm_line(&self, line: &str) -> Line<'_> {
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with(';') {
+            return Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(self.theme.comment),
+            ));
+        }
+
+        if trimmed.ends_with(':') {
+            return Line::from(Span::styled(
+                line.to_string(),
+                Style::default().fg(self.theme.asm_label).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        let mut spans = Vec::new();
+
+        for (i, part) in line.splitn(3, char::is_whitespace).enumerate() {
+            match i {
+                0 => { spans.push(Span::styled(part.to_string(), Style::default().fg(self.theme.asm_address))) },
+                1 => { spans.push(Span::styled(format!(" {part} "), Style::default().fg(self.theme.asm_instruction))) }
+                2 => { self.highlight_operands(part, &mut spans) }
+                _ => {},
+            };
+        }
+
+        return Line::from(spans);
+    }
+
+    #[rustfmt::skip]
+    fn highlight_operand<'a>(&self, text: &str, add_comma: bool, add_space: bool) -> Vec<Span<'a>> {
+        let comma = if add_comma { "," } else { "" };
+        let space = if add_space { " " } else { "" };
+
+        let fmt_text = format!("{}{}{}", comma, space, text.to_string());
+
+        if is_x86_64_register(text) {
+            return vec![Span::styled(fmt_text, Style::default().fg(self.theme.asm_register))];
+        } else if text.starts_with("[") {
+            let mut spans = vec![Span::styled(format!("{}{}[", comma, space), Style::default().fg(self.theme.asm_separator))];
+
+            for (i, part) in text.trim_matches(|c| matches!(c, '[' | ']')).split_ascii_whitespace().enumerate() {
+                match i {
+                    0 => spans.extend(self.highlight_operand(part, false, false)),
+                    _ => spans.extend(self.highlight_operand(part, false, true)),
+                }
+            }
+
+            spans.push(Span::styled("]", Style::default().fg(self.theme.asm_separator)));
+
+            return spans;
+        } else if char_utils::is_digit(text) {
+            return vec![Span::styled(fmt_text, Style::default().fg(self.theme.asm_immediate))];
+        } else if starts_with_type_qualifier(text){
+            let mut spans = Vec::new();
+
+            for (i, part) in text.splitn(3, char::is_whitespace).enumerate() {
+                match i {
+                    0..1 => {
+                        let comma = if i == 0 && add_comma { "," } else { "" };
+                        let space = if i == 1 { " " } else { space };
+                        spans.push(Span::styled(format!("{}{}{}", comma, space, part), Style::default().fg(self.theme.asm_separator)));
+                    }
+                    _ => spans.extend(self.highlight_operand(part, false, true))
+                }
+            }
+
+            return spans;
+        }
+
+        return vec![Span::styled(fmt_text, Style::default().fg(self.theme.fg))];
+    }
+
+    fn highlight_operands(&self, text: &str, spans: &mut Vec<Span<'_>>) {
+        let (code_part, comment_part) = if let Some(idx) = text.find(';') {
+            (&text[..idx], Some(&text[idx..]))
+        } else {
+            (text, None)
+        };
+
+        for (i, part) in code_part.split(',').enumerate() {
+            let part = part.trim();
+
+            match i {
+                0 => { spans.extend(self.highlight_operand(part, false, false)); }
+                1 => { spans.extend(self.highlight_operand(part, true, true)); }
+                2 => { spans.extend(self.highlight_operand(part, true, true)); }
+                3 => { spans.extend(self.highlight_operand(part, true, comment_part.is_some())); }
+                _ => {}
+            }
+        }
+
+        if let Some(comment) = comment_part {
+            spans.push(Span::styled(comment.to_string(), Style::default().fg(self.theme.comment)));
+        }
+    }
+
     fn render_section_code(&self, name: &str, code: &[String]) -> Text<'_> {
         let mut lines = vec![
             Line::from(Span::styled(
@@ -640,7 +762,7 @@ impl App {
         ];
 
         for loc in code {
-            lines.push(Line::from(loc.clone()));
+            lines.push(self.highlight_disasm_line(loc));
         }
 
         return Text::from(lines);

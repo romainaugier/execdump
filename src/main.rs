@@ -16,6 +16,8 @@ pub mod format;
 pub mod exec;
 pub mod reader;
 pub mod demangle;
+pub mod x86_64;
+pub mod char_utils;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();

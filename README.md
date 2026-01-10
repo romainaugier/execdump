@@ -38,17 +38,17 @@ Options:
       --pe-exc-table
           Dump the exception information from the Exception Table, if any
       --elf-headers
-          Dumps all the ELF headers
+          Dump all the ELF headers
       --elf-header
-          Dumps the ELF Base Header
+          Dump the ELF Base Header
       --elf-program-headers
-          Dumps the ELF Program Headers
+          Dump the ELF Program Headers
       --sections
-          Dumps the Sections
+          Dump the Sections
       --sections-filter <SECTIONS_FILTER>
           Regulax expresion to filter the Sections to display [default: .*]
       --sections-data
-          Dumps the Sections data along with the headers
+          Dump the Sections data along the Sections headers
       --disasm
           Disassemble the code found in the Sections containing code
       --padding-size <PADDING_SIZE>
@@ -105,21 +105,24 @@ Code:
 ### Core
 
 Utilities:
-  - :x: C++ Symbol Demangler
+  - :clock9: C++ Symbol Demangler
 
 PE/ELF Disasm:
   - :x: Replace call addresses with symbols
   - :x: Structure program
   - :x: Easily find system calls
+  - :x: Generate C code from assembly functions
 
 ### TUI
 
 Viewers:
   - :heavy_check_mark: Headers
   - :clock9: PE Sections
-  - :x: ELF Sections
+  - :clock9: ELF Sections
   - :heavy_check_mark: Hex Viewer
-  - :x: Disasm Viewer
+  - :clock9: Disasm Viewer
+  
+![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
 
 ## Acknowledgement
 
