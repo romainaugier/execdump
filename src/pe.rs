@@ -1109,7 +1109,7 @@ impl Section {
     }
 
     pub fn dump(&self, pe: &PE, disasm_code: bool) -> Dump {
-        let mut dump = Dump::new_with_string(format!("Section ({})", self.header.name));
+        let mut dump = Dump::new_from_string(format!("Section ({})", self.header.name));
 
         dump.push_child(self.header.dump());
 

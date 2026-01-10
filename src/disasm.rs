@@ -1,9 +1,10 @@
 use crate::pe::PE;
+use crate::elf::ELF;
 
 use capstone::Insn;
 use capstone::prelude::*;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct BasicBlock {
@@ -557,6 +558,45 @@ pub fn disasm_pe_code(
 
         let line = format!("{:08x}  {}", insn_addr, formatted);
         output.push(line);
+
+        if let Some(mnemonic) = insn.mnemonic() {
+            if mnemonic == "ret" {
+                output.push(String::new());
+            }
+        }
+    }
+
+    output.push(String::new());
+    output.push(format!("; End"));
+
+    return Ok(output);
+}
+
+pub fn disasm_elf_code(
+    elf: &ELF,
+    code: &[u8],
+    addr: u64,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut output = Vec::new();
+
+    let cs = Capstone::new()
+        .x86()
+        .mode(arch::x86::ArchMode::Mode64)
+        .syntax(arch::x86::ArchSyntax::Intel)
+        .detail(false)
+        .build()
+        .expect("Failed to initialize Capstone disasm");
+
+    let instructions = cs.disasm_all(code, addr).expect("Failed to disassemble");
+
+    output.push(format!("; Entry: 0x{:X}", addr));
+
+    for insn in instructions.as_ref() {
+        if is_padding_instruction(&insn) {
+            continue;
+        }
+
+        output.push(insn.to_string());
 
         if let Some(mnemonic) = insn.mnemonic() {
             if mnemonic == "ret" {

@@ -35,7 +35,7 @@ impl<'a> LEReader<'a> {
     }
 
     #[inline]
-    fn read_bytes(&mut self, n: usize) -> ReaderResult<&[u8]> {
+    pub fn read_bytes(&mut self, n: usize) -> ReaderResult<&[u8]> {
         if self.position + n > self.data.len() {
             return Err(ReaderError::UnexpectedEof);
         }
@@ -180,7 +180,7 @@ impl<'a> BEReader<'a> {
     }
 
     #[inline]
-    fn read_bytes(&mut self, n: usize) -> ReaderResult<&[u8]> {
+    pub fn read_bytes(&mut self, n: usize) -> ReaderResult<&[u8]> {
         if self.position + n > self.data.len() {
             return Err(ReaderError::UnexpectedEof);
         }
@@ -322,6 +322,14 @@ impl<'a> Reader<'a> {
 
     pub fn new_be(data: &'a [u8]) -> Reader<'a> {
         return Reader::BigEndian(BEReader::new(data));
+    }
+
+    #[inline]
+    pub fn read_bytes(&mut self, n: usize) -> ReaderResult<&[u8]> {
+        match self {
+            Reader::LittleEndian(r) => r.read_bytes(n),
+            Reader::BigEndian(r) => r.read_bytes(n),
+        }
     }
 
     #[inline]

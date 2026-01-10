@@ -9,7 +9,9 @@ pub struct Args {
     #[arg(long, short, default_value_t = false)]
     pub tui: bool,
 
-    /* PE */
+    /*
+     * PE
+     */
 
     /// Dumps the PE legacy MS-DOS compatible header
     #[arg(long, default_value_t = false)]
@@ -22,22 +24,6 @@ pub struct Args {
     /// Dumps the PE Optional (either 32/64) header
     #[arg(long, default_value_t = false)]
     pub pe_optional_header: bool,
-
-    /// Dumps the Sections
-    #[arg(long, default_value_t = false)]
-    pub sections: bool,
-
-    /// Regulax expresion to filter the Sections to display
-    #[arg(long, default_value = ".*")]
-    pub sections_filter: String,
-
-    /// Dumps the Sections data along with the headers
-    #[arg(long, default_value_t = false)]
-    pub sections_data: bool,
-
-    /// Disassemble the code found in the Sections containing code
-    #[arg(long, default_value_t = false)]
-    pub disasm: bool,
 
     /// Dump all the PE data related to imports, if any
     #[arg(long, default_value_t = false)]
@@ -63,13 +49,45 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub pe_exc_table: bool,
 
-    /* ELF */
+    /*
+     * ELF
+     */
 
-    /// Dumps the ELF base header
+    /// Dumps all the ELF headers
+    #[arg(long, default_value_t = false)]
+    pub elf_headers: bool,
+
+    /// Dumps the ELF Base Header
     #[arg(long, default_value_t = false)]
     pub elf_header: bool,
 
-    /* Dump formatting */
+    /// Dumps the ELF Program Headers
+    #[arg(long, default_value_t = false)]
+    pub elf_program_headers: bool,
+
+    /*
+     * Common
+     */
+
+    /// Dumps the Sections
+    #[arg(long, default_value_t = false)]
+    pub sections: bool,
+
+    /// Regulax expresion to filter the Sections to display
+    #[arg(long, default_value = ".*")]
+    pub sections_filter: String,
+
+    /// Dumps the Sections data along with the headers
+    #[arg(long, default_value_t = false)]
+    pub sections_data: bool,
+
+    /// Disassemble the code found in the Sections containing code
+    #[arg(long, default_value_t = false)]
+    pub disasm: bool,
+
+    /*
+     * Formatting
+     */
 
     /// Padding size to apply when dumping information for better readability
     #[arg(long, default_value_t = 4)]

@@ -50,7 +50,7 @@ impl Dump {
         return dump;
     }
 
-    pub fn new_with_string(label: String) -> Dump {
+    pub fn new_from_string(label: String) -> Dump {
         let mut dump = Dump::default();
         dump.label = label;
         return dump;
@@ -146,6 +146,7 @@ impl Dump {
 
         for child in self.children.iter() {
             child.print(indent_level + 1, indent_size);
+            println!("");
         }
     }
 }
@@ -243,6 +244,38 @@ pub fn dump_pe(pe: &PE, args: &Args) {
 pub fn dump_elf(elf: &ELF, args: &Args) {
     if args.elf_header {
         elf.headers.elf_header.dump().print(0, args.padding_size);
+    }
+
+    if args.elf_program_headers {
+        for header in elf.headers.program_headers.iter() {
+            header.dump().print(0, args.padding_size);
+            println!("");
+        }
+    }
+
+    if args.sections {
+        let sections_filter_regex = Regex::new(&args.sections_filter.as_str()).expect("Invalid regular expression");
+
+        println!("Sections ({})", elf.sections.len());
+        println!("");
+
+        for (_, section) in elf.sections.iter() {
+            if sections_filter_regex.is_match(section.name.as_str()) {
+                section.dump(elf, args.sections_data, args.disasm).print(0, args.padding_size);
+                println!("");
+            }
+        }
+    }
+
+    if args.elf_headers {
+        elf.headers.elf_header.dump().print(0, args.padding_size);
+
+        println!("");
+
+        for header in elf.headers.program_headers.iter() {
+            header.dump().print(0, args.padding_size);
+            println!("");
+        }
     }
 }
 

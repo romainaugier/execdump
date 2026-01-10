@@ -114,6 +114,8 @@ enum ExplorerItem {
     PEDosHeader,
     PENtHeader,
     PEOptionalHeader,
+    ELFHeader,
+    ELFProgramHeaders,
     Sections,
     Section(String),
     PEDataDirectories,
@@ -131,6 +133,8 @@ impl ExplorerItem {
             ExplorerItem::PEDosHeader => "  DOS Header".to_string(),
             ExplorerItem::PENtHeader => "  NT Header".to_string(),
             ExplorerItem::PEOptionalHeader => "  Optional Header".to_string(),
+            ExplorerItem::ELFHeader => "  Header".to_string(),
+            ExplorerItem::ELFProgramHeaders=> "Program Headers".to_string(),
             ExplorerItem::Sections => "Sections/".to_string(),
             ExplorerItem::Section(name) => format!("  {}", name),
             ExplorerItem::PEDataDirectories => "Data Directories/".to_string(),
@@ -198,18 +202,17 @@ impl App {
                 explorer_items.push(ExplorerItem::PENtHeader);
                 explorer_items.push(ExplorerItem::PEOptionalHeader);
             }
-            Exec::ELF(_) => { /* TODO ELF */ }
+            Exec::ELF(_) => {
+                explorer_items.push(ExplorerItem::ELFHeader);
+                explorer_items.push(ExplorerItem::ELFProgramHeaders);
+            }
         }
 
         explorer_items.push(ExplorerItem::Sections);
 
         let mut sections: Vec<String> = match &exec {
             Exec::PE(pe) => pe.sections.keys().cloned().collect(),
-            Exec::ELF(_) =>
-            /* TODO ELF */
-            {
-                Vec::new()
-            }
+            Exec::ELF(elf) => elf.sections.keys().cloned().collect(),
         };
 
         sections.sort();
@@ -227,7 +230,9 @@ impl App {
                 explorer_items.push(ExplorerItem::PEExceptionTable);
                 explorer_items.push(ExplorerItem::PEDebugDirectory);
             }
-            Exec::ELF(_) => { /* TODO ELF */ }
+            Exec::ELF(_) => {
+                /* TODO ELF */
+            }
         }
 
         let mut state = ListState::default();
@@ -398,6 +403,7 @@ impl App {
         }
     }
 
+    #[rustfmt::skip]
     fn activate_selected_item(&mut self) {
         if let Some(idx) = self.explorer_state.selected() {
             if let Some(item) = self.explorer_items.get(idx) {
@@ -424,7 +430,19 @@ impl App {
                             _ => self.current_view.clone(),
                         };
                     }
-                    Exec::ELF(_) => { /* TODO ELF */ }
+                    Exec::ELF(elf) => {
+                        self.current_view = match item {
+                            ExplorerItem::ELFHeader => {
+                                ViewType::Header(elf.get_elf_header().dump())
+                            }
+                            ExplorerItem::Section(name) => {
+                                let section = elf.sections.get(name).unwrap();
+
+                                ViewType::Section(section.dump(&elf, true, section.contains_code()))
+                            }
+                            _ => self.current_view.clone(),
+                        }
+                    }
                 }
 
                 self.content_scroll = 0;
