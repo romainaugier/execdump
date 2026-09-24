@@ -73,6 +73,26 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub elf_program_headers: bool,
 
+    /// Dumps the ELF Symbol Tables (.symtab and .dynsym), if any
+    #[arg(long, default_value_t = false)]
+    pub elf_symbols: bool,
+
+    /// Dumps the ELF Dynamic Section, if any
+    #[arg(long, default_value_t = false)]
+    pub elf_dynamic: bool,
+
+    /// Dumps the ELF Relocation Tables, if any
+    #[arg(long, default_value_t = false)]
+    pub elf_relocations: bool,
+
+    /// Dumps the ELF imported libraries and symbols, if any
+    #[arg(long, default_value_t = false)]
+    pub elf_imports: bool,
+
+    /// Dumps the ELF Notes, if any
+    #[arg(long, default_value_t = false)]
+    pub elf_notes: bool,
+
     /*
      * Common
      */

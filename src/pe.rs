@@ -6,7 +6,7 @@ use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
 use crate::demangle::{demangle_msvc, is_mangled_symbol};
-use crate::disasm::disasm_and_format_pe_code;
+use crate::disasm::{Architecture, disasm_and_format_code};
 use crate::decompiler::decompile_and_format_pe_code;
 use crate::dump::*;
 use crate::format::format_u32_as_ctime;
@@ -1114,8 +1114,8 @@ impl Section {
         dump.push_child(self.header.dump());
 
         if self.contains_code() {
-            if disasm_code {
-                let res = disasm_and_format_pe_code(&pe, &self.data, self.header.virtual_address as u64);
+            if disasm_code || (decompile_code && pe.architecture() != Architecture::X86_64) {
+                let res = disasm_and_format_code(pe.architecture(), &self.data, self.header.virtual_address as u64);
 
                 if let Ok(code) = res {
                     dump.set_raw_data(DumpRawData::Code(code));
@@ -1124,7 +1124,7 @@ impl Section {
                 }
             }
 
-            if decompile_code {
+            if decompile_code && pe.architecture() == Architecture::X86_64 {
                 let res = decompile_and_format_pe_code(&pe, &self.data, self.header.virtual_address as u64);
 
                 if let Ok(code) = res {
@@ -1799,10 +1799,77 @@ impl OtherExcFunctionEntry {
     }
 }
 
+/// ARM64 platforms
+/// https://learn.microsoft.com/en-us/cpp/build/arm64-exception-handling
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Arm64ExcFunctionEntry {
+    pub begin_address: u32,
+    pub unwind_data: u32,
+    pub xdata_header: Option<u32>,
+}
+
+impl Arm64ExcFunctionEntry {
+    pub fn from_parser(
+        reader: &mut Reader,
+    ) -> Result<Arm64ExcFunctionEntry, Box<dyn std::error::Error>> {
+        let mut entry = Arm64ExcFunctionEntry::default();
+
+        entry.begin_address = reader.read_u32()?;
+        entry.unwind_data = reader.read_u32()?;
+
+        return Ok(entry);
+    }
+
+    pub fn flag(&self) -> u32 {
+        return self.unwind_data & 0x3;
+    }
+
+    pub fn is_packed(&self) -> bool {
+        return self.flag() == 1 || self.flag() == 2;
+    }
+
+    pub fn exception_information_rva(&self) -> u32 {
+        return self.unwind_data & !0x3;
+    }
+
+    #[rustfmt::skip]
+    pub fn dump(&self) -> Dump {
+        let mut dump = Dump::new("Function Entry");
+
+        dump.push_field("BeginAddress", format!("{:#x}", self.begin_address), None);
+        dump.push_field("Flag", format!("{:#x} ({})", self.flag(), if self.is_packed() { "Packed unwind data" } else { "Exception information RVA" }), None);
+
+        if self.is_packed() {
+            let data = self.unwind_data;
+
+            dump.push_field("FunctionLength", format!("{:#x}", ((data >> 2) & 0x7ff) * 4), Some("In bytes"));
+            dump.push_field("RegF", format!("{}", (data >> 13) & 0x7), Some("Number of non-volatile FP registers saved (d8-d15)"));
+            dump.push_field("RegI", format!("{}", (data >> 16) & 0xf), Some("Number of non-volatile integer registers saved (x19-x28)"));
+            dump.push_field("H", format!("{}", (data >> 20) & 0x1), Some("Homes the integer parameter registers (x0-x7)"));
+            dump.push_field("CR", format!("{}", (data >> 21) & 0x3), Some("Whether the function includes extra instructions to set up a frame chain and return link"));
+            dump.push_field("FrameSize", format!("{:#x}", ((data >> 23) & 0x1ff) * 16), Some("In bytes"));
+        } else {
+            dump.push_field("ExceptionInformationRVA", format!("{:#x}", self.exception_information_rva()), None);
+
+            if let Some(header) = self.xdata_header {
+                dump.push_field("FunctionLength", format!("{:#x}", (header & 0x3ffff) * 4), Some("In bytes"));
+                dump.push_field("Vers", format!("{}", (header >> 18) & 0x3), None);
+                dump.push_field("X", format!("{}", (header >> 20) & 0x1), Some("Presence of exception data"));
+                dump.push_field("E", format!("{}", (header >> 21) & 0x1), Some("Single epilog packed in the header"));
+                dump.push_field("EpilogCount", format!("{}", (header >> 22) & 0x1f), None);
+                dump.push_field("CodeWords", format!("{}", (header >> 27) & 0x1f), None);
+            }
+        }
+
+        return dump;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExcFunctionEntry {
     Mips32(Mips32ExcFunctionEntry),
     X64(X64ExcFunctionEntry),
+    Arm64(Arm64ExcFunctionEntry),
     Other(OtherExcFunctionEntry),
 }
 
@@ -1821,8 +1888,10 @@ impl ExcFunctionEntry {
             MachineType::AMD64 | MachineType::I386 => Ok(ExcFunctionEntry::X64(
                 X64ExcFunctionEntry::from_parser(reader)?,
             )),
+            MachineType::ARM64 | MachineType::ARM64EC | MachineType::ARM64X => Ok(ExcFunctionEntry::Arm64(
+                Arm64ExcFunctionEntry::from_parser(reader)?,
+            )),
             _ => Err("Cannot parse Exception Function Entry, unsupported platform".into()),
-            /* TODO: implement other machine types */
         }
     }
 
@@ -1830,6 +1899,7 @@ impl ExcFunctionEntry {
         match self {
             ExcFunctionEntry::Mips32(_) => 20,
             ExcFunctionEntry::X64(_) => 12,
+            ExcFunctionEntry::Arm64(_) => 8,
             ExcFunctionEntry::Other(_) => 8,
         }
     }
@@ -1838,6 +1908,7 @@ impl ExcFunctionEntry {
         match self {
             ExcFunctionEntry::Mips32(e) => e.dump(),
             ExcFunctionEntry::X64(e) => e.dump(),
+            ExcFunctionEntry::Arm64(e) => e.dump(),
             ExcFunctionEntry::Other(e) => e.dump(),
         }
     }
@@ -1920,6 +1991,15 @@ impl PE {
         match &self.header.optional {
             OptionalHeader::PE32(_) => return PEArchitecture::PE32,
             OptionalHeader::PE64(_) => return PEArchitecture::PE64,
+        }
+    }
+
+    pub fn architecture(&self) -> Architecture {
+        match MachineType::from(self.header.nt.coff_header.machine) {
+            MachineType::I386 => Architecture::X86,
+            MachineType::AMD64 => Architecture::X86_64,
+            MachineType::ARM64 | MachineType::ARM64EC | MachineType::ARM64X => Architecture::Aarch64,
+            _ => Architecture::Unsupported,
         }
     }
 
@@ -2212,11 +2292,22 @@ impl PE {
             if let Some(efo) = exception_fo {
                 reader.set_position(efo as usize)?;
 
-                let exception_table = ExceptionTable::from_parser(
+                let mut exception_table = ExceptionTable::from_parser(
                     reader,
                     self.get_optional_header().get_exception_table_idd().size as usize,
                     self.get_nt_header().coff_header.machine.into(),
                 )?;
+
+                for entry in exception_table.entries.iter_mut() {
+                    if let ExcFunctionEntry::Arm64(e) = entry {
+                        if !e.is_packed() {
+                            if let Some(offset) = self.convert_rva_to_file_offset(e.exception_information_rva()) {
+                                reader.set_position(offset as usize)?;
+                                e.xdata_header = Some(reader.read_u32()?);
+                            }
+                        }
+                    }
+                }
 
                 self.exception_table = Some(exception_table);
             }

@@ -270,10 +270,7 @@ pub fn dump_elf(elf: &ELF, args: &Args) {
     }
 
     if args.elf_program_headers {
-        for header in elf.headers.program_headers.iter() {
-            header.dump().print(0, args.padding_size);
-            println!("");
-        }
+        elf.dump_program_headers().print(0, args.padding_size);
     }
 
     if args.sections {
@@ -292,13 +289,46 @@ pub fn dump_elf(elf: &ELF, args: &Args) {
 
     if args.elf_headers {
         elf.headers.elf_header.dump().print(0, args.padding_size);
+        elf.dump_program_headers().print(0, args.padding_size);
+    }
 
-        println!("");
-
-        for header in elf.headers.program_headers.iter() {
-            header.dump().print(0, args.padding_size);
-            println!("");
+    if args.elf_symbols {
+        if elf.symbol_tables.is_empty() {
+            println!("Symbol Tables");
+            println!("No symbol table found in ELF");
         }
+
+        for table in elf.symbol_tables.iter() {
+            table.dump().print(0, args.padding_size);
+        }
+    }
+
+    if args.elf_dynamic {
+        if let Some(ref dynamic) = elf.dynamic {
+            dynamic.dump().print(0, args.padding_size);
+        } else {
+            println!("Dynamic Section");
+            println!("No dynamic section found in ELF");
+        }
+    }
+
+    if args.elf_relocations {
+        if elf.relocation_tables.is_empty() {
+            println!("Relocation Tables");
+            println!("No relocation table found in ELF");
+        }
+
+        for table in elf.relocation_tables.iter() {
+            table.dump().print(0, args.padding_size);
+        }
+    }
+
+    if args.elf_imports {
+        elf.dump_imports().print(0, args.padding_size);
+    }
+
+    if args.elf_notes {
+        elf.dump_notes().print(0, args.padding_size);
     }
 }
 

@@ -21,6 +21,7 @@ use std::{error::Error, io, path::PathBuf};
 use crate::{char_utils, dump::{Dump, DumpRawData}, x86_64::starts_with_type_qualifier};
 use crate::exec::Exec;
 use crate::x86_64::{is_x86_64_register};
+use crate::aarch64::is_aarch64_register;
 
 #[derive(Clone, Debug)]
 struct Theme {
@@ -129,6 +130,11 @@ enum ExplorerItem {
     PEOptionalHeader,
     ELFHeader,
     ELFProgramHeaders,
+    ELFSymbols,
+    ELFDynamic,
+    ELFRelocations,
+    ELFImports,
+    ELFNotes,
     Sections,
     Section(String),
     PEDataDirectories,
@@ -147,7 +153,12 @@ impl ExplorerItem {
             ExplorerItem::PENtHeader => "  NT Header".to_string(),
             ExplorerItem::PEOptionalHeader => "  Optional Header".to_string(),
             ExplorerItem::ELFHeader => "  Header".to_string(),
-            ExplorerItem::ELFProgramHeaders=> "Program Headers".to_string(),
+            ExplorerItem::ELFProgramHeaders => "  Program Headers".to_string(),
+            ExplorerItem::ELFSymbols => "Symbols".to_string(),
+            ExplorerItem::ELFDynamic => "Dynamic".to_string(),
+            ExplorerItem::ELFRelocations => "Relocations".to_string(),
+            ExplorerItem::ELFImports => "Imports".to_string(),
+            ExplorerItem::ELFNotes => "Notes".to_string(),
             ExplorerItem::Sections => "Sections/".to_string(),
             ExplorerItem::Section(name) => format!("  {}", name),
             ExplorerItem::PEDataDirectories => "Data Directories/".to_string(),
@@ -244,7 +255,11 @@ impl App {
                 explorer_items.push(ExplorerItem::PEDebugDirectory);
             }
             Exec::ELF(_) => {
-                /* TODO ELF */
+                explorer_items.push(ExplorerItem::ELFSymbols);
+                explorer_items.push(ExplorerItem::ELFDynamic);
+                explorer_items.push(ExplorerItem::ELFRelocations);
+                explorer_items.push(ExplorerItem::ELFImports);
+                explorer_items.push(ExplorerItem::ELFNotes);
             }
         }
 
@@ -448,6 +463,22 @@ impl App {
                             ExplorerItem::ELFHeader => {
                                 ViewType::Header(elf.get_elf_header().dump())
                             }
+                            ExplorerItem::ELFProgramHeaders => ViewType::Header(elf.dump_program_headers()),
+                            ExplorerItem::ELFSymbols => {
+                                let mut dump = Dump::new("Symbols");
+                                elf.symbol_tables.iter().for_each(|t| dump.push_child(t.dump()));
+                                ViewType::Header(dump)
+                            }
+                            ExplorerItem::ELFDynamic => {
+                                ViewType::Header(elf.dynamic.as_ref().map_or(Dump::new("No dynamic section found"), |d| d.dump()))
+                            }
+                            ExplorerItem::ELFRelocations => {
+                                let mut dump = Dump::new("Relocations");
+                                elf.relocation_tables.iter().for_each(|t| dump.push_child(t.dump()));
+                                ViewType::Header(dump)
+                            }
+                            ExplorerItem::ELFImports => ViewType::Header(elf.dump_imports()),
+                            ExplorerItem::ELFNotes => ViewType::Header(elf.dump_notes()),
                             ExplorerItem::Section(name) => {
                                 let section = elf.sections.get(name).unwrap();
 
@@ -578,7 +609,10 @@ impl App {
     fn render_header(&self, _rect: &Rect, dump: &Dump) -> Text<'_> {
         let indent = 4;
 
-        return Text::from(self.lines_from_dump(dump, 0, indent));
+        let mut lines = self.lines_from_dump(dump, 0, indent);
+        let start = self.content_scroll.min(lines.len().saturating_sub(1));
+
+        return Text::from(lines.split_off(start));
     }
 
     /*
@@ -692,22 +726,23 @@ impl App {
 
         let fmt_text = format!("{}{}{}", comma, space, text.to_string());
 
-        if is_x86_64_register(text) {
+        if is_x86_64_register(text) || is_aarch64_register(text) {
             return vec![Span::styled(fmt_text, Style::default().fg(self.theme.asm_register))];
         } else if text.starts_with("[") {
+            let end = text.rfind(']').unwrap_or(text.len());
+
             let mut spans = vec![Span::styled(format!("{}{}[", comma, space), Style::default().fg(self.theme.asm_separator))];
 
-            for (i, part) in text.trim_matches(|c| matches!(c, '[' | ']')).split_ascii_whitespace().enumerate() {
-                match i {
-                    0 => spans.extend(self.highlight_operand(part, false, false)),
-                    _ => spans.extend(self.highlight_operand(part, false, true)),
+            for (i, operand) in text[1..end].split(',').enumerate() {
+                for (j, part) in operand.split_ascii_whitespace().enumerate() {
+                    spans.extend(self.highlight_operand(part, i > 0 && j == 0, i > 0 || j > 0));
                 }
             }
 
-            spans.push(Span::styled("]", Style::default().fg(self.theme.asm_separator)));
+            spans.push(Span::styled(text[end..].to_string(), Style::default().fg(self.theme.asm_separator)));
 
             return spans;
-        } else if char_utils::is_digit(text) {
+        } else if char_utils::is_digit(text.trim_start_matches(['#', '-'])) {
             return vec![Span::styled(fmt_text, Style::default().fg(self.theme.asm_immediate))];
         } else if starts_with_type_qualifier(text){
             let mut spans = Vec::new();
@@ -736,16 +771,8 @@ impl App {
             (text, None)
         };
 
-        for (i, part) in code_part.split(',').enumerate() {
-            let part = part.trim();
-
-            match i {
-                0 => { spans.extend(self.highlight_operand(part, false, false)); }
-                1 => { spans.extend(self.highlight_operand(part, true, true)); }
-                2 => { spans.extend(self.highlight_operand(part, true, true)); }
-                3 => { spans.extend(self.highlight_operand(part, true, comment_part.is_some())); }
-                _ => {}
-            }
+        for (i, part) in split_operands(code_part).iter().enumerate() {
+            spans.extend(self.highlight_operand(part.trim(), i > 0, i > 0));
         }
 
         if let Some(comment) = comment_part {
@@ -855,6 +882,30 @@ impl App {
 
         return Text::from("Not supported for executable type other than PE");
     }
+}
+
+fn split_operands(text: &str) -> Vec<&str> {
+    let mut operands = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, c) in text.char_indices() {
+        match c {
+            '[' | '{' => depth += 1,
+            ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                operands.push(&text[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    if !text[start..].trim().is_empty() {
+        operands.push(&text[start..]);
+    }
+
+    return operands;
 }
 
 fn ui(f: &mut Frame, app: &mut App) {

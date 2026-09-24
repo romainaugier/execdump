@@ -17,6 +17,7 @@ pub mod exec;
 mod reader;
 mod demangle;
 mod x86_64;
+mod aarch64;
 mod char_utils;
 mod decompiler;
 
