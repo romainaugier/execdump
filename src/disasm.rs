@@ -1,6 +1,3 @@
-use crate::elf::ELF;
-use crate::pe::PE;
-
 use capstone::Insn;
 use capstone::arch::ArchOperand;
 use capstone::arch::x86;
@@ -112,6 +109,14 @@ impl X86Instruction {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Architecture {
+    X86,
+    X86_64,
+    Aarch64,
+    Unsupported,
+}
+
 pub fn is_padding_instruction(insn: &Insn) -> bool {
     match (insn.mnemonic(), insn.op_str()) {
         (Some("add"), Some("byte ptr [rax], al")) => true,
@@ -125,20 +130,27 @@ pub fn is_padding_instruction(insn: &Insn) -> bool {
     }
 }
 
-pub fn disasm_and_format_pe_code(
-    pe: &PE,
+pub fn is_aarch64_padding_instruction(insn: &Insn) -> bool {
+    match (insn.mnemonic(), insn.op_str()) {
+        (Some("nop"), _) => true,
+        (Some("udf"), Some("#0")) => true,
+        _ => false,
+    }
+}
+
+fn disasm_and_format_x86_code(
     code: &[u8],
     addr: u64,
+    mode: arch::x86::ArchMode,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let cs = Capstone::new()
         .x86()
-        .mode(arch::x86::ArchMode::Mode64)
+        .mode(mode)
         .syntax(arch::x86::ArchSyntax::Intel)
         .detail(true)
-        .build()
-        .expect("Failed to initialize Capstone disasm");
+        .build()?;
 
-    let insns = cs.disasm_all(code, addr).expect("Failed to disassemble");
+    let insns = cs.disasm_all(code, addr)?;
 
     let mut res = Vec::new();
 
@@ -153,31 +165,74 @@ pub fn disasm_and_format_pe_code(
     return Ok(res);
 }
 
-#[allow(dead_code)]
-pub fn disasm_and_format_elf_code(
-    _elf: &ELF,
+fn disasm_and_format_aarch64_code(
     code: &[u8],
     addr: u64,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let cs = Capstone::new()
-        .x86()
-        .mode(arch::x86::ArchMode::Mode64)
-        .syntax(arch::x86::ArchSyntax::Intel)
+        .arm64()
+        .mode(arch::arm64::ArchMode::Arm)
         .detail(false)
-        .build()
-        .expect("Failed to initialize Capstone disasm");
+        .build()?;
 
-    let insns = cs.disasm_all(code, addr).expect("Failed to disassemble");
+    let insns = cs.disasm_all(code, addr)?;
 
     let mut res = Vec::new();
 
     for insn in insns.as_ref() {
-        if is_padding_instruction(insn) {
+        if is_aarch64_padding_instruction(insn) {
             continue;
         }
 
-        res.push(X86Instruction::from_cs(insn, &cs)?.as_string(&cs))
+        res.push(format!(
+            "0x{:08x} {} {}",
+            insn.address(),
+            insn.mnemonic().unwrap_or("???"),
+            insn.op_str().unwrap_or(""),
+        ));
     }
 
     return Ok(res);
+}
+
+pub fn disasm_and_format_code(
+    arch: Architecture,
+    code: &[u8],
+    addr: u64,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    match arch {
+        Architecture::X86 => disasm_and_format_x86_code(code, addr, arch::x86::ArchMode::Mode32),
+        Architecture::X86_64 => disasm_and_format_x86_code(code, addr, arch::x86::ArchMode::Mode64),
+        Architecture::Aarch64 => disasm_and_format_aarch64_code(code, addr),
+        Architecture::Unsupported => Err("Unsupported architecture for disassembly".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aarch64() {
+        let code = [0x20, 0x00, 0x80, 0xd2, 0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6];
+        let res = disasm_and_format_code(Architecture::Aarch64, &code, 0x1000).unwrap();
+
+        assert_eq!(res, vec!["0x00001000 mov x0, #1", "0x00001008 ret "]);
+    }
+
+    #[test]
+    fn x86_modes() {
+        let code = [0x48, 0x89, 0xc3];
+
+        let res = disasm_and_format_code(Architecture::X86_64, &code, 0).unwrap();
+        assert_eq!(res, vec!["0x00000000 mov rbx, rax"]);
+
+        let res = disasm_and_format_code(Architecture::X86, &code, 0).unwrap();
+        assert_eq!(res, vec!["0x00000000 dec eax", "0x00000001 mov ebx, eax"]);
+    }
+
+    #[test]
+    fn unsupported() {
+        assert!(disasm_and_format_code(Architecture::Unsupported, &[0x00], 0).is_err());
+    }
 }

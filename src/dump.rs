@@ -1,5 +1,6 @@
 use crate::elf::ELF;
 use crate::exec::Exec;
+use crate::macho::MachO;
 use crate::args::Args;
 use crate::pe::PE;
 
@@ -270,10 +271,7 @@ pub fn dump_elf(elf: &ELF, args: &Args) {
     }
 
     if args.elf_program_headers {
-        for header in elf.headers.program_headers.iter() {
-            header.dump().print(0, args.padding_size);
-            println!("");
-        }
+        elf.dump_program_headers().print(0, args.padding_size);
     }
 
     if args.sections {
@@ -292,12 +290,89 @@ pub fn dump_elf(elf: &ELF, args: &Args) {
 
     if args.elf_headers {
         elf.headers.elf_header.dump().print(0, args.padding_size);
+        elf.dump_program_headers().print(0, args.padding_size);
+    }
 
-        println!("");
+    if args.elf_symbols {
+        if elf.symbol_tables.is_empty() {
+            println!("Symbol Tables");
+            println!("No symbol table found in ELF");
+        }
 
-        for header in elf.headers.program_headers.iter() {
-            header.dump().print(0, args.padding_size);
+        for table in elf.symbol_tables.iter() {
+            table.dump().print(0, args.padding_size);
+        }
+    }
+
+    if args.elf_dynamic {
+        if let Some(ref dynamic) = elf.dynamic {
+            dynamic.dump().print(0, args.padding_size);
+        } else {
+            println!("Dynamic Section");
+            println!("No dynamic section found in ELF");
+        }
+    }
+
+    if args.elf_relocations {
+        if elf.relocation_tables.is_empty() {
+            println!("Relocation Tables");
+            println!("No relocation table found in ELF");
+        }
+
+        for table in elf.relocation_tables.iter() {
+            table.dump().print(0, args.padding_size);
+        }
+    }
+
+    if args.elf_imports {
+        elf.dump_imports().print(0, args.padding_size);
+    }
+
+    if args.elf_notes {
+        elf.dump_notes().print(0, args.padding_size);
+    }
+}
+
+pub fn dump_macho(macho: &MachO, args: &Args) {
+    if args.macho_fat_header {
+        if let Some(ref fat_header) = macho.fat_header {
+            fat_header.dump().print(0, args.padding_size);
+        } else {
+            println!("Fat Header");
+            println!("No fat header found in Mach-O");
             println!("");
+        }
+    }
+
+    for binary in macho.binaries.iter() {
+        if args.macho_header {
+            binary.header.dump().print(0, args.padding_size);
+        }
+
+        if args.macho_load_commands {
+            binary.dump_load_commands().print(0, args.padding_size);
+        }
+
+        if args.sections {
+            let sections_filter_regex = Regex::new(&args.sections_filter.as_str()).expect("Invalid regular expression");
+
+            println!("Sections ({}, {})", binary.cpu_name(), binary.sections.len());
+            println!("");
+
+            for (name, section) in binary.sections.iter() {
+                if sections_filter_regex.is_match(name.as_str()) {
+                    section.dump(binary, args.sections_data, args.disasm).print(0, args.padding_size);
+                    println!("");
+                }
+            }
+        }
+
+        if args.macho_symbols {
+            binary.dump_symbols().print(0, args.padding_size);
+        }
+
+        if args.macho_imports {
+            binary.dump_dylibs().print(0, args.padding_size);
         }
     }
 }
@@ -306,5 +381,6 @@ pub fn dump_exec(exec: &Exec, args: &Args) {
     match exec {
         Exec::PE(pe) => dump_pe(pe, args),
         Exec::ELF(elf) => dump_elf(elf, args),
+        Exec::MachO(macho) => dump_macho(macho, args),
     }
 }

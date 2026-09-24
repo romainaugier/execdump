@@ -1,9 +1,9 @@
-use crate::{disasm::disasm_and_format_elf_code, dump::{Dump, DumpRawData}, reader::{BEReader, LEReader, Reader}};
+use crate::{demangle::demangle, disasm::{Architecture, disasm_and_format_code}, dump::{Dump, DumpRawData}, reader::{BEReader, LEReader, Reader}};
 
 use strum::IntoEnumIterator;
-use strum_macros::{EnumIter, IntoStaticStr};
+use strum_macros::{EnumIter, FromRepr, IntoStaticStr};
 
-use std::{collections::HashMap, fmt::Display, path::PathBuf};
+use std::{collections::{HashMap, HashSet}, fmt::Display, path::PathBuf};
 
 pub const ELF_MAGIC: u32 = 0x7f454c46;
 pub const ELF_MAGIC_ARRAY: [u8; 4] = [0x7F, b'E', b'L', b'F'];
@@ -42,16 +42,10 @@ impl TryFrom<u8> for ELFClass {
  */
 
 #[repr(u8)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRepr)]
 pub enum ELFEndianness {
     Little = 0x1,
     Big = 0x2,
-}
-
-impl From<u8> for ELFEndianness {
-    fn from(value: u8) -> Self {
-        return value.into();
-    }
 }
 
 /*
@@ -59,7 +53,7 @@ impl From<u8> for ELFEndianness {
  */
 
 #[repr(u8)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, FromRepr)]
 pub enum ELFOsAbi {
     SystemV = 0x00,
     HPUX = 0x01,
@@ -81,9 +75,9 @@ pub enum ELFOsAbi {
     StratusTechnologiesOpenVOS = 0x12,
 }
 
-impl From<u8> for ELFOsAbi {
-    fn from(value: u8) -> Self {
-        return value.into();
+impl ELFOsAbi {
+    pub fn name(value: u8) -> String {
+        return ELFOsAbi::from_repr(value).map_or("Unknown".to_string(), |abi| format!("{:?}", abi));
     }
 }
 
@@ -92,8 +86,7 @@ impl From<u8> for ELFOsAbi {
  */
 
 #[repr(u16)]
-#[derive(Clone, Debug, IntoStaticStr)]
-#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
 pub enum ELFTargetISA {
     /// No specific instruction set
     Unknown = 0x00,
@@ -168,6 +161,12 @@ pub enum ELFTargetISA {
     BerkeleyPacketFilter = 0xF7,
     WDC65C816 = 0x101,
     LoongArch = 0x102,
+}
+
+impl ELFTargetISA {
+    pub fn name(value: u16) -> String {
+        return ELFTargetISA::from_repr(value).map_or("Unknown".to_string(), |isa| format!("{:?}", isa));
+    }
 }
 
 /*
@@ -330,14 +329,14 @@ impl ELFHeader32 {
         let mut dump = Dump::new("ELF Header (32-bit)");
 
         dump.push_field("ei_magic", format!("{:#x}, {}, {}, {}", self.ei_mag[0], self.ei_mag[1] as char, self.ei_mag[2] as char, self.ei_mag[3] as char), Some("ELF Magic number"));
-        dump.push_field("ei_class", format!("{:#x}", self.ei_class), Some("This byte is set to either 1 or 2 to signify 32- or 64-bit format, respectively."));
-        dump.push_field("ei_data", format!("{:#x}", self.ei_data), Some("This byte is set to either 1 or 2 to signify little or big endianness, respectively. This affects interpretation of multi-byte fields starting with offset 0x10."));
+        dump.push_field("ei_class", format!("{:#x} ({})", self.ei_class, ELFClass::try_from(self.ei_class).map_or("Unknown".to_string(), |c| format!("{:?}", c))), Some("This byte is set to either 1 or 2 to signify 32- or 64-bit format, respectively."));
+        dump.push_field("ei_data", format!("{:#x} ({})", self.ei_data, ELFEndianness::from_repr(self.ei_data).map_or("Unknown".to_string(), |e| format!("{:?}", e))), Some("This byte is set to either 1 or 2 to signify little or big endianness, respectively. This affects interpretation of multi-byte fields starting with offset 0x10."));
         dump.push_field("ei_version", format!("{:#x}", self.ei_version), Some("Set to 1 for the original and current version of ELF."));
-        dump.push_field("ei_osabi", format!("{:#x}", self.ei_osabi), Some("Identifies the target operating system ABI."));
+        dump.push_field("ei_osabi", format!("{:#x} ({})", self.ei_osabi, ELFOsAbi::name(self.ei_osabi)), Some("Identifies the target operating system ABI."));
         dump.push_field("ei_abiversion", format!("{:#x}", self.ei_abiversion), Some("Further specifies the ABI version. Its interpretation depends on the target ABI. Linux kernel (after at least 2.6) has no definition of it,[6] so it is ignored for statically linked executables. In that case, offset and size of EI_PAD are 8.   glibc 2.12+ in case e_ident[EI_OSABI] == 3 treats this field as ABI version of the dynamic linker:[7] it defines a list of dynamic linker's features,[8] treats e_ident[EI_ABIVERSION] as a feature level requested by the shared object (executable or dynamic library) and refuses to load it if an unknown feature is requested, i.e. e_ident[EI_ABIVERSION] is greater than the largest known feature.[9]"));
         dump.push_field("ei_pad", format!("{:?}", self.ei_pad), Some("Reserved padding bytes. Currently unused. Should be filled with zeros and ignored when read."));
-        dump.push_field("e_type", format!("{}", ELFFileType::from(self.e_type)), Some("Identifies object file type."));
-        dump.push_field("e_machine", format!("{:#x}", self.e_machine), Some("Specifies target instruction set architecture."));
+        dump.push_field("e_type", format!("{:#x} ({})", self.e_type, ELFFileType::from(self.e_type)), Some("Identifies object file type."));
+        dump.push_field("e_machine", format!("{:#x} ({})", self.e_machine, ELFTargetISA::name(self.e_machine)), Some("Specifies target instruction set architecture."));
         dump.push_field("e_version", format!("{:#x}", self.e_version), Some("Set to 1 for the original version of ELF."));
         dump.push_field("e_entry", format!("{:#x}", self.e_entry), Some("This is the memory address of the entry point from where the process starts executing. This field is either 32 or 64 bits long, depending on the format defined earlier (byte 0x04). If the file doesn't have an associated entry point, then this holds zero."));
         dump.push_field("e_phoff", format!("{:#x}", self.e_phoff), Some("Points to the start of the program header table. It usually follows the file header immediately following this one, making the offset 0x34 or 0x40 for 32- and 64-bit ELF executables, respectively."));
@@ -450,14 +449,14 @@ impl ELFHeader64 {
         let mut dump = Dump::new("ELF Header (64-bit)");
 
         dump.push_field("ei_magic", format!("{:#x}, {}, {}, {}", self.ei_mag[0], self.ei_mag[1] as char, self.ei_mag[2] as char, self.ei_mag[3] as char), Some("ELF Magic number"));
-        dump.push_field("ei_class", format!("{:#x}", self.ei_class), Some("This byte is set to either 1 or 2 to signify 32- or 64-bit format, respectively."));
-        dump.push_field("ei_data", format!("{:#x}", self.ei_data), Some("This byte is set to either 1 or 2 to signify little or big endianness, respectively. This affects interpretation of multi-byte fields starting with offset 0x10."));
+        dump.push_field("ei_class", format!("{:#x} ({})", self.ei_class, ELFClass::try_from(self.ei_class).map_or("Unknown".to_string(), |c| format!("{:?}", c))), Some("This byte is set to either 1 or 2 to signify 32- or 64-bit format, respectively."));
+        dump.push_field("ei_data", format!("{:#x} ({})", self.ei_data, ELFEndianness::from_repr(self.ei_data).map_or("Unknown".to_string(), |e| format!("{:?}", e))), Some("This byte is set to either 1 or 2 to signify little or big endianness, respectively. This affects interpretation of multi-byte fields starting with offset 0x10."));
         dump.push_field("ei_version", format!("{:#x}", self.ei_version), Some("Set to 1 for the original and current version of ELF."));
-        dump.push_field("ei_osabi", format!("{:#x}", self.ei_osabi), Some("Identifies the target operating system ABI."));
+        dump.push_field("ei_osabi", format!("{:#x} ({})", self.ei_osabi, ELFOsAbi::name(self.ei_osabi)), Some("Identifies the target operating system ABI."));
         dump.push_field("ei_abiversion", format!("{:#x}", self.ei_abiversion), Some("Further specifies the ABI version. Its interpretation depends on the target ABI. Linux kernel (after at least 2.6) has no definition of it,[6] so it is ignored for statically linked executables. In that case, offset and size of EI_PAD are 8.   glibc 2.12+ in case e_ident[EI_OSABI] == 3 treats this field as ABI version of the dynamic linker:[7] it defines a list of dynamic linker's features,[8] treats e_ident[EI_ABIVERSION] as a feature level requested by the shared object (executable or dynamic library) and refuses to load it if an unknown feature is requested, i.e. e_ident[EI_ABIVERSION] is greater than the largest known feature.[9]"));
         dump.push_field("ei_pad", format!("{:?}", self.ei_pad), Some("Reserved padding bytes. Currently unused. Should be filled with zeros and ignored when read."));
-        dump.push_field("e_type", format!("{:#x}", self.e_type), Some("Identifies object file type."));
-        dump.push_field("e_machine", format!("{:#x}", self.e_machine), Some("Specifies target instruction set architecture."));
+        dump.push_field("e_type", format!("{:#x} ({})", self.e_type, ELFFileType::from(self.e_type)), Some("Identifies object file type."));
+        dump.push_field("e_machine", format!("{:#x} ({})", self.e_machine, ELFTargetISA::name(self.e_machine)), Some("Specifies target instruction set architecture."));
         dump.push_field("e_version", format!("{:#x}", self.e_version), Some("Set to 1 for the original version of ELF."));
         dump.push_field("e_entry", format!("{:#x}", self.e_entry), Some("This is the memory address of the entry point from where the process starts executing. This field is either 32 or 64 bits long, depending on the format defined earlier (byte 0x04). If the file doesn't have an associated entry point, then this holds zero."));
         dump.push_field("e_phoff", format!("{:#x}", self.e_phoff), Some("Points to the start of the program header table. It usually follows the file header immediately following this one, making the offset 0x34 or 0x40 for 32- and 64-bit ELF executables, respectively."));
@@ -536,6 +535,13 @@ impl ELFHeader {
         match self {
             Self::ELFHeader32(h) => h.e_shentsize as u64,
             Self::ELFHeader64(h) => h.e_shentsize as u64,
+        }
+    }
+
+    pub fn machine(&self) -> u16 {
+        match self {
+            Self::ELFHeader32(h) => h.e_machine,
+            Self::ELFHeader64(h) => h.e_machine,
         }
     }
 
@@ -825,6 +831,27 @@ pub enum ELFProgramHeader {
 }
 
 impl ELFProgramHeader {
+    pub fn program_type(&self) -> ProgramHeaderType {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_type.into(),
+            Self::ELFProgramHeader64(h) => h.p_type.into(),
+        }
+    }
+
+    pub fn offset(&self) -> u64 {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_offset as u64,
+            Self::ELFProgramHeader64(h) => h.p_offset,
+        }
+    }
+
+    pub fn file_size(&self) -> u64 {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_filesz as u64,
+            Self::ELFProgramHeader64(h) => h.p_filesz,
+        }
+    }
+
     pub fn dump(&self) -> Dump {
         match self {
             Self::ELFProgramHeader32(h) => h.dump(),
@@ -1189,6 +1216,13 @@ impl ELFSectionHeader {
             ELFSectionHeader::ELFSectionHeader64(h) => h.sh_addr,
         }
     }
+
+    pub fn link(&self) -> usize {
+        match &self {
+            ELFSectionHeader::ELFSectionHeader32(h) => h.sh_link as usize,
+            ELFSectionHeader::ELFSectionHeader64(h) => h.sh_link as usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1235,7 +1269,7 @@ impl ELFSection {
 
         if disasm_code {
             if self.contains_code() {
-                let res = disasm_and_format_elf_code(elf, &self.data, self.header.virtual_address());
+                let res = disasm_and_format_code(elf.architecture(), &self.data, self.header.virtual_address());
 
                 if let Ok(code) = res {
                     dump.set_raw_data(DumpRawData::Code(code));
@@ -1253,6 +1287,555 @@ impl ELFSection {
     }
 }
 
+/*
+ * Symbols (.symtab, .dynsym)
+ */
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+pub enum SymbolType {
+    NoType = 0,
+    Object = 1,
+    Func = 2,
+    Section = 3,
+    File = 4,
+    Common = 5,
+    Tls = 6,
+    GnuIFunc = 10,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+pub enum SymbolBinding {
+    Local = 0,
+    Global = 1,
+    Weak = 2,
+    GnuUnique = 10,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr)]
+pub enum SymbolVisibility {
+    Default = 0,
+    Internal = 1,
+    Hidden = 2,
+    Protected = 3,
+}
+
+pub const SHN_UNDEF: u16 = 0x0;
+pub const SHN_ABS: u16 = 0xfff1;
+pub const SHN_COMMON: u16 = 0xfff2;
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFSymbol {
+    pub name: String,
+    pub st_name: u32,
+    pub st_info: u8,
+    pub st_other: u8,
+    pub st_shndx: u16,
+    pub st_value: u64,
+    pub st_size: u64,
+}
+
+impl ELFSymbol {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut symbol = Self::default();
+
+        match class {
+            ELFClass::ELF32 => {
+                symbol.st_name = reader.read_u32()?;
+                symbol.st_value = reader.read_u32()? as u64;
+                symbol.st_size = reader.read_u32()? as u64;
+                symbol.st_info = reader.read_u8()?;
+                symbol.st_other = reader.read_u8()?;
+                symbol.st_shndx = reader.read_u16()?;
+            }
+            ELFClass::ELF64 => {
+                symbol.st_name = reader.read_u32()?;
+                symbol.st_info = reader.read_u8()?;
+                symbol.st_other = reader.read_u8()?;
+                symbol.st_shndx = reader.read_u16()?;
+                symbol.st_value = reader.read_u64()?;
+                symbol.st_size = reader.read_u64()?;
+            }
+        }
+
+        return Ok(symbol);
+    }
+
+    pub fn symbol_type(&self) -> Option<SymbolType> {
+        return SymbolType::from_repr(self.st_info & 0xf);
+    }
+
+    pub fn binding(&self) -> Option<SymbolBinding> {
+        return SymbolBinding::from_repr(self.st_info >> 4);
+    }
+
+    pub fn visibility(&self) -> Option<SymbolVisibility> {
+        return SymbolVisibility::from_repr(self.st_other & 0x3);
+    }
+
+    pub fn is_import(&self) -> bool {
+        return self.st_shndx == SHN_UNDEF && !self.name.is_empty();
+    }
+
+    pub fn demangled_name(&self) -> String {
+        return demangle(&self.name).unwrap_or(self.name.clone());
+    }
+
+    pub fn section_index_as_string(&self) -> String {
+        match self.st_shndx {
+            SHN_UNDEF => "UND".to_string(),
+            SHN_ABS => "ABS".to_string(),
+            SHN_COMMON => "COM".to_string(),
+            index => format!("{}", index),
+        }
+    }
+
+    pub fn as_string(&self) -> String {
+        return format!(
+            "{:#018x} {:>8} {:<8} {:<8} {:<9} {:>4} {}",
+            self.st_value,
+            self.st_size,
+            self.symbol_type().map_or("Unknown".to_string(), |t| format!("{:?}", t)),
+            self.binding().map_or("Unknown".to_string(), |b| format!("{:?}", b)),
+            self.visibility().map_or("Unknown".to_string(), |v| format!("{:?}", v)),
+            self.section_index_as_string(),
+            self.demangled_name(),
+        );
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFSymbolTable {
+    pub section_name: String,
+    pub symbols: Vec<ELFSymbol>,
+}
+
+impl ELFSymbolTable {
+    pub fn dump(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Symbol Table {} ({} entries)", self.section_name, self.symbols.len()));
+
+        dump.push_field("", format!("{:<18} {:>8} {:<8} {:<8} {:<9} {:>4} {}", "Value", "Size", "Type", "Bind", "Vis", "Ndx", "Name"), None);
+
+        for symbol in self.symbols.iter() {
+            dump.push_field("", symbol.as_string(), None);
+        }
+
+        return dump;
+    }
+}
+
+/*
+ * Dynamic Section (.dynamic)
+ */
+
+#[repr(u64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum DynamicTag {
+    DtNull = 0,
+    DtNeeded = 1,
+    DtPltrelsz = 2,
+    DtPltgot = 3,
+    DtHash = 4,
+    DtStrtab = 5,
+    DtSymtab = 6,
+    DtRela = 7,
+    DtRelasz = 8,
+    DtRelaent = 9,
+    DtStrsz = 10,
+    DtSyment = 11,
+    DtInit = 12,
+    DtFini = 13,
+    DtSoname = 14,
+    DtRpath = 15,
+    DtSymbolic = 16,
+    DtRel = 17,
+    DtRelsz = 18,
+    DtRelent = 19,
+    DtPltrel = 20,
+    DtDebug = 21,
+    DtTextrel = 22,
+    DtJmprel = 23,
+    DtBindNow = 24,
+    DtInitArray = 25,
+    DtFiniArray = 26,
+    DtInitArraysz = 27,
+    DtFiniArraysz = 28,
+    DtRunpath = 29,
+    DtFlags = 30,
+    DtPreinitArray = 32,
+    DtPreinitArraysz = 33,
+    DtSymtabShndx = 34,
+    DtRelrsz = 35,
+    DtRelr = 36,
+    DtRelrent = 37,
+    DtGnuHash = 0x6ffffef5,
+    DtVersym = 0x6ffffff0,
+    DtRelacount = 0x6ffffff9,
+    DtRelcount = 0x6ffffffa,
+    DtFlags1 = 0x6ffffffb,
+    DtVerdef = 0x6ffffffc,
+    DtVerdefnum = 0x6ffffffd,
+    DtVerneed = 0x6ffffffe,
+    DtVerneednum = 0x6fffffff,
+}
+
+#[repr(u64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum DynamicFlag {
+    DfOrigin = 0x1,
+    DfSymbolic = 0x2,
+    DfTextrel = 0x4,
+    DfBindNow = 0x8,
+    DfStaticTls = 0x10,
+}
+
+impl DynamicFlag {
+    pub fn flags_as_string(flags: u64) -> String {
+        let str_flags: Vec<&'static str> = DynamicFlag::iter()
+            .filter(|&flag| (flag as u64 & flags) != 0)
+            .map(|flag| flag.into())
+            .collect();
+
+        return str_flags.join(" | ");
+    }
+}
+
+#[repr(u64)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum DynamicFlag1 {
+    DfNow = 0x1,
+    DfGlobal = 0x2,
+    DfGroup = 0x4,
+    DfNodelete = 0x8,
+    DfLoadfltr = 0x10,
+    DfInitfirst = 0x20,
+    DfNoopen = 0x40,
+    DfOrigin = 0x80,
+    DfDirect = 0x100,
+    DfInterpose = 0x400,
+    DfNodeflib = 0x800,
+    DfNodump = 0x1000,
+    DfPie = 0x8000000,
+}
+
+impl DynamicFlag1 {
+    pub fn flags_as_string(flags: u64) -> String {
+        let str_flags: Vec<&'static str> = DynamicFlag1::iter()
+            .filter(|&flag| (flag as u64 & flags) != 0)
+            .map(|flag| flag.into())
+            .collect();
+
+        return str_flags.join(" | ");
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFDynamicEntry {
+    pub d_tag: u64,
+    pub d_val: u64,
+    pub string: Option<String>,
+}
+
+impl ELFDynamicEntry {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut entry = Self::default();
+
+        match class {
+            ELFClass::ELF32 => {
+                entry.d_tag = reader.read_u32()? as u64;
+                entry.d_val = reader.read_u32()? as u64;
+            }
+            ELFClass::ELF64 => {
+                entry.d_tag = reader.read_u64()?;
+                entry.d_val = reader.read_u64()?;
+            }
+        }
+
+        return Ok(entry);
+    }
+
+    pub fn tag(&self) -> Option<DynamicTag> {
+        return DynamicTag::from_repr(self.d_tag);
+    }
+
+    pub fn has_string_value(&self) -> bool {
+        return matches!(self.tag(), Some(DynamicTag::DtNeeded | DynamicTag::DtSoname | DynamicTag::DtRpath | DynamicTag::DtRunpath));
+    }
+
+    pub fn value_as_string(&self) -> String {
+        match (self.tag(), &self.string) {
+            (_, Some(s)) => format!("{:#x} ({})", self.d_val, s),
+            (Some(DynamicTag::DtFlags), _) => format!("{:#x} ({})", self.d_val, DynamicFlag::flags_as_string(self.d_val)),
+            (Some(DynamicTag::DtFlags1), _) => format!("{:#x} ({})", self.d_val, DynamicFlag1::flags_as_string(self.d_val)),
+            _ => format!("{:#x}", self.d_val),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFDynamic {
+    pub entries: Vec<ELFDynamicEntry>,
+}
+
+impl ELFDynamic {
+    pub fn needed_libraries(&self) -> Vec<&str> {
+        return self.entries
+            .iter()
+            .filter(|e| e.tag() == Some(DynamicTag::DtNeeded))
+            .filter_map(|e| e.string.as_deref())
+            .collect();
+    }
+
+    pub fn dump(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Dynamic Section ({} entries)", self.entries.len()));
+
+        for entry in self.entries.iter() {
+            let tag: &'static str = entry.tag().map_or("UNKNOWN", |t| t.into());
+            dump.push_field(tag, entry.value_as_string(), None);
+        }
+
+        return dump;
+    }
+}
+
+/*
+ * Relocations (.rel.*, .rela.*)
+ */
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum X86_64RelocationType {
+    None = 0,
+    #[strum(serialize = "64")]
+    Direct64 = 1,
+    Pc32 = 2,
+    Got32 = 3,
+    Plt32 = 4,
+    Copy = 5,
+    GlobDat = 6,
+    JumpSlot = 7,
+    Relative = 8,
+    Gotpcrel = 9,
+    #[strum(serialize = "32")]
+    Direct32 = 10,
+    #[strum(serialize = "32S")]
+    Direct32S = 11,
+    Dtpmod64 = 16,
+    Dtpoff64 = 17,
+    Tpoff64 = 18,
+    Tlsgd = 19,
+    Tlsld = 20,
+    Gottpoff = 22,
+    Tpoff32 = 23,
+    Pc64 = 24,
+    Irelative = 37,
+    Gotpcrelx = 41,
+    RexGotpcrelx = 42,
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromRepr, IntoStaticStr)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum Aarch64RelocationType {
+    None = 0,
+    Abs64 = 257,
+    Abs32 = 258,
+    Abs16 = 259,
+    Prel64 = 260,
+    Prel32 = 261,
+    Prel16 = 262,
+    AdrPrelPgHi21 = 275,
+    AddAbsLo12Nc = 277,
+    Ldst8AbsLo12Nc = 278,
+    Jump26 = 282,
+    Call26 = 283,
+    Ldst16AbsLo12Nc = 284,
+    Ldst32AbsLo12Nc = 285,
+    Ldst64AbsLo12Nc = 286,
+    Ldst128AbsLo12Nc = 299,
+    AdrGotPage = 311,
+    Ld64GotLo12Nc = 312,
+    Copy = 1024,
+    GlobDat = 1025,
+    JumpSlot = 1026,
+    Relative = 1027,
+    TlsDtpmod = 1028,
+    TlsDtprel = 1029,
+    TlsTprel = 1030,
+    Tlsdesc = 1031,
+    Irelative = 1032,
+}
+
+pub fn relocation_type_name(machine: u16, r_type: u32) -> String {
+    let name: Option<&'static str> = match ELFTargetISA::from_repr(machine) {
+        Some(ELFTargetISA::AMDX86_64) => X86_64RelocationType::from_repr(r_type).map(|t| t.into()),
+        Some(ELFTargetISA::Arm64bits) => Aarch64RelocationType::from_repr(r_type).map(|t| t.into()),
+        _ => None,
+    };
+
+    let prefix = match ELFTargetISA::from_repr(machine) {
+        Some(ELFTargetISA::AMDX86_64) => "R_X86_64_",
+        Some(ELFTargetISA::Arm64bits) => "R_AARCH64_",
+        _ => "",
+    };
+
+    return name.map_or(format!("{:#x}", r_type), |n| format!("{}{}", prefix, n));
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFRelocation {
+    pub r_offset: u64,
+    pub r_info: u64,
+    pub r_addend: Option<i64>,
+    pub symbol_name: String,
+}
+
+impl ELFRelocation {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass, with_addend: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut reloc = Self::default();
+
+        match class {
+            ELFClass::ELF32 => {
+                reloc.r_offset = reader.read_u32()? as u64;
+                reloc.r_info = reader.read_u32()? as u64;
+                reloc.r_addend = if with_addend { Some(reader.read_i32()? as i64) } else { None };
+            }
+            ELFClass::ELF64 => {
+                reloc.r_offset = reader.read_u64()?;
+                reloc.r_info = reader.read_u64()?;
+                reloc.r_addend = if with_addend { Some(reader.read_i64()?) } else { None };
+            }
+        }
+
+        return Ok(reloc);
+    }
+
+    pub fn symbol_index(&self, class: &ELFClass) -> usize {
+        match class {
+            ELFClass::ELF32 => (self.r_info >> 8) as usize,
+            ELFClass::ELF64 => (self.r_info >> 32) as usize,
+        }
+    }
+
+    pub fn relocation_type(&self, class: &ELFClass) -> u32 {
+        match class {
+            ELFClass::ELF32 => (self.r_info & 0xff) as u32,
+            ELFClass::ELF64 => (self.r_info & 0xffffffff) as u32,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFRelocationTable {
+    pub section_name: String,
+    pub class: ELFClass,
+    pub machine: u16,
+    pub relocations: Vec<ELFRelocation>,
+}
+
+impl ELFRelocationTable {
+    pub fn dump(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Relocation Table {} ({} entries)", self.section_name, self.relocations.len()));
+
+        dump.push_field("", format!("{:<18} {:<28} {}", "Offset", "Type", "Symbol + Addend"), None);
+
+        for reloc in self.relocations.iter() {
+            let addend = match reloc.r_addend {
+                Some(a) if a < 0 => format!(" - {:#x}", -a),
+                Some(a) => format!(" + {:#x}", a),
+                None => String::new(),
+            };
+
+            dump.push_field("", format!(
+                "{:#018x} {:<28} {}{}",
+                reloc.r_offset,
+                relocation_type_name(self.machine, reloc.relocation_type(&self.class)),
+                demangle(&reloc.symbol_name).unwrap_or(reloc.symbol_name.clone()),
+                addend,
+            ), None);
+        }
+
+        return dump;
+    }
+}
+
+/*
+ * Notes (.note.*)
+ */
+
+pub const NT_GNU_ABI_TAG: u32 = 1;
+pub const NT_GNU_BUILD_ID: u32 = 3;
+pub const NT_GNU_PROPERTY_TYPE_0: u32 = 5;
+
+#[derive(Clone, Debug, Default)]
+pub struct ELFNote {
+    pub section_name: String,
+    pub name: String,
+    pub note_type: u32,
+    pub desc: Vec<u8>,
+}
+
+impl ELFNote {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut note = Self::default();
+
+        let namesz = reader.read_u32()? as usize;
+        let descsz = reader.read_u32()? as usize;
+        note.note_type = reader.read_u32()?;
+
+        let name = reader.read_bytes(namesz)?;
+        let nul = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+        note.name = String::from_utf8_lossy(&name[..nul]).to_string();
+        reader.set_position(reader.position() + (namesz.next_multiple_of(4) - namesz))?;
+
+        note.desc = reader.read_bytes(descsz)?.to_vec();
+        reader.set_position(reader.position() + (descsz.next_multiple_of(4) - descsz))?;
+
+        return Ok(note);
+    }
+
+    fn desc_word(&self, index: usize) -> u32 {
+        let bytes: [u8; 4] = self.desc[index * 4..index * 4 + 4].try_into().unwrap_or([0; 4]);
+        return u32::from_le_bytes(bytes);
+    }
+
+    pub fn description(&self) -> String {
+        match (self.name.as_str(), self.note_type) {
+            ("GNU", NT_GNU_BUILD_ID) => format!("Build ID: {}", self.desc.iter().map(|b| format!("{:02x}", b)).collect::<String>()),
+            ("GNU", NT_GNU_ABI_TAG) if self.desc.len() >= 16 => {
+                let os = match self.desc_word(0) {
+                    0 => "Linux",
+                    1 => "GNU",
+                    2 => "Solaris",
+                    3 => "FreeBSD",
+                    _ => "Unknown",
+                };
+
+                format!("ABI Tag: {} {}.{}.{}", os, self.desc_word(1), self.desc_word(2), self.desc_word(3))
+            }
+            ("GNU", NT_GNU_PROPERTY_TYPE_0) => format!("GNU Property: {:02x?}", self.desc),
+            _ => format!("{:02x?}", self.desc),
+        }
+    }
+
+    pub fn dump(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Note ({})", self.section_name));
+
+        dump.push_field("Owner", self.name.clone(), None);
+        dump.push_field("Type", format!("{:#x}", self.note_type), None);
+        dump.push_field("Size", format!("{:#x}", self.desc.len()), None);
+        dump.push_field("Description", self.description(), None);
+
+        return dump;
+    }
+}
+
 /* Headers */
 
 #[derive(Clone, Debug, Default)]
@@ -1263,17 +1846,33 @@ pub struct ELFHeaders {
 
 /* ELF */
 
+fn read_c_string(data: &[u8], offset: usize) -> String {
+    if offset >= data.len() {
+        return String::new();
+    }
+
+    let bytes = &data[offset..];
+    let nul = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+
+    return String::from_utf8_lossy(&bytes[..nul]).to_string();
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ELF {
     pub headers: ELFHeaders,
     pub sections: HashMap<String, ELFSection>,
+    pub interpreter: Option<String>,
+    pub symbol_tables: Vec<ELFSymbolTable>,
+    pub dynamic: Option<ELFDynamic>,
+    pub relocation_tables: Vec<ELFRelocationTable>,
+    pub notes: Vec<ELFNote>,
 }
 
 impl ELF {
     fn parse_headers_and_sections(
         &mut self,
         reader: &mut Reader
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ELFSection>, Box<dyn std::error::Error>> {
         self.headers.elf_header = ELFHeader::from_parser(reader)?;
 
         let ph_off = self.headers.elf_header.program_headers_offset();
@@ -1305,27 +1904,143 @@ impl ELF {
                     ELFSection::new(ELFSectionHeader::ELFSectionHeader64(ELFSectionHeader64::from_reader(reader)?)),
             };
 
-            let old_position = reader.position();
+            if section.header.section_type() != SectionType::Nobits {
+                let old_position = reader.position();
 
-            reader.set_position(section.offset() as usize)?;
+                reader.set_position(section.offset() as usize)?;
 
-            section.data = reader.read_bytes(section.size() as usize)?.to_vec();
+                section.data = reader.read_bytes(section.size() as usize)?.to_vec();
+
+                reader.set_position(old_position)?;
+            }
 
             sections.push(section);
-
-            reader.set_position(old_position)?;
         }
 
-        let shstrtab_sh = &sections[self.get_elf_header().shstr_index()].clone();
-
-        for section in sections.iter_mut() {
-            let name_offset = section.header.name_offset() as usize;
-            let name = &shstrtab_sh.data[name_offset..];
-            let nul = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-            section.name = String::from_utf8_lossy(&name[..nul]).to_string();
+        if let Some(shstrtab) = sections.get(self.get_elf_header().shstr_index()).cloned() {
+            for section in sections.iter_mut() {
+                section.name = read_c_string(&shstrtab.data, section.header.name_offset() as usize);
+            }
         }
 
-        self.sections = sections.into_iter().map(|s| (s.name.clone(), s)).collect();
+        return Ok(sections);
+    }
+
+    fn parse_interpreter(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+        let interp = self.headers.program_headers
+            .iter()
+            .find(|ph| ph.program_type() == ProgramHeaderType::Interp);
+
+        if let Some(ph) = interp {
+            reader.set_position(ph.offset() as usize)?;
+            self.interpreter = Some(read_c_string(reader.read_bytes(ph.file_size() as usize)?, 0));
+        }
+
+        return Ok(());
+    }
+
+    fn parse_symbols(&self, sections: &[ELFSection], section: &ELFSection) -> Result<Vec<ELFSymbol>, Box<dyn std::error::Error>> {
+        let strtab = sections.get(section.header.link()).map_or(&[] as &[u8], |s| s.data.as_slice());
+        let mut reader = self.reader_for(&section.data);
+        let mut symbols = Vec::new();
+
+        while reader.remaining() > 0 {
+            let mut symbol = ELFSymbol::from_reader(&mut reader, &self.class())?;
+            symbol.name = read_c_string(strtab, symbol.st_name as usize);
+            symbols.push(symbol);
+        }
+
+        return Ok(symbols);
+    }
+
+    fn parse_symbol_tables(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+        for section in sections.iter() {
+            if matches!(section.header.section_type(), SectionType::Symtab | SectionType::Dynsym) {
+                self.symbol_tables.push(ELFSymbolTable {
+                    section_name: section.name.clone(),
+                    symbols: self.parse_symbols(sections, section)?,
+                });
+            }
+        }
+
+        return Ok(());
+    }
+
+    fn parse_dynamic(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(section) = sections.iter().find(|s| s.header.section_type() == SectionType::Dynamic) else {
+            return Ok(());
+        };
+
+        let dynstr = sections.get(section.header.link()).map_or(&[] as &[u8], |s| s.data.as_slice());
+        let mut reader = self.reader_for(&section.data);
+        let mut dynamic = ELFDynamic::default();
+
+        while reader.remaining() > 0 {
+            let mut entry = ELFDynamicEntry::from_reader(&mut reader, &self.class())?;
+
+            if entry.tag() == Some(DynamicTag::DtNull) {
+                break;
+            }
+
+            if entry.has_string_value() {
+                entry.string = Some(read_c_string(dynstr, entry.d_val as usize));
+            }
+
+            dynamic.entries.push(entry);
+        }
+
+        self.dynamic = Some(dynamic);
+
+        return Ok(());
+    }
+
+    fn parse_relocation_tables(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+        for section in sections.iter() {
+            let with_addend = match section.header.section_type() {
+                SectionType::Rela => true,
+                SectionType::Rel => false,
+                _ => continue,
+            };
+
+            let symbols = match sections.get(section.header.link()) {
+                Some(symtab) if section.header.link() != 0 => self.parse_symbols(sections, symtab)?,
+                _ => Vec::new(),
+            };
+
+            let mut reader = self.reader_for(&section.data);
+            let mut table = ELFRelocationTable {
+                section_name: section.name.clone(),
+                class: self.class(),
+                machine: self.get_elf_header().machine(),
+                relocations: Vec::new(),
+            };
+
+            while reader.remaining() > 0 {
+                let mut reloc = ELFRelocation::from_reader(&mut reader, &self.class(), with_addend)?;
+
+                if let Some(symbol) = symbols.get(reloc.symbol_index(&self.class())) {
+                    reloc.symbol_name = symbol.name.clone();
+                }
+
+                table.relocations.push(reloc);
+            }
+
+            self.relocation_tables.push(table);
+        }
+
+        return Ok(());
+    }
+
+    fn parse_notes(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+        for section in sections.iter().filter(|s| s.header.section_type() == SectionType::Note) {
+            let mut reader = self.reader_for(&section.data);
+
+            while reader.remaining() >= 12 {
+                let mut note = ELFNote::from_reader(&mut reader)?;
+                note.section_name = section.name.clone();
+                self.notes.push(note);
+            }
+        }
 
         return Ok(());
     }
@@ -1342,6 +2057,88 @@ impl ELF {
             ELFHeader::ELFHeader64(_) => ELFClass::ELF64,
         }
     }
+
+    pub fn is_big_endian(&self) -> bool {
+        match &self.headers.elf_header {
+            ELFHeader::ELFHeader32(h) => h.ei_data == ELFEndianness::Big as u8,
+            ELFHeader::ELFHeader64(h) => h.ei_data == ELFEndianness::Big as u8,
+        }
+    }
+
+    pub fn architecture(&self) -> Architecture {
+        match ELFTargetISA::from_repr(self.get_elf_header().machine()) {
+            Some(ELFTargetISA::X86) => Architecture::X86,
+            Some(ELFTargetISA::AMDX86_64) => Architecture::X86_64,
+            Some(ELFTargetISA::Arm64bits) => Architecture::Aarch64,
+            _ => Architecture::Unsupported,
+        }
+    }
+
+    fn reader_for<'a>(&self, data: &'a [u8]) -> Reader<'a> {
+        if self.is_big_endian() {
+            return Reader::new_be(data);
+        }
+
+        return Reader::new_le(data);
+    }
+
+    pub fn symbol_table(&self, section_name: &str) -> Option<&ELFSymbolTable> {
+        return self.symbol_tables.iter().find(|t| t.section_name == section_name);
+    }
+
+    pub fn imported_symbols(&self) -> Vec<&ELFSymbol> {
+        return self.symbol_table(".dynsym")
+            .map_or(Vec::new(), |t| t.symbols.iter().filter(|s| s.is_import()).collect());
+    }
+
+    pub fn dump_program_headers(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Program Headers ({})", self.headers.program_headers.len()));
+
+        if let Some(interpreter) = &self.interpreter {
+            dump.push_field("Interpreter", interpreter.clone(), Some("Program interpreter (PT_INTERP)"));
+        }
+
+        for header in self.headers.program_headers.iter() {
+            dump.push_child(header.dump());
+        }
+
+        return dump;
+    }
+
+    pub fn dump_imports(&self) -> Dump {
+        let mut dump = Dump::new("Imports");
+
+        if let Some(dynamic) = &self.dynamic {
+            for library in dynamic.needed_libraries() {
+                dump.push_field("Library", library.to_string(), None);
+            }
+        }
+
+        let imports: HashSet<&str> = self.imported_symbols().iter().map(|s| s.name.as_str()).collect();
+
+        for table in self.relocation_tables.iter() {
+            for reloc in table.relocations.iter().filter(|r| imports.contains(r.symbol_name.as_str())) {
+                dump.push_field("", format!(
+                    "{:#018x} {:<28} {}",
+                    reloc.r_offset,
+                    relocation_type_name(table.machine, reloc.relocation_type(&table.class)),
+                    demangle(&reloc.symbol_name).unwrap_or(reloc.symbol_name.clone()),
+                ), None);
+            }
+        }
+
+        return dump;
+    }
+
+    pub fn dump_notes(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Notes ({})", self.notes.len()));
+
+        for note in self.notes.iter() {
+            dump.push_child(note.dump());
+        }
+
+        return dump;
+    }
 }
 
 pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>> {
@@ -1351,9 +2148,7 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
 
     let file_bytes = std::fs::read(file_path).expect("Unable to open and read file");
 
-    let magic_bytes = &file_bytes[0..4];
-
-    if magic_bytes != ELF_MAGIC_ARRAY {
+    if file_bytes.len() < 6 || file_bytes[0..4] != ELF_MAGIC_ARRAY {
         return Err("File magic number does not match ELF magic number".into());
     }
 
@@ -1367,7 +2162,117 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
 
     let mut elf = ELF::default();
 
-    elf.parse_headers_and_sections(&mut reader)?;
+    let sections = elf.parse_headers_and_sections(&mut reader)?;
+
+    elf.parse_interpreter(&mut reader)?;
+    elf.parse_symbol_tables(&sections)?;
+    elf.parse_dynamic(&sections)?;
+    elf.parse_relocation_tables(&sections)?;
+    elf.parse_notes(&sections)?;
+
+    elf.sections = sections.into_iter().map(|s| (s.name.clone(), s)).collect();
 
     return Ok(elf);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    }
+
+    #[test]
+    fn enum_names() {
+        assert_eq!(ELFOsAbi::name(0x03), "Linux");
+        assert_eq!(ELFOsAbi::name(0xff), "Unknown");
+        assert_eq!(ELFTargetISA::name(0xb7), "Arm64bits");
+        assert_eq!(ELFTargetISA::name(0x3e), "AMDX86_64");
+        assert_eq!(relocation_type_name(0x3e, 7), "R_X86_64_JUMP_SLOT");
+        assert_eq!(relocation_type_name(0x3e, 1), "R_X86_64_64");
+        assert_eq!(relocation_type_name(0xb7, 1026), "R_AARCH64_JUMP_SLOT");
+        assert_eq!(relocation_type_name(0xb7, 275), "R_AARCH64_ADR_PREL_PG_HI21");
+        assert_eq!(relocation_type_name(0x03, 7), "0x7");
+    }
+
+    #[test]
+    fn read_c_string_bounds() {
+        assert_eq!(read_c_string(b"abc\0def\0", 4), "def");
+        assert_eq!(read_c_string(b"abc", 0), "abc");
+        assert_eq!(read_c_string(b"abc", 10), "");
+    }
+
+    #[test]
+    fn aarch64_static() {
+        let elf = parse_elf(&fixture("elf_aarch64_static")).unwrap();
+
+        assert_eq!(elf.architecture(), Architecture::Aarch64);
+        assert!(matches!(elf.class(), ELFClass::ELF64));
+        assert!(elf.interpreter.is_none());
+        assert!(elf.dynamic.is_none());
+
+        let symtab = elf.symbol_table(".symtab").unwrap();
+        let start = symtab.symbols.iter().find(|s| s.name == "_start").unwrap();
+
+        assert_eq!(start.binding(), Some(SymbolBinding::Global));
+        assert_eq!(start.st_value, elf.sections[".text"].header.virtual_address());
+
+        let code = disasm_and_format_code(elf.architecture(), &elf.sections[".text"].data, start.st_value).unwrap();
+
+        assert!(code[0].ends_with("mov x0, #1"));
+        assert!(code.iter().any(|l| l.ends_with("svc #0")));
+    }
+
+    #[test]
+    fn aarch64_dynamic() {
+        let elf = parse_elf(&fixture("elf_aarch64_dyn")).unwrap();
+
+        assert_eq!(elf.interpreter.as_deref(), Some("/lib/ld-linux-aarch64.so.1"));
+        assert_eq!(elf.dynamic.as_ref().unwrap().needed_libraries(), vec!["libfoo.so"]);
+
+        let imports: Vec<&str> = elf.imported_symbols().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(imports, vec!["lib_add"]);
+
+        let reloc = elf.relocation_tables
+            .iter()
+            .flat_map(|t| t.relocations.iter().map(move |r| (t, r)))
+            .find(|(_, r)| r.symbol_name == "lib_add")
+            .unwrap();
+
+        assert_eq!(relocation_type_name(reloc.0.machine, reloc.1.relocation_type(&reloc.0.class)), "R_AARCH64_JUMP_SLOT");
+
+        let build_id = elf.notes.iter().find(|n| n.note_type == NT_GNU_BUILD_ID).unwrap();
+        assert_eq!(build_id.name, "GNU");
+        assert_eq!(build_id.desc.len(), 20);
+    }
+
+    #[test]
+    fn x86_64_dynamic() {
+        let elf = parse_elf(&fixture("elf_x86_64_dyn")).unwrap();
+
+        assert_eq!(elf.architecture(), Architecture::X86_64);
+        assert_eq!(elf.interpreter.as_deref(), Some("/lib64/ld-linux-x86-64.so.2"));
+
+        let dynamic = elf.dynamic.as_ref().unwrap();
+        assert!(dynamic.entries.iter().any(|e| e.tag() == Some(DynamicTag::DtStrtab)));
+        assert!(dynamic.entries.iter().all(|e| e.tag() != Some(DynamicTag::DtNull)));
+
+        let imports = elf.dump_imports();
+        let lines: Vec<&str> = imports.iter_fields().map(|f| f.value.as_str()).collect();
+
+        assert!(lines.contains(&"libfoo.so"));
+        assert!(lines.iter().any(|l| l.contains("R_X86_64_JUMP_SLOT") && l.ends_with("lib_add")));
+    }
+
+    #[test]
+    fn nobits_sections_have_no_data() {
+        let elf = parse_elf(&fixture("elf_x86_64_dyn")).unwrap();
+
+        for section in elf.sections.values() {
+            if section.header.section_type() == SectionType::Nobits {
+                assert!(section.data.is_empty());
+            }
+        }
+    }
 }

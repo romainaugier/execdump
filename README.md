@@ -1,6 +1,6 @@
 # execdump
 
-execdump is a command-line tool that helps you analyze Windows's PE and Linux's ELF files by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
+execdump is a command-line tool that helps you analyze Windows's PE, Linux's ELF and macOS's Mach-O files (x86, x86_64 and aarch64) by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
 
 This project is currently a work in progress so not everything is supported, and it might be broken.
 
@@ -47,6 +47,27 @@ Options:
           Dumps the ELF Base Header
       --elf-program-headers
           Dumps the ELF Program Headers
+      --elf-symbols
+          Dumps the ELF Symbol Tables (.symtab and .dynsym), if any
+      --elf-dynamic
+          Dumps the ELF Dynamic Section, if any
+      --elf-relocations
+          Dumps the ELF Relocation Tables, if any
+      --elf-imports
+          Dumps the ELF imported libraries and symbols, if any
+      --elf-notes
+          Dumps the ELF Notes, if any
+
+      --macho-fat-header
+          Dumps the Mach-O Fat (Universal) Header, if any
+      --macho-header
+          Dumps the Mach-O Header of each architecture
+      --macho-load-commands
+          Dumps the Mach-O Load Commands of each architecture
+      --macho-symbols
+          Dumps the Mach-O Symbol Table of each architecture, if any
+      --macho-imports
+          Dumps the Mach-O imported libraries and symbols of each architecture, if any
 
       --sections
           Dumps the Sections
@@ -102,13 +123,52 @@ Code:
 Headers:
 
 - :heavy_check_mark: ELF Header
-- :heavy_check_mark: Program Headers
+- :heavy_check_mark: Program Headers (and interpreter)
+- :heavy_check_mark: Section Headers
 
 Sections:
+
+- :heavy_check_mark: Symbol Tables (.symtab, .dynsym)
+- :heavy_check_mark: Dynamic Section
+- :heavy_check_mark: Relocations (.rel, .rela)
+- :heavy_check_mark: Imports (needed libraries and imported symbols)
+- :heavy_check_mark: Notes (build-id, ABI tag, GNU properties)
+- :x: Symbol Versioning (.gnu.version, .gnu.version_r)
+- :x: DWARF debug information
 
 Code:
 
 - :heavy_check_mark: Basic disassembly of the code sections
+
+### Mach-O
+
+Headers:
+
+- :heavy_check_mark: Fat (Universal) Header
+- :heavy_check_mark: Mach Header (32-bit and 64-bit)
+
+Load Commands:
+
+- :heavy_check_mark: Segments and Sections
+- :heavy_check_mark: Symbol Table and Dynamic Symbol Table
+- :heavy_check_mark: Dylibs, Dylinker and Rpaths
+- :heavy_check_mark: Main, UUID, Build Version, Version Min, Source Version
+- :heavy_check_mark: Dyld Info, Function Starts, Chained Fixups, Exports Trie, Code Signature (offsets only)
+- :x: Dyld bind/rebase opcodes, chained fixups and exports trie contents
+- :x: Code Signature contents
+
+Code:
+
+- :heavy_check_mark: Basic disassembly of the code sections
+
+### Architectures
+
+Disassembly:
+
+- :heavy_check_mark: x86
+- :heavy_check_mark: x86_64
+- :heavy_check_mark: aarch64
+- :x: arm (32-bit)
 
 ### Core
 
@@ -133,6 +193,7 @@ Viewers:
   - :heavy_check_mark: Headers
   - :clock9: PE Sections
   - :clock9: ELF Sections
+  - :clock9: Mach-O Sections
   - :heavy_check_mark: Hex Viewer
   - :clock9: Disasm Viewer
   - :x: Decompiler Viewer
