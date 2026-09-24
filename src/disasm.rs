@@ -207,3 +207,32 @@ pub fn disasm_and_format_code(
         Architecture::Unsupported => Err("Unsupported architecture for disassembly".into()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aarch64() {
+        let code = [0x20, 0x00, 0x80, 0xd2, 0x1f, 0x20, 0x03, 0xd5, 0xc0, 0x03, 0x5f, 0xd6];
+        let res = disasm_and_format_code(Architecture::Aarch64, &code, 0x1000).unwrap();
+
+        assert_eq!(res, vec!["0x00001000 mov x0, #1", "0x00001008 ret "]);
+    }
+
+    #[test]
+    fn x86_modes() {
+        let code = [0x48, 0x89, 0xc3];
+
+        let res = disasm_and_format_code(Architecture::X86_64, &code, 0).unwrap();
+        assert_eq!(res, vec!["0x00000000 mov rbx, rax"]);
+
+        let res = disasm_and_format_code(Architecture::X86, &code, 0).unwrap();
+        assert_eq!(res, vec!["0x00000000 dec eax", "0x00000001 mov ebx, eax"]);
+    }
+
+    #[test]
+    fn unsupported() {
+        assert!(disasm_and_format_code(Architecture::Unsupported, &[0x00], 0).is_err());
+    }
+}

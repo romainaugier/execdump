@@ -23,3 +23,19 @@ pub fn is_aarch64_register(s: &str) -> bool {
 
     return num < 31 || (num == 31 && !matches!(prefix, 'x' | 'w'));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registers() {
+        for register in ["x0", "x30", "w12", "sp", "wsp", "xzr", "wzr", "lr", "d8", "q31", "v0.16b", "s1"] {
+            assert!(is_aarch64_register(register), "{}", register);
+        }
+
+        for text in ["x31", "w32", "#0x10", "b", "x", "lsl", "x1a", "[sp", "xmm0", "rax"] {
+            assert!(!is_aarch64_register(text), "{}", text);
+        }
+    }
+}

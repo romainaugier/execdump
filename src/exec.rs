@@ -39,3 +39,20 @@ pub enum Exec {
     ELF(ELF),
     MachO(MachO),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    }
+
+    #[test]
+    fn guess_fixtures_exectype() {
+        assert!(matches!(guess_exectype(&fixture("elf_aarch64_static")).unwrap(), ExecType::ELF));
+        assert!(matches!(guess_exectype(&fixture("pe_arm64.exe")).unwrap(), ExecType::PE));
+        assert!(matches!(guess_exectype(&fixture("macho_x86_64")).unwrap(), ExecType::MachO));
+        assert!(matches!(guess_exectype(&fixture("macho_fat.o")).unwrap(), ExecType::MachO));
+    }
+}

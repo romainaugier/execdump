@@ -2174,3 +2174,105 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
 
     return Ok(elf);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    }
+
+    #[test]
+    fn enum_names() {
+        assert_eq!(ELFOsAbi::name(0x03), "Linux");
+        assert_eq!(ELFOsAbi::name(0xff), "Unknown");
+        assert_eq!(ELFTargetISA::name(0xb7), "Arm64bits");
+        assert_eq!(ELFTargetISA::name(0x3e), "AMDX86_64");
+        assert_eq!(relocation_type_name(0x3e, 7), "R_X86_64_JUMP_SLOT");
+        assert_eq!(relocation_type_name(0x3e, 1), "R_X86_64_64");
+        assert_eq!(relocation_type_name(0xb7, 1026), "R_AARCH64_JUMP_SLOT");
+        assert_eq!(relocation_type_name(0xb7, 275), "R_AARCH64_ADR_PREL_PG_HI21");
+        assert_eq!(relocation_type_name(0x03, 7), "0x7");
+    }
+
+    #[test]
+    fn read_c_string_bounds() {
+        assert_eq!(read_c_string(b"abc\0def\0", 4), "def");
+        assert_eq!(read_c_string(b"abc", 0), "abc");
+        assert_eq!(read_c_string(b"abc", 10), "");
+    }
+
+    #[test]
+    fn aarch64_static() {
+        let elf = parse_elf(&fixture("elf_aarch64_static")).unwrap();
+
+        assert_eq!(elf.architecture(), Architecture::Aarch64);
+        assert!(matches!(elf.class(), ELFClass::ELF64));
+        assert!(elf.interpreter.is_none());
+        assert!(elf.dynamic.is_none());
+
+        let symtab = elf.symbol_table(".symtab").unwrap();
+        let start = symtab.symbols.iter().find(|s| s.name == "_start").unwrap();
+
+        assert_eq!(start.binding(), Some(SymbolBinding::Global));
+        assert_eq!(start.st_value, elf.sections[".text"].header.virtual_address());
+
+        let code = disasm_and_format_code(elf.architecture(), &elf.sections[".text"].data, start.st_value).unwrap();
+
+        assert!(code[0].ends_with("mov x0, #1"));
+        assert!(code.iter().any(|l| l.ends_with("svc #0")));
+    }
+
+    #[test]
+    fn aarch64_dynamic() {
+        let elf = parse_elf(&fixture("elf_aarch64_dyn")).unwrap();
+
+        assert_eq!(elf.interpreter.as_deref(), Some("/lib/ld-linux-aarch64.so.1"));
+        assert_eq!(elf.dynamic.as_ref().unwrap().needed_libraries(), vec!["libfoo.so"]);
+
+        let imports: Vec<&str> = elf.imported_symbols().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(imports, vec!["lib_add"]);
+
+        let reloc = elf.relocation_tables
+            .iter()
+            .flat_map(|t| t.relocations.iter().map(move |r| (t, r)))
+            .find(|(_, r)| r.symbol_name == "lib_add")
+            .unwrap();
+
+        assert_eq!(relocation_type_name(reloc.0.machine, reloc.1.relocation_type(&reloc.0.class)), "R_AARCH64_JUMP_SLOT");
+
+        let build_id = elf.notes.iter().find(|n| n.note_type == NT_GNU_BUILD_ID).unwrap();
+        assert_eq!(build_id.name, "GNU");
+        assert_eq!(build_id.desc.len(), 20);
+    }
+
+    #[test]
+    fn x86_64_dynamic() {
+        let elf = parse_elf(&fixture("elf_x86_64_dyn")).unwrap();
+
+        assert_eq!(elf.architecture(), Architecture::X86_64);
+        assert_eq!(elf.interpreter.as_deref(), Some("/lib64/ld-linux-x86-64.so.2"));
+
+        let dynamic = elf.dynamic.as_ref().unwrap();
+        assert!(dynamic.entries.iter().any(|e| e.tag() == Some(DynamicTag::DtStrtab)));
+        assert!(dynamic.entries.iter().all(|e| e.tag() != Some(DynamicTag::DtNull)));
+
+        let imports = elf.dump_imports();
+        let lines: Vec<&str> = imports.iter_fields().map(|f| f.value.as_str()).collect();
+
+        assert!(lines.contains(&"libfoo.so"));
+        assert!(lines.iter().any(|l| l.contains("R_X86_64_JUMP_SLOT") && l.ends_with("lib_add")));
+    }
+
+    #[test]
+    fn nobits_sections_have_no_data() {
+        let elf = parse_elf(&fixture("elf_x86_64_dyn")).unwrap();
+
+        for section in elf.sections.values() {
+            if section.header.section_type() == SectionType::Nobits {
+                assert!(section.data.is_empty());
+            }
+        }
+    }
+}

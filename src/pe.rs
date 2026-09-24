@@ -2361,3 +2361,66 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
 
     return Ok(pe);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    }
+
+    fn field<'a>(dump: &'a Dump, key: &str) -> &'a str {
+        return dump.iter_fields().find(|f| f.key == key).map(|f| f.value.as_str()).unwrap();
+    }
+
+    #[test]
+    fn arm64_exception_table() {
+        let pe = parse_pe(&fixture("pe_arm64.exe")).unwrap();
+
+        assert_eq!(pe.architecture(), Architecture::Aarch64);
+
+        let entries = &pe.exception_table.as_ref().unwrap().entries;
+        assert_eq!(entries.len(), 2);
+
+        let ExcFunctionEntry::Arm64(entry) = &entries[0] else {
+            panic!("Expected an ARM64 exception entry");
+        };
+
+        assert_eq!(entry.begin_address, 0x1008);
+        assert!(!entry.is_packed());
+        assert_eq!(field(&entry.dump(), "FunctionLength"), "0x40");
+        assert_eq!(field(&entry.dump(), "E"), "1");
+    }
+
+    #[test]
+    fn arm64_packed_unwind_data() {
+        let entry = Arm64ExcFunctionEntry {
+            begin_address: 0x1000,
+            unwind_data: 0x1 | (0x10 << 2) | (0x2 << 16) | (0x3 << 21) | (0x4 << 23),
+            xdata_header: None,
+        };
+
+        let dump = entry.dump();
+
+        assert!(entry.is_packed());
+        assert_eq!(field(&dump, "FunctionLength"), "0x40");
+        assert_eq!(field(&dump, "RegI"), "2");
+        assert_eq!(field(&dump, "CR"), "3");
+        assert_eq!(field(&dump, "FrameSize"), "0x40");
+    }
+
+    #[test]
+    fn arm64_disasm() {
+        let pe = parse_pe(&fixture("pe_arm64.exe")).unwrap();
+        let text = &pe.sections[".text"];
+
+        let dump = text.dump(&pe, true, false);
+
+        let DumpRawData::Code(code) = dump.raw_data() else {
+            panic!("Expected disassembled code");
+        };
+
+        assert_eq!(code[0], "0x00001000 add w0, w1, w0");
+    }
+}

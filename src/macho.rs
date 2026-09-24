@@ -1128,3 +1128,88 @@ pub fn parse_macho(file_path: &PathBuf) -> Result<MachO, Box<dyn std::error::Err
 
     return Ok(macho);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> PathBuf {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    }
+
+    #[test]
+    fn magic_detection() {
+        assert!(is_macho(&[0xcf, 0xfa, 0xed, 0xfe, 0x07, 0x00, 0x00, 0x01]));
+        assert!(is_macho(&[0xfe, 0xed, 0xfa, 0xce, 0x00, 0x00, 0x00, 0x12]));
+        assert!(is_macho(&[0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]));
+        assert!(!is_macho(&[0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x34]));
+        assert!(!is_macho(&[0x7f, b'E', b'L', b'F', 0x02, 0x01, 0x01, 0x00]));
+    }
+
+    #[test]
+    fn big_endian_header() {
+        let mut bytes = Vec::new();
+
+        for value in [MH_MAGIC, CpuType::PowerPC as u32, 0, FileType::MhExecute as u32, 0, 0, 0] {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+
+        let binary = MachOBinary::from_bytes(&bytes).unwrap();
+
+        assert!(!binary.header.is_64());
+        assert_eq!(binary.cpu_name(), "ppc");
+        assert_eq!(binary.header.filetype, FileType::MhExecute as u32);
+    }
+
+    #[test]
+    fn fat_object() {
+        let macho = parse_macho(&fixture("macho_fat.o")).unwrap();
+
+        assert_eq!(macho.fat_header.as_ref().unwrap().nfat_arch, 2);
+
+        let names: Vec<String> = macho.binaries.iter().map(|b| b.cpu_name()).collect();
+        assert_eq!(names, vec!["x86_64", "arm64"]);
+
+        for binary in macho.binaries.iter() {
+            assert_eq!(binary.header.filetype, FileType::MhObject as u32);
+
+            let text = &binary.sections["__TEXT,__text"];
+            assert!(text.contains_code());
+
+            let code = disasm_and_format_code(binary.architecture(), &text.data, text.header.addr).unwrap();
+            assert!(!code.is_empty());
+
+            let twice = binary.symbols.iter().find(|s| s.name == "__ZN2ns5twiceEi").unwrap();
+            assert!(!twice.is_import());
+
+            let lib_add = binary.symbols.iter().find(|s| s.name == "_lib_add").unwrap();
+            assert!(lib_add.is_import());
+        }
+    }
+
+    #[test]
+    fn executable_load_commands() {
+        let macho = parse_macho(&fixture("macho_x86_64")).unwrap();
+
+        assert!(macho.fat_header.is_none());
+
+        let binary = &macho.binaries[0];
+
+        assert_eq!(binary.architecture(), Architecture::X86_64);
+        assert_eq!(binary.header.filetype, FileType::MhExecute as u32);
+        assert_eq!(binary.load_commands.len(), binary.header.ncmds as usize);
+
+        let dylibs: Vec<&str> = binary.dylibs().iter().filter_map(|c| match &c.data {
+            LoadCommandData::Dylib { name, .. } => Some(name.as_str()),
+            _ => None,
+        }).collect();
+
+        assert_eq!(dylibs, vec!["@rpath/libfoo.dylib", "/usr/lib/libSystem.B.dylib"]);
+
+        assert!(binary.load_commands.iter().any(|c| matches!(&c.data, LoadCommandData::Rpath { path } if path == "@loader_path")));
+        assert!(binary.load_commands.iter().any(|c| matches!(&c.data, LoadCommandData::Dylinker { name } if name == "/usr/lib/dyld")));
+        assert!(binary.load_commands.iter().any(|c| matches!(c.data, LoadCommandData::Main { entryoff, .. } if entryoff > 0)));
+        assert!(binary.load_commands.iter().any(|c| c.name() == "LC_SEGMENT_64"));
+        assert!(binary.load_commands.iter().all(|c| c.name() != "LC_UNKNOWN"));
+    }
+}
