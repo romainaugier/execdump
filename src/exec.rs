@@ -3,11 +3,13 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use crate::elf::{ELF_MAGIC_ARRAY, ELF};
+use crate::macho::{is_macho, MachO};
 use crate::pe::{DOS_MAGIC_ARRAY, PE};
 
 pub enum ExecType {
     PE,
     ELF,
+    MachO,
 }
 
 pub fn guess_exectype(path: &PathBuf) -> Result<ExecType, Box<dyn std::error::Error>> {
@@ -24,6 +26,10 @@ pub fn guess_exectype(path: &PathBuf) -> Result<ExecType, Box<dyn std::error::Er
         return Ok(ExecType::PE);
     }
 
+    if is_macho(&buffer) {
+        return Ok(ExecType::MachO);
+    }
+
     return Err("Cannot determine the executable type".into());
 }
 
@@ -31,4 +37,5 @@ pub fn guess_exectype(path: &PathBuf) -> Result<ExecType, Box<dyn std::error::Er
 pub enum Exec {
     PE(PE),
     ELF(ELF),
+    MachO(MachO),
 }

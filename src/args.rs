@@ -3,7 +3,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(version, about = "Parser/Dumper for portable executable files on Windows")]
+#[command(version, about = "Parser/Dumper for executable files (PE, ELF and Mach-O)")]
 pub struct Args {
     /// Opens the executable in the terminal-based user interface for exploration
     #[arg(long, short, default_value_t = false)]
@@ -92,6 +92,30 @@ pub struct Args {
     /// Dumps the ELF Notes, if any
     #[arg(long, default_value_t = false)]
     pub elf_notes: bool,
+
+    /*
+     * Mach-O
+     */
+
+    /// Dumps the Mach-O Fat (Universal) Header, if any
+    #[arg(long, default_value_t = false)]
+    pub macho_fat_header: bool,
+
+    /// Dumps the Mach-O Header of each architecture
+    #[arg(long, default_value_t = false)]
+    pub macho_header: bool,
+
+    /// Dumps the Mach-O Load Commands of each architecture
+    #[arg(long, default_value_t = false)]
+    pub macho_load_commands: bool,
+
+    /// Dumps the Mach-O Symbol Table of each architecture, if any
+    #[arg(long, default_value_t = false)]
+    pub macho_symbols: bool,
+
+    /// Dumps the Mach-O imported libraries and symbols of each architecture, if any
+    #[arg(long, default_value_t = false)]
+    pub macho_imports: bool,
 
     /*
      * Common
