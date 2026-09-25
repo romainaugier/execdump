@@ -173,7 +173,7 @@ Disassembly:
 ### Core
 
 Utilities:
-  - :clock9: C++ Symbol Demangler
+  - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC) and Rust legacy
   - :x: Known symbols loading (kernel32, user32, glibc...)
 
 Decompiler:

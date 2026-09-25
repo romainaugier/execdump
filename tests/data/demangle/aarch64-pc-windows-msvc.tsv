@@ -1,0 +1,102 @@
+?$TSS0@?1??with_local_static@ns@@YAHXZ@4HA	int `int __cdecl ns::with_local_static(void)'::`2'::$TSS0
+??$?RH@<lambda_0>@?0??with_lambda@ns@@YAHXZ@QEBA?A?<auto>@@H@Z	public: <auto> __cdecl `int __cdecl ns::with_lambda(void)'::`1'::<lambda_0>::operator()<int>(int) const
+??$array_ref@H$03@ns@@YAXAEAY03H@Z	void __cdecl ns::array_ref<int, 4>(int (&)[4])
+??$convert@M@?$Box@H@ns@@QEBAMM@Z	public: float __cdecl ns::Box<int>::convert<float>(float) const
+??$pack@$$V@ns@@YAXXZ	void __cdecl ns::pack<>(void)
+??$pack@HND@ns@@YAXHND@Z	void __cdecl ns::pack<int, double, char>(int, double, char)
+??$template_function@H@ns@@YAPEAHHAEBH@Z	int * __cdecl ns::template_function<int>(int, int const &)
+??$template_function@U?$Box@H@ns@@@ns@@YAPEAU?$Box@H@0@U10@AEBU10@@Z	struct ns::Box<int> * __cdecl ns::template_function<struct ns::Box<int>>(struct ns::Box<int>, struct ns::Box<int> const &)
+??0?$Box@H@ns@@QEAA@XZ	public: __cdecl ns::Box<int>::Box<int>(void)
+??0?$Box@U?$Box@N@ns@@@ns@@QEAA@XZ	public: __cdecl ns::Box<struct ns::Box<double>>::Box<struct ns::Box<double>>(void)
+??0Base@ns@@QEAA@XZ	public: __cdecl ns::Base::Base(void)
+??0Derived@ns@@QEAA@AEBU01@@Z	public: __cdecl ns::Derived::Derived(struct ns::Derived const &)
+??0Derived@ns@@QEAA@XZ	public: __cdecl ns::Derived::Derived(void)
+??0Virtual@ns@@QEAA@XZ	public: __cdecl ns::Virtual::Virtual(void)
+??1Base@ns@@UEAA@XZ	public: virtual __cdecl ns::Base::~Base(void)
+??1Derived@ns@@UEAA@XZ	public: virtual __cdecl ns::Derived::~Derived(void)
+??1DtorOnly@ns@@QEAA@XZ	public: __cdecl ns::DtorOnly::~DtorOnly(void)
+??1Virtual@ns@@UEAA@XZ	public: virtual __cdecl ns::Virtual::~Virtual(void)
+??2Derived@ns@@SAPEAX_K@Z	public: static void * __cdecl ns::Derived::operator new(unsigned __int64)
+??3@YAXPEAX@Z	void __cdecl operator delete(void *)
+??3Derived@ns@@SAXPEAX@Z	public: static void __cdecl ns::Derived::operator delete(void *)
+??4Derived@ns@@QEAAAEAU01@AEBU01@@Z	public: struct ns::Derived & __cdecl ns::Derived::operator=(struct ns::Derived const &)
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QEAAAEAU01@PEBD@Z	public: struct std::basic_ostream<char, struct std::char_traits<char>> & __cdecl std::basic_ostream<char, struct std::char_traits<char>>::operator<<(char const *)
+??7Derived@ns@@QEBA_NXZ	public: bool __cdecl ns::Derived::operator!(void) const
+??8Derived@ns@@QEBA_NAEBU01@@Z	public: bool __cdecl ns::Derived::operator==(struct ns::Derived const &) const
+??A?$vector@HU?$allocator@H@std@@@std@@QEAAAEAHK@Z	public: int & __cdecl std::vector<int, struct std::allocator<int>>::operator[](unsigned long)
+??ADerived@ns@@QEBAHH@Z	public: int __cdecl ns::Derived::operator[](int) const
+??BDerived@ns@@QEBAHXZ	public: int __cdecl ns::Derived::operator int(void) const
+??EDerived@ns@@QEAA?AU01@H@Z	public: struct ns::Derived __cdecl ns::Derived::operator++(int)
+??EDerived@ns@@QEAAAEAU01@XZ	public: struct ns::Derived & __cdecl ns::Derived::operator++(void)
+??GDerived@ns@@QEBA?AU01@XZ	public: struct ns::Derived __cdecl ns::Derived::operator-(void) const
+??JDerived@ns@@QEAAHH@Z	public: int __cdecl ns::Derived::operator->*(int)
+??R<lambda_1>@?0??with_lambda@ns@@YAHXZ@QEBA?A?<auto>@@H@Z	public: <auto> __cdecl `int __cdecl ns::with_lambda(void)'::`1'::<lambda_1>::operator()(int) const
+??RDerived@ns@@QEGAAHHD@Z	public: int __cdecl ns::Derived::operator()(int, char) &
+??RDerived@ns@@QEHAAHHD@Z	public: int __cdecl ns::Derived::operator()(int, char) &&
+??YDerived@ns@@QEAAAEAU01@H@Z	public: struct ns::Derived & __cdecl ns::Derived::operator+=(int)
+??_7Base@ns@@6B@	const ns::Base::`vftable'
+??_7Virtual@ns@@6B@	const ns::Virtual::`vftable'
+??_7type_info@@6B@	const type_info::`vftable'
+??_8Virtual@ns@@7B@	const ns::Virtual::`vbtable'
+??_C@_01FJMABOPO@x?$AA@	"x"
+??_C@_01MCMALHOG@a?$AA@	"a"
+??_C@_0M@LACCCNMM@hello?5world?$AA@	"hello world"
+??_DVirtual@ns@@QEAAXXZ	public: void __cdecl ns::Virtual::`vbase dtor'(void)
+??_GBase@ns@@UEAAPEAXI@Z	public: virtual void * __cdecl ns::Base::`scalar deleting dtor'(unsigned int)
+??_GVirtual@ns@@UEAAPEAXI@Z	public: virtual void * __cdecl ns::Virtual::`scalar deleting dtor'(unsigned int)
+??_R0?AUBase@ns@@@8	struct ns::Base `RTTI Type Descriptor'
+??_R0?AUVirtual@ns@@@8	struct ns::Virtual `RTTI Type Descriptor'
+??_R1A@?0A@EA@Base@ns@@8	ns::Base::`RTTI Base Class Descriptor at (0, -1, 0, 64)'
+??_R1A@?0A@EA@Virtual@ns@@8	ns::Virtual::`RTTI Base Class Descriptor at (0, -1, 0, 64)'
+??_R1A@A@3FA@Base@ns@@8	ns::Base::`RTTI Base Class Descriptor at (0, 0, 4, 80)'
+??_R2Base@ns@@8	ns::Base::`RTTI Base Class Array'
+??_R2Virtual@ns@@8	ns::Virtual::`RTTI Base Class Array'
+??_R3Base@ns@@8	ns::Base::`RTTI Class Hierarchy Descriptor'
+??_R3Virtual@ns@@8	ns::Virtual::`RTTI Class Hierarchy Descriptor'
+??_R4Base@ns@@6B@	const ns::Base::`RTTI Complete Object Locator'
+??_R4Virtual@ns@@6B@	const ns::Virtual::`RTTI Complete Object Locator'
+??__Eglobal_with_dtor@ns@@YAXXZ	void __cdecl `dynamic initializer for 'ns::global_with_dtor''(void)
+??__Fglobal_with_dtor@ns@@YAXXZ	void __cdecl `dynamic atexit destructor for 'ns::global_with_dtor''(void)
+?anonymous@?A0x932B6940@ns@@YAXXZ	void __cdecl ns::`anonymous namespace'::anonymous(void)
+?arr@?1??use_everything@@YAPEAXXZ@4PAHA	int *`void * __cdecl use_everything(void)'::`2'::arr
+?counter@Base@ns@@2HA	public: static int ns::Base::counter
+?dtor$53@?0??use_everything@@YAPEAXXZ@4HA	int `void * __cdecl use_everything(void)'::`1'::dtor$53
+?dtor$54@?0??use_everything@@YAPEAXXZ@4HA	int `void * __cdecl use_everything(void)'::`1'::dtor$54
+?dtor$55@?0??use_everything@@YAPEAXXZ@4HA	int `void * __cdecl use_everything(void)'::`1'::dtor$55
+?free_function@ns@@YAXXZ	void __cdecl ns::free_function(void)
+?function_pointer_noexcept@ns@@YAXP6AXX_E@Z	void __cdecl ns::function_pointer_noexcept(void (__cdecl *)(void) noexcept)
+?get@?$Box@H@ns@@QEBAHXZ	public: int __cdecl ns::Box<int>::get(void) const
+?get@?$Box@U?$Box@N@ns@@@ns@@QEBA?AU?$Box@N@2@XZ	public: struct ns::Box<double> __cdecl ns::Box<struct ns::Box<double>>::get(void) const
+?get@Local@?1??with_local_static@ns@@YAHXZ@SAHXZ	public: static int __cdecl `int __cdecl ns::with_local_static(void)'::`2'::Local::get(void)
+?global@ns@@3HA	int ns::global
+?global_array@ns@@3PAHA	int *ns::global_array
+?global_with_dtor@ns@@3UDtorOnly@1@A	struct ns::DtorOnly ns::global_with_dtor
+?inline_namespace@v1@ns@@YAXXZ	void __cdecl ns::v1::inline_namespace(void)
+?instance@?$Box@D@ns@@2DA	public: static char ns::Box<char>::instance
+?local@?1??with_local_static@ns@@YAHXZ@4HA	int `int __cdecl ns::with_local_static(void)'::`2'::local
+?noexcept_function@ns@@YAHXZ	int __cdecl ns::noexcept_function(void)
+?overloaded@ns@@YAX$$T@Z	void __cdecl ns::overloaded(std::nullptr_t)
+?overloaded@ns@@YAXAEAH$$QEAHAEBH@Z	void __cdecl ns::overloaded(int &, int &&, int const &)
+?overloaded@ns@@YAXAEAY03HPEAY134H@Z	void __cdecl ns::overloaded(int (&)[4], int (*)[4][5])
+?overloaded@ns@@YAXAEBU?$basic_string@DU?$char_traits@D@std@@U?$allocator@D@2@@std@@AEAU?$basic_ostream@DU?$char_traits@D@std@@@3@@Z	void __cdecl ns::overloaded(struct std::basic_string<char, struct std::char_traits<char>, struct std::allocator<char>> const &, struct std::basic_ostream<char, struct std::char_traits<char>> &)
+?overloaded@ns@@YAXDCEFG@Z	void __cdecl ns::overloaded(char, signed char, unsigned char, short, unsigned short)
+?overloaded@ns@@YAXH@Z	void __cdecl ns::overloaded(int)
+?overloaded@ns@@YAXI_J_K@Z	void __cdecl ns::overloaded(unsigned int, __int64, unsigned __int64)
+?overloaded@ns@@YAXMNO_N_W@Z	void __cdecl ns::overloaded(float, double, long double, bool, wchar_t)
+?overloaded@ns@@YAXP6AHD@ZP8Base@1@EAAXXZPEQ21@H@Z	void __cdecl ns::overloaded(int (__cdecl *)(char), void (__cdecl ns::Base::*)(void), int ns::Base::*)
+?overloaded@ns@@YAXPEBDPECHPEDX@Z	void __cdecl ns::overloaded(char const *, int volatile *, void const volatile *)
+?overloaded@ns@@YAXU?$Int@$0A@@1@U?$Int@$0?0@1@U?$Int@$0CK@@1@U?$Bool@$00@1@U?$Ptr@$1?global@ns@@3HA@1@@Z	void __cdecl ns::overloaded(struct ns::Int<0>, struct ns::Int<-1>, struct ns::Int<42>, struct ns::Bool<1>, struct ns::Ptr<&int ns::global>)
+?overloaded@ns@@YAXU?$vector@HU?$allocator@H@std@@@std@@U?$vector@U?$vector@U?$Box@H@ns@@U?$allocator@U?$Box@H@ns@@@std@@@std@@U?$allocator@U?$vector@U?$Box@H@ns@@U?$allocator@U?$Box@H@ns@@@std@@@std@@@2@@3@@Z	void __cdecl ns::overloaded(struct std::vector<int, struct std::allocator<int>>, struct std::vector<struct std::vector<struct ns::Box<int>, struct std::allocator<struct ns::Box<int>>>, struct std::allocator<struct std::vector<struct ns::Box<int>, struct std::allocator<struct ns::Box<int>>>>>)
+?overloaded@ns@@YAXW4Color@1@W4Scoped@1@TUnion@1@@Z	void __cdecl ns::overloaded(enum ns::Color, enum ns::Scoped, union ns::Union)
+?overloaded@ns@@YAX_S_U@Z	void __cdecl ns::overloaded(char16_t, char32_t)
+?push_back@?$vector@HU?$allocator@H@std@@@std@@QEAAXAEBH@Z	public: void __cdecl std::vector<int, struct std::allocator<int>>::push_back(int const &)
+?static_method@Derived@ns@@SAXXZ	public: static void __cdecl ns::Derived::static_method(void)
+?string_literal@ns@@YAPEBDXZ	char const * __cdecl ns::string_literal(void)
+?trailing@ns@@YAHH@Z	int __cdecl ns::trailing(int)
+?use_everything@@YAPEAXXZ	void * __cdecl use_everything(void)
+?value@Base@ns@@UEBAHXZ	public: virtual int __cdecl ns::Base::value(void) const
+?value@Virtual@ns@@UEBAHXZ	public: virtual int __cdecl ns::Virtual::value(void) const
+?variadic@ns@@YAXHZZ	void __cdecl ns::variadic(int, ...)
+?volatile_method@Derived@ns@@QECAXXZ	public: void __cdecl ns::Derived::volatile_method(void) volatile
+?with_lambda@ns@@YAHXZ	int __cdecl ns::with_lambda(void)
+?with_local_static@ns@@YAHXZ	int __cdecl ns::with_local_static(void)

@@ -1,0 +1,737 @@
+_ZGVNSt10moneypunctIwLb0EE2idE@@GLIBCXX_3.4	guard variable for std::moneypunct<wchar_t, false>::id@@GLIBCXX_3.4
+_ZGVNSt7__cxx117collateIcE2idE@@GLIBCXX_3.4.21	guard variable for std::__cxx11::collate<char>::id@@GLIBCXX_3.4.21
+_ZGVNSt7__cxx119money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE2idE@@GLIBCXX_3.4.21	guard variable for std::__cxx11::money_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::id@@GLIBCXX_3.4.21
+_ZGVNSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE2idE@@GLIBCXX_3.4	guard variable for std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::id@@GLIBCXX_3.4
+_ZGVNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE2idE@@GLIBCXX_3.4	guard variable for std::time_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::id@@GLIBCXX_3.4
+_ZN10__cxxabiv116__enum_type_infoD2Ev@@CXXABI_1.3	__cxxabiv1::__enum_type_info::~__enum_type_info()@@CXXABI_1.3
+_ZN10__cxxabiv117__pbase_type_infoD1Ev@@CXXABI_1.3	__cxxabiv1::__pbase_type_info::~__pbase_type_info()@@CXXABI_1.3
+_ZN10__cxxabiv120__si_class_type_infoD0Ev@@CXXABI_1.3	__cxxabiv1::__si_class_type_info::~__si_class_type_info()@@CXXABI_1.3
+_ZN10__cxxabiv123__fundamental_type_infoD2Ev@@CXXABI_1.3	__cxxabiv1::__fundamental_type_info::~__fundamental_type_info()@@CXXABI_1.3
+_ZN10__gnu_norm15_List_node_base8transferEPS0_S1_@@GLIBCXX_3.4	__gnu_norm::_List_node_base::transfer(__gnu_norm::_List_node_base*, __gnu_norm::_List_node_base*)@@GLIBCXX_3.4
+_ZN11__gnu_debug19_Safe_sequence_base18_M_detach_singularEv@@GLIBCXX_3.4	__gnu_debug::_Safe_sequence_base::_M_detach_singular()@@GLIBCXX_3.4
+_ZN14__gnu_parallel9_Settings3getEv@@GLIBCXX_3.4.10	__gnu_parallel::_Settings::get()@@GLIBCXX_3.4.10
+_ZN9__gnu_cxx18stdio_sync_filebufIcSt11char_traitsIcEE4syncEv@@GLIBCXX_3.4.10	__gnu_cxx::stdio_sync_filebuf<char, std::char_traits<char>>::sync()@@GLIBCXX_3.4.10
+_ZN9__gnu_cxx18stdio_sync_filebufIcSt11char_traitsIcEE9underflowEv@@GLIBCXX_3.4.10	__gnu_cxx::stdio_sync_filebuf<char, std::char_traits<char>>::underflow()@@GLIBCXX_3.4.10
+_ZN9__gnu_cxx18stdio_sync_filebufIwSt11char_traitsIwEE4fileEv@@GLIBCXX_3.4.2	__gnu_cxx::stdio_sync_filebuf<wchar_t, std::char_traits<wchar_t>>::file()@@GLIBCXX_3.4.2
+_ZN9__gnu_cxx18stdio_sync_filebufIwSt11char_traitsIwEE9pbackfailEj@@GLIBCXX_3.4.10	__gnu_cxx::stdio_sync_filebuf<wchar_t, std::char_traits<wchar_t>>::pbackfail(unsigned int)@@GLIBCXX_3.4.10
+_ZN9__gnu_cxx18stdio_sync_filebufIwSt11char_traitsIwEEaSEOS3_@@GLIBCXX_3.4.21	__gnu_cxx::stdio_sync_filebuf<wchar_t, std::char_traits<wchar_t>>::operator=(__gnu_cxx::stdio_sync_filebuf<wchar_t, std::char_traits<wchar_t>>&&)@@GLIBCXX_3.4.21
+_ZN9__gnu_cxx6__poolILb1EE13_M_initializeEv@@GLIBCXX_3.4.6	__gnu_cxx::__pool<true>::_M_initialize()@@GLIBCXX_3.4.6
+_ZNK10__cxxabiv117__class_type_info10__do_catchEPKSt9type_infoPPvj@@CXXABI_1.3	__cxxabiv1::__class_type_info::__do_catch(std::type_info const*, void**, unsigned int) const@@CXXABI_1.3
+_ZNK10__cxxabiv119__pointer_type_info15__pointer_catchEPKNS_17__pbase_type_infoEPPvj@@CXXABI_1.3	__cxxabiv1::__pointer_type_info::__pointer_catch(__cxxabiv1::__pbase_type_info const*, void**, unsigned int) const@@CXXABI_1.3
+_ZNK10__cxxabiv129__pointer_to_member_type_info15__pointer_catchEPKNS_17__pbase_type_infoEPPvj@@CXXABI_1.3	__cxxabiv1::__pointer_to_member_type_info::__pointer_catch(__cxxabiv1::__pbase_type_info const*, void**, unsigned int) const@@CXXABI_1.3
+_ZNK11__gnu_debug19_Safe_iterator_base11_M_singularEv@@GLIBCXX_3.4	__gnu_debug::_Safe_iterator_base::_M_singular() const@@GLIBCXX_3.4
+_ZNKRSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEE3strEv@@GLIBCXX_3.4.29	std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>::str() const &@@GLIBCXX_3.4.29
+_ZNKSbIwSt11char_traitsIwESaIwEE13find_first_ofEPKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find_first_of(wchar_t const*, unsigned long) const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE16find_last_not_ofEPKwmm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find_last_not_of(wchar_t const*, unsigned long, unsigned long) const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE3endEv@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::end() const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE4findEPKwmm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find(wchar_t const*, unsigned long, unsigned long) const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE5emptyEv@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::empty() const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE6lengthEv@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::length() const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE7compareEmmPKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::compare(unsigned long, unsigned long, wchar_t const*, unsigned long) const@@GLIBCXX_3.4
+_ZNKSbIwSt11char_traitsIwESaIwEE9_M_ibeginEv@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_ibegin() const@@GLIBCXX_3.4
+_ZNKSs12find_last_ofEPKcm@@GLIBCXX_3.4	std::string::find_last_of(char const*, unsigned long) const@@GLIBCXX_3.4
+_ZNKSs13get_allocatorEv@@GLIBCXX_3.4	std::string::get_allocator() const@@GLIBCXX_3.4
+_ZNKSs17find_first_not_ofEPKcmm@@GLIBCXX_3.4	std::string::find_first_not_of(char const*, unsigned long, unsigned long) const@@GLIBCXX_3.4
+_ZNKSs4cendEv@@GLIBCXX_3.4.14	std::string::cend() const@@GLIBCXX_3.4.14
+_ZNKSs4sizeEv@@GLIBCXX_3.4	std::string::size() const@@GLIBCXX_3.4
+_ZNKSs5rfindERKSsm@@GLIBCXX_3.4	std::string::rfind(std::string const&, unsigned long) const@@GLIBCXX_3.4
+_ZNKSs7_M_iendEv@@GLIBCXX_3.4	std::string::_M_iend() const@@GLIBCXX_3.4
+_ZNKSs8_M_checkEmPKc@@GLIBCXX_3.4	std::string::_M_check(unsigned long, char const*) const@@GLIBCXX_3.4
+_ZNKSt10error_code23default_error_conditionEv@@GLIBCXX_3.4.11	std::error_code::default_error_condition() const@@GLIBCXX_3.4.11
+_ZNKSt10filesystem28recursive_directory_iteratordeEv@@GLIBCXX_3.4.26	std::filesystem::recursive_directory_iterator::operator*() const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem4path16lexically_normalEv@@GLIBCXX_3.4.26	std::filesystem::path::lexically_normal() const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem4path5_List5beginEv@@GLIBCXX_3.4.26	std::filesystem::path::_List::begin() const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem7__cxx1118directory_iteratordeEv@@GLIBCXX_3.4.26	std::filesystem::__cxx11::directory_iterator::operator*() const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem7__cxx114path13has_root_pathEv@@GLIBCXX_3.4.26	std::filesystem::__cxx11::path::has_root_path() const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem7__cxx114path18lexically_relativeERKS1_@@GLIBCXX_3.4.26	std::filesystem::__cxx11::path::lexically_relative(std::filesystem::__cxx11::path const&) const@@GLIBCXX_3.4.26
+_ZNKSt10filesystem7__cxx114path9root_pathEv@@GLIBCXX_3.4.26	std::filesystem::__cxx11::path::root_path() const@@GLIBCXX_3.4.26
+_ZNKSt10moneypunctIcLb0EE13decimal_pointEv@@GLIBCXX_3.4	std::moneypunct<char, false>::decimal_point() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIcLb0EE16do_decimal_pointEv@@GLIBCXX_3.4	std::moneypunct<char, false>::do_decimal_point() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIcLb1EE11do_groupingEv@@GLIBCXX_3.4	std::moneypunct<char, true>::do_grouping() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIcLb1EE14do_curr_symbolEv@@GLIBCXX_3.4	std::moneypunct<char, true>::do_curr_symbol() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIwLb0EE10pos_formatEv@@GLIBCXX_3.4	std::moneypunct<wchar_t, false>::pos_format() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIwLb0EE13positive_signEv@@GLIBCXX_3.4	std::moneypunct<wchar_t, false>::positive_sign() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIwLb0EE8groupingEv@@GLIBCXX_3.4	std::moneypunct<wchar_t, false>::grouping() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIwLb1EE13do_pos_formatEv@@GLIBCXX_3.4	std::moneypunct<wchar_t, true>::do_pos_format() const@@GLIBCXX_3.4
+_ZNKSt10moneypunctIwLb1EE16do_positive_signEv@@GLIBCXX_3.4	std::moneypunct<wchar_t, true>::do_positive_sign() const@@GLIBCXX_3.4
+_ZNKSt11__timepunctIcE15_M_time_formatsEPPKc@@GLIBCXX_3.4	std::__timepunct<char>::_M_time_formats(char const**) const@@GLIBCXX_3.4
+_ZNKSt11__timepunctIwE15_M_am_pm_formatEPKw@@GLIBCXX_3.4	std::__timepunct<wchar_t>::_M_am_pm_format(wchar_t const*) const@@GLIBCXX_3.4
+_ZNKSt11__timepunctIwE7_M_daysEPPKw@@GLIBCXX_3.4	std::__timepunct<wchar_t>::_M_days(wchar_t const**) const@@GLIBCXX_3.4
+_ZNKSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EEcvbEv@@GLIBCXX_3.4.31	std::__shared_ptr<std::filesystem::__cxx11::recursive_directory_iterator::_Dir_stack, (__gnu_cxx::_Lock_policy)2>::operator bool() const@@GLIBCXX_3.4.31
+_ZNKSt13basic_fstreamIcSt11char_traitsIcEE5rdbufEv@@GLIBCXX_3.4	std::basic_fstream<char, std::char_traits<char>>::rdbuf() const@@GLIBCXX_3.4
+_ZNKSt13basic_ostreamIwSt11char_traitsIwEE6sentrycvbEv@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::sentry::operator bool() const@@GLIBCXX_3.4
+_ZNKSt14basic_ifstreamIwSt11char_traitsIwEE7is_openEv@GLIBCXX_3.4	std::basic_ifstream<wchar_t, std::char_traits<wchar_t>>::is_open() const@GLIBCXX_3.4
+_ZNKSt14error_category10equivalentEiRKSt15error_condition@@GLIBCXX_3.4.11	std::error_category::equivalent(int, std::error_condition const&) const@@GLIBCXX_3.4.11
+_ZNKSt15basic_streambufIcSt11char_traitsIcEE5egptrEv@@GLIBCXX_3.4	std::basic_streambuf<char, std::char_traits<char>>::egptr() const@@GLIBCXX_3.4
+_ZNKSt15basic_streambufIwSt11char_traitsIwEE5epptrEv@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::epptr() const@@GLIBCXX_3.4
+_ZNKSt18basic_stringstreamIcSt11char_traitsIcESaIcEE5rdbufEv@@GLIBCXX_3.4	std::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::rdbuf() const@@GLIBCXX_3.4
+_ZNKSt19__codecvt_utf8_baseIDiE6do_outER11__mbstate_tPKDiS4_RS4_PcS6_RS6_@@GLIBCXX_3.4.21	std::__codecvt_utf8_base<char32_t>::do_out(__mbstate_t&, char32_t const*, char32_t const*, char32_t const*&, char*, char*, char*&) const@@GLIBCXX_3.4.21
+_ZNKSt19__codecvt_utf8_baseIDsE9do_lengthER11__mbstate_tPKcS4_m@@GLIBCXX_3.4.21	std::__codecvt_utf8_base<char16_t>::do_length(__mbstate_t&, char const*, char const*, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt19basic_istringstreamIcSt11char_traitsIcESaIcEE3strEv@@GLIBCXX_3.4	std::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::str() const@@GLIBCXX_3.4
+_ZNKSt20__codecvt_utf16_baseIDiE10do_unshiftER11__mbstate_tPcS3_RS3_@@GLIBCXX_3.4.21	std::__codecvt_utf16_base<char32_t>::do_unshift(__mbstate_t&, char*, char*, char*&) const@@GLIBCXX_3.4.21
+_ZNKSt20__codecvt_utf16_baseIDsE11do_encodingEv@@GLIBCXX_3.4.21	std::__codecvt_utf16_base<char16_t>::do_encoding() const@@GLIBCXX_3.4.21
+_ZNKSt20__codecvt_utf16_baseIwE13do_max_lengthEv@@GLIBCXX_3.4.21	std::__codecvt_utf16_base<wchar_t>::do_max_length() const@@GLIBCXX_3.4.21
+_ZNKSt25__codecvt_utf8_utf16_baseIDiE13do_max_lengthEv@@GLIBCXX_3.4.21	std::__codecvt_utf8_utf16_base<char32_t>::do_max_length() const@@GLIBCXX_3.4.21
+_ZNKSt25__codecvt_utf8_utf16_baseIDsE16do_always_noconvEv@@GLIBCXX_3.4.21	std::__codecvt_utf8_utf16_base<char16_t>::do_always_noconv() const@@GLIBCXX_3.4.21
+_ZNKSt25__codecvt_utf8_utf16_baseIwE5do_inER11__mbstate_tPKcS4_RS4_PwS6_RS6_@@GLIBCXX_3.4.21	std::__codecvt_utf8_utf16_base<wchar_t>::do_in(__mbstate_t&, char const*, char const*, char const*&, wchar_t*, wchar_t*, wchar_t*&) const@@GLIBCXX_3.4.21
+_ZNKSt3tr14hashINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEEclES6_@@GLIBCXX_3.4.21	std::tr1::hash<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>::operator()(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>) const@@GLIBCXX_3.4.21
+_ZNKSt4hashIRKSsEclES1_@@GLIBCXX_3.4.10	std::hash<std::string const&>::operator()(std::string const&) const@@GLIBCXX_3.4.10
+_ZNKSt5ctypeIcE10do_toupperEc@@GLIBCXX_3.4	std::ctype<char>::do_toupper(char) const@@GLIBCXX_3.4
+_ZNKSt5ctypeIwE10do_tolowerEPwPKw@@GLIBCXX_3.4	std::ctype<wchar_t>::do_tolower(wchar_t*, wchar_t const*) const@@GLIBCXX_3.4
+_ZNKSt5ctypeIwE8do_widenEPKcS2_Pw@@GLIBCXX_3.4	std::ctype<wchar_t>::do_widen(char const*, char const*, wchar_t*) const@@GLIBCXX_3.4
+_ZNKSt6chrono9tzdb_list14const_iteratordeEv@@GLIBCXX_3.4.31	std::chrono::tzdb_list::const_iterator::operator*() const@@GLIBCXX_3.4.31
+_ZNKSt7__cxx1110moneypunctIcLb0EE10pos_formatEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, false>::pos_format() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIcLb0EE13positive_signEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, false>::positive_sign() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIcLb0EE8groupingEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, false>::grouping() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIcLb1EE13do_pos_formatEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, true>::do_pos_format() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIcLb1EE16do_positive_signEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, true>::do_positive_sign() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIwLb0EE13decimal_pointEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, false>::decimal_point() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIwLb0EE16do_decimal_pointEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, false>::do_decimal_point() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIwLb1EE11do_groupingEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, true>::do_grouping() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1110moneypunctIwLb1EE14do_curr_symbolEv@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, true>::do_curr_symbol() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE11_M_is_localEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_is_local() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13find_first_ofERKS4_m@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::find_first_of(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE16find_last_not_ofEcm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::find_last_not_of(char, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4cendEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::cend() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4sizeEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::size() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5rfindERKS4_m@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::rfind(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareERKS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::compare(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE8capacityEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::capacity() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE12find_last_ofERKS4_m@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find_last_of(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE15_M_check_lengthEmmPKc@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_check_length(unsigned long, unsigned long, char const*) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE17find_first_not_ofERKS4_m@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find_first_not_of(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE4findEPKwm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::find(wchar_t const*, unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE5crendEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::crend() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE6lengthEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::length() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE7compareEmmRKS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::compare(unsigned long, unsigned long, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEixEm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::operator[](unsigned long) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEE4viewEv@@GLIBCXX_3.4.29	std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::view() const@@GLIBCXX_3.4.29
+_ZNKSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEE3strEv@@GLIBCXX_3.4.21	std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::str() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx1119basic_ostringstreamIwSt11char_traitsIwESaIwEE5rdbufEv@@GLIBCXX_3.4.21	std::__cxx11::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::rdbuf() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx117collateIcE9transformEPKcS3_@@GLIBCXX_3.4.21	std::__cxx11::collate<char>::transform(char const*, char const*) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx117collateIwE9transformEPKwS3_@@GLIBCXX_3.4.21	std::__cxx11::collate<wchar_t>::transform(wchar_t const*, wchar_t const*) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118messagesIcE7do_openERKNS_12basic_stringIcSt11char_traitsIcESaIcEEERKSt6locale@@GLIBCXX_3.4.21	std::__cxx11::messages<char>::do_open(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::locale const&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118messagesIwE6do_getEiiiRKNS_12basic_stringIwSt11char_traitsIwESaIwEEE@@GLIBCXX_3.4.21	std::__cxx11::messages<wchar_t>::do_get(int, int, int, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118numpunctIcE16do_decimal_pointEv@@GLIBCXX_3.4.21	std::__cxx11::numpunct<char>::do_decimal_point() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118numpunctIwE13decimal_pointEv@@GLIBCXX_3.4.21	std::__cxx11::numpunct<wchar_t>::decimal_point() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE11do_get_dateES4_S4_RSt8ios_baseRSt12_Ios_IostateP2tm@@GLIBCXX_3.4.21	std::__cxx11::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::do_get_date(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, tm*) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE15_M_extract_nameES4_S4_RiPPKcmRSt8ios_baseRSt12_Ios_Iostate@@GLIBCXX_3.4.21	std::__cxx11::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::_M_extract_name(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, int&, char const**, unsigned long, std::ios_base&, std::_Ios_Iostate&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE8get_dateES4_S4_RSt8ios_baseRSt12_Ios_IostateP2tm@@GLIBCXX_3.4.21	std::__cxx11::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::get_date(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, tm*) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE13do_date_orderEv@@GLIBCXX_3.4.21	std::__cxx11::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::do_date_order() const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx118time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE24_M_extract_wday_or_monthES4_S4_RiPPKwmRSt8ios_baseRSt12_Ios_Iostate@@GLIBCXX_3.4.21	std::__cxx11::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::_M_extract_wday_or_month(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, int&, wchar_t const**, unsigned long, std::ios_base&, std::_Ios_Iostate&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx119money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE10_M_extractILb1EEES4_S4_S4_RSt8ios_baseRSt12_Ios_IostateRNS_12basic_stringIcS3_SaIcEEE@@GLIBCXX_3.4.21	std::istreambuf_iterator<char, std::char_traits<char>> std::__cxx11::money_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::_M_extract<true>(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx119money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE3getES4_S4_bRSt8ios_baseRSt12_Ios_IostateRe@@GLIBCXX_3.4.21	std::__cxx11::money_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::get(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, bool, std::ios_base&, std::_Ios_Iostate&, long double&) const@@GLIBCXX_3.4.21
+_ZNKSt7__cxx119money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE9_M_insertILb1EEES4_S4_RSt8ios_basecRKNS_12basic_stringIcS3_SaIcEEE@@GLIBCXX_3.4.21	std::ostreambuf_iterator<char, std::char_traits<char>> std::__cxx11::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::_M_insert<true>(std::ostreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, char, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&) const@@GLIBCXX_3.4.21
+_ZNKSt7codecvtIDiDu11__mbstate_tE11do_encodingEv@@GLIBCXX_3.4.26	std::codecvt<char32_t, char8_t, __mbstate_t>::do_encoding() const@@GLIBCXX_3.4.26
+_ZNKSt7codecvtIDic11__mbstate_tE13do_max_lengthEv@@GLIBCXX_3.4.21	std::codecvt<char32_t, char, __mbstate_t>::do_max_length() const@@GLIBCXX_3.4.21
+_ZNKSt7codecvtIDsDu11__mbstate_tE16do_always_noconvEv@@GLIBCXX_3.4.26	std::codecvt<char16_t, char8_t, __mbstate_t>::do_always_noconv() const@@GLIBCXX_3.4.26
+_ZNKSt7codecvtIDsc11__mbstate_tE5do_inERS0_PKcS4_RS4_PDsS6_RS6_@@GLIBCXX_3.4.21	std::codecvt<char16_t, char, __mbstate_t>::do_in(__mbstate_t&, char const*, char const*, char const*&, char16_t*, char16_t*, char16_t*&) const@@GLIBCXX_3.4.21
+_ZNKSt7codecvtIcc11__mbstate_tE6do_outERS0_PKcS4_RS4_PcS6_RS6_@@GLIBCXX_3.4	std::codecvt<char, char, __mbstate_t>::do_out(__mbstate_t&, char const*, char const*, char const*&, char*, char*, char*&) const@@GLIBCXX_3.4
+_ZNKSt7codecvtIwc11__mbstate_tE9do_lengthERS0_PKcS4_m@@GLIBCXX_3.4	std::codecvt<wchar_t, char, __mbstate_t>::do_length(__mbstate_t&, char const*, char const*, unsigned long) const@@GLIBCXX_3.4
+_ZNKSt7collateIcE9transformEPKcS2_@@GLIBCXX_3.4	std::collate<char>::transform(char const*, char const*) const@@GLIBCXX_3.4
+_ZNKSt7collateIwE9transformEPKwS2_@@GLIBCXX_3.4	std::collate<wchar_t>::transform(wchar_t const*, wchar_t const*) const@@GLIBCXX_3.4
+_ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE3getES3_S3_RSt8ios_baseRSt12_Ios_IostateRPv@@GLIBCXX_3.4	std::num_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::get(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, void*&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE3getES3_S3_RSt8ios_baseRSt12_Ios_IostateRt@@GLIBCXX_3.4	std::num_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::get(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, unsigned short&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRSt12_Ios_IostateRj@@GLIBCXX_3.4	std::num_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::do_get(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, unsigned int&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE14_M_extract_intImEES3_S3_S3_RSt8ios_baseRSt12_Ios_IostateRT_@@GLIBCXX_3.4	std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>> std::num_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::_M_extract_int<unsigned long>(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, unsigned long&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE3getES3_S3_RSt8ios_baseRSt12_Ios_IostateRe@@GLIBCXX_3.4	std::num_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::get(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, long double&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRSt12_Ios_IostateRPv@@GLIBCXX_3.4	std::num_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::do_get(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, void*&) const@@GLIBCXX_3.4
+_ZNKSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_RSt8ios_baseRSt12_Ios_IostateRt@@GLIBCXX_3.4	std::num_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::do_get(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, unsigned short&) const@@GLIBCXX_3.4
+_ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE14_M_group_floatEPKcmcS6_PcS7_Ri@@GLIBCXX_3.4	std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::_M_group_float(char const*, unsigned long, char, char const*, char*, char*, int&) const@@GLIBCXX_3.4
+_ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE3putES3_RSt8ios_basecm@@GLIBCXX_3.4	std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::put(std::ostreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, char, unsigned long) const@@GLIBCXX_3.4
+_ZNKSt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE6do_putES3_RSt8ios_basecl@@GLIBCXX_3.4	std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::do_put(std::ostreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, char, long) const@@GLIBCXX_3.4
+_ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE13_M_insert_intIyEES3_S3_RSt8ios_basewT_@@GLIBCXX_3.4	std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>> std::num_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::_M_insert_int<unsigned long long>(std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, wchar_t, unsigned long long) const@@GLIBCXX_3.4
+_ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE3putES3_RSt8ios_basewl@@GLIBCXX_3.4	std::num_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::put(std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, wchar_t, long) const@@GLIBCXX_3.4
+_ZNKSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE6do_putES3_RSt8ios_basewe@@GLIBCXX_3.4	std::num_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::do_put(std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, wchar_t, long double) const@@GLIBCXX_3.4
+_ZNKSt8ios_base7failure4whatEv@@GLIBCXX_3.4	std::ios_base::failure::what() const@@GLIBCXX_3.4
+_ZNKSt8messagesIcE6do_getEiiiRKSs@@GLIBCXX_3.4	std::messages<char>::do_get(int, int, int, std::string const&) const@@GLIBCXX_3.4
+_ZNKSt8messagesIwE5closeEi@@GLIBCXX_3.4	std::messages<wchar_t>::close(int) const@@GLIBCXX_3.4
+_ZNKSt8numpunctIcE13thousands_sepEv@@GLIBCXX_3.4	std::numpunct<char>::thousands_sep() const@@GLIBCXX_3.4
+_ZNKSt8numpunctIwE12do_falsenameEv@@GLIBCXX_3.4	std::numpunct<wchar_t>::do_falsename() const@@GLIBCXX_3.4
+_ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE10date_orderEv@@GLIBCXX_3.4	std::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::date_order() const@@GLIBCXX_3.4
+_ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE14do_get_weekdayES3_S3_RSt8ios_baseRSt12_Ios_IostateP2tm@@GLIBCXX_3.4	std::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::do_get_weekday(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, tm*) const@@GLIBCXX_3.4
+_ZNKSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE6do_getES3_S3_RSt8ios_baseRSt12_Ios_IostateP2tmcc@@GLIBCXX_3.4.21	std::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::do_get(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, std::_Ios_Iostate&, tm*, char, char) const@@GLIBCXX_3.4.21
+_ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE11get_weekdayES3_S3_RSt8ios_baseRSt12_Ios_IostateP2tm@@GLIBCXX_3.4	std::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::get_weekday(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, tm*) const@@GLIBCXX_3.4
+_ZNKSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE21_M_extract_via_formatES3_S3_RSt8ios_baseRSt12_Ios_IostateP2tmPKwRSt16__time_get_state@@GLIBCXX_3.4.30	std::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::_M_extract_via_format(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::ios_base&, std::_Ios_Iostate&, tm*, wchar_t const*, std::__time_get_state&) const@@GLIBCXX_3.4.30
+_ZNKSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE3putES3_RSt8ios_basecPK2tmPKcSB_@@GLIBCXX_3.4	std::time_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::put(std::ostreambuf_iterator<char, std::char_traits<char>>, std::ios_base&, char, tm const*, char const*, char const*) const@@GLIBCXX_3.4
+_ZNKSt9basic_iosIcSt11char_traitsIcEE10exceptionsEv@@GLIBCXX_3.4	std::basic_ios<char, std::char_traits<char>>::exceptions() const@@GLIBCXX_3.4
+_ZNKSt9basic_iosIcSt11char_traitsIcEE5widenEc@@GLIBCXX_3.4	std::basic_ios<char, std::char_traits<char>>::widen(char) const@@GLIBCXX_3.4
+_ZNKSt9basic_iosIwSt11char_traitsIwEE3eofEv@@GLIBCXX_3.4	std::basic_ios<wchar_t, std::char_traits<wchar_t>>::eof() const@@GLIBCXX_3.4
+_ZNKSt9basic_iosIwSt11char_traitsIwEE7rdstateEv@@GLIBCXX_3.4	std::basic_ios<wchar_t, std::char_traits<wchar_t>>::rdstate() const@@GLIBCXX_3.4
+_ZNKSt9money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE3getES3_S3_bRSt8ios_baseRSt12_Ios_IostateRe@@GLIBCXX_3.4	std::money_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::get(std::istreambuf_iterator<char, std::char_traits<char>>, std::istreambuf_iterator<char, std::char_traits<char>>, bool, std::ios_base&, std::_Ios_Iostate&, long double&) const@@GLIBCXX_3.4
+_ZNKSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE6do_getES3_S3_bRSt8ios_baseRSt12_Ios_IostateRe@@GLIBCXX_3.4	std::money_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::do_get(std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, bool, std::ios_base&, std::_Ios_Iostate&, long double&) const@@GLIBCXX_3.4
+_ZNKSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE3putES3_bRSt8ios_basewe@@GLIBCXX_3.4	std::money_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::put(std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>, bool, std::ios_base&, wchar_t, long double) const@@GLIBCXX_3.4
+_ZNKSt9type_info11__do_upcastEPKN10__cxxabiv117__class_type_infoEPPv@@GLIBCXX_3.4	std::type_info::__do_upcast(__cxxabiv1::__class_type_info const*, void**) const@@GLIBCXX_3.4
+_ZNOSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEE3strEv@@GLIBCXX_3.4.29	std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::str() &&@@GLIBCXX_3.4.29
+_ZNSaIcED2Ev@@GLIBCXX_3.4	std::allocator<char>::~allocator()@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE12_Alloc_hiderC1EPwRKS1_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_Alloc_hider::_Alloc_hider(wchar_t*, std::allocator<wchar_t> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE12__sv_wrapperC1ESt17basic_string_viewIwS0_E@@GLIBCXX_3.4.26	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::__sv_wrapper::__sv_wrapper(std::basic_string_view<wchar_t, std::char_traits<wchar_t>>)@@GLIBCXX_3.4.26
+_ZNSbIwSt11char_traitsIwESaIwEE15_M_replace_safeEmmPKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_replace_safe(unsigned long, unsigned long, wchar_t const*, unsigned long)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE4_Rep10_M_refdataEv@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_Rep::_M_refdata()@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE4_Rep26_M_set_length_and_sharableEm@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_Rep::_M_set_length_and_sharable(unsigned long)@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE4swapERS2_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::swap(std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE6appendEPKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::append(wchar_t const*, unsigned long)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE6assignERKS2_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::assign(std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE6insertEmPKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::insert(unsigned long, wchar_t const*, unsigned long)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE7_M_copyEPwPKwm@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_copy(wchar_t*, wchar_t const*, unsigned long)@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPwS2_EES6_PKwm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::replace(__gnu_cxx::__normal_iterator<wchar_t*, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, wchar_t const*, unsigned long)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE7replaceEmmRKS2_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::replace(unsigned long, unsigned long, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEE9_M_mutateEmmm@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_mutate(unsigned long, unsigned long, unsigned long)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEEC1ERKS2_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string(std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEEC1IN9__gnu_cxx17__normal_iteratorIPwS2_EEEET_S8_RKS1_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string<__gnu_cxx::__normal_iterator<wchar_t*, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>>(__gnu_cxx::__normal_iterator<wchar_t*, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, std::allocator<wchar_t> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEEC2ERKS1_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string(std::allocator<wchar_t> const&)@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEEC2Ev@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string()@@GLIBCXX_3.4
+_ZNSbIwSt11char_traitsIwESaIwEEaSERKS2_@@GLIBCXX_3.4	std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::operator=(std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4
+_ZNSd4swapERSd@@GLIBCXX_3.4.21	std::iostream::swap(std::iostream&)@@GLIBCXX_3.4.21
+_ZNSdD1Ev@@GLIBCXX_3.4	std::basic_iostream<char, std::char_traits<char>>::~basic_iostream()@@GLIBCXX_3.4
+_ZNSi10_M_extractIjEERSiRT_@@GLIBCXX_3.4.9	std::istream& std::istream::_M_extract<unsigned int>(unsigned int&)@@GLIBCXX_3.4.9
+_ZNSi3getERSt15basic_streambufIcSt11char_traitsIcEE@@GLIBCXX_3.4	std::istream::get(std::basic_streambuf<char, std::char_traits<char>>&)@@GLIBCXX_3.4
+_ZNSi5seekgESt4fposI11__mbstate_tE@@GLIBCXX_3.4	std::istream::seekg(std::fpos<__mbstate_t>)@@GLIBCXX_3.4
+_ZNSi6ignoreEv@GLIBCXX_3.4	std::istream::ignore()@GLIBCXX_3.4
+_ZNSiC1EPSt15basic_streambufIcSt11char_traitsIcEE@@GLIBCXX_3.4	std::basic_istream<char, std::char_traits<char>>::basic_istream(std::basic_streambuf<char, std::char_traits<char>>*)@@GLIBCXX_3.4
+_ZNSiaSEOSi@@GLIBCXX_3.4.21	std::istream::operator=(std::istream&&)@@GLIBCXX_3.4.21
+_ZNSirsERe@@GLIBCXX_3.4	std::istream::operator>>(long double&)@@GLIBCXX_3.4
+_ZNSirsERx@@GLIBCXX_3.4	std::istream::operator>>(long long&)@@GLIBCXX_3.4
+_ZNSo5writeEPKcl@@GLIBCXX_3.4	std::ostream::write(char const*, long)@@GLIBCXX_3.4
+_ZNSo9_M_insertIdEERSoT_@@GLIBCXX_3.4.9	std::ostream& std::ostream::_M_insert<double>(double)@@GLIBCXX_3.4.9
+_ZNSoC1ERSd@@GLIBCXX_3.4.21	std::basic_ostream<char, std::char_traits<char>>::basic_ostream(std::iostream&)@@GLIBCXX_3.4.21
+_ZNSoD2Ev@@GLIBCXX_3.4	std::basic_ostream<char, std::char_traits<char>>::~basic_ostream()@@GLIBCXX_3.4
+_ZNSolsEb@@GLIBCXX_3.4	std::ostream::operator<<(bool)@@GLIBCXX_3.4
+_ZNSolsEs@@GLIBCXX_3.4	std::ostream::operator<<(short)@@GLIBCXX_3.4
+_ZNSs12_S_constructEmcRKSaIcE@@GLIBCXX_3.4	std::string::_S_construct(unsigned long, char, std::allocator<char> const&)@@GLIBCXX_3.4
+_ZNSs13_S_copy_charsEPcN9__gnu_cxx17__normal_iteratorIS_SsEES2_@@GLIBCXX_3.4	std::string::_S_copy_chars(char*, __gnu_cxx::__normal_iterator<char*, std::string>, __gnu_cxx::__normal_iterator<char*, std::string>)@@GLIBCXX_3.4
+_ZNSs2atEm@@GLIBCXX_3.4	std::string::at(unsigned long)@@GLIBCXX_3.4
+_ZNSs4_Rep12_S_empty_repEv@@GLIBCXX_3.4	std::string::_Rep::_S_empty_rep()@@GLIBCXX_3.4
+_ZNSs4_Rep9_S_createEmmRKSaIcE@@GLIBCXX_3.4	std::string::_Rep::_S_create(unsigned long, unsigned long, std::allocator<char> const&)@@GLIBCXX_3.4
+_ZNSs5eraseEN9__gnu_cxx17__normal_iteratorIPcSsEE@@GLIBCXX_3.4	std::string::erase(__gnu_cxx::__normal_iterator<char*, std::string>)@@GLIBCXX_3.4
+_ZNSs6appendESt16initializer_listIcE@@GLIBCXX_3.4.11	std::string::append(std::initializer_list<char>)@@GLIBCXX_3.4.11
+_ZNSs6assignEmc@@GLIBCXX_3.4	std::string::assign(unsigned long, char)@@GLIBCXX_3.4
+_ZNSs6insertEmmc@@GLIBCXX_3.4	std::string::insert(unsigned long, unsigned long, char)@@GLIBCXX_3.4
+_ZNSs7_M_moveEPcPKcm@@GLIBCXX_3.4.5	std::string::_M_move(char*, char const*, unsigned long)@@GLIBCXX_3.4.5
+_ZNSs7replaceEN9__gnu_cxx17__normal_iteratorIPcSsEES2_S2_S2_@@GLIBCXX_3.4	std::string::replace(__gnu_cxx::__normal_iterator<char*, std::string>, __gnu_cxx::__normal_iterator<char*, std::string>, __gnu_cxx::__normal_iterator<char*, std::string>, __gnu_cxx::__normal_iterator<char*, std::string>)@@GLIBCXX_3.4
+_ZNSs7reserveEm@@GLIBCXX_3.4	std::string::reserve(unsigned long)@@GLIBCXX_3.4
+_ZNSsC1EOSs@@GLIBCXX_3.4.14	std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::string&&)@@GLIBCXX_3.4.14
+_ZNSsC1ERKSsmm@@GLIBCXX_3.4	std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::string const&, unsigned long, unsigned long)@@GLIBCXX_3.4
+_ZNSsC2ENSs12__sv_wrapperERKSaIcE@@GLIBCXX_3.4.26	std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::string::__sv_wrapper, std::allocator<char> const&)@@GLIBCXX_3.4.26
+_ZNSsC2ERKSsmRKSaIcE@@GLIBCXX_3.4.23	std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::string const&, unsigned long, std::allocator<char> const&)@@GLIBCXX_3.4.23
+_ZNSsC2IPcEET_S1_RKSaIcE@@GLIBCXX_3.4	std::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string<char*>(char*, char*, std::allocator<char> const&)@@GLIBCXX_3.4
+_ZNSsixEm@@GLIBCXX_3.4	std::string::operator[](unsigned long)@@GLIBCXX_3.4
+_ZNSt10_Sp_lockerC2EPKvS1_@@GLIBCXX_3.4.21	std::_Sp_locker::_Sp_locker(void const*, void const*)@@GLIBCXX_3.4.21
+_ZNSt10bad_typeidD2Ev@@GLIBCXX_3.4	std::bad_typeid::~bad_typeid()@@GLIBCXX_3.4
+_ZNSt10ctype_base5printE@@GLIBCXX_3.4	std::ctype_base::print@@GLIBCXX_3.4
+_ZNSt10filesystem10equivalentERKNS_7__cxx114pathES3_RSt10error_code@@GLIBCXX_3.4.26	std::filesystem::equivalent(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem11permissionsERKNS_7__cxx114pathENS_5permsENS_12perm_optionsE@@GLIBCXX_3.4.26	std::filesystem::permissions(std::filesystem::__cxx11::path const&, std::filesystem::perms, std::filesystem::perm_options)@@GLIBCXX_3.4.26
+_ZNSt10filesystem12copy_symlinkERKNS_7__cxx114pathES3_@@GLIBCXX_3.4.26	std::filesystem::copy_symlink(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem12current_pathERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::current_path(std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem14create_symlinkERKNS_7__cxx114pathES3_@@GLIBCXX_3.4.26	std::filesystem::create_symlink(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem15hard_link_countERKNS_7__cxx114pathE@@GLIBCXX_3.4.26	std::filesystem::hard_link_count(std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem15last_write_timeERKNS_7__cxx114pathENSt6chrono10time_pointINS_12__file_clockENS4_8durationIlSt5ratioILl1ELl1000000000EEEEEERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::last_write_time(std::filesystem::__cxx11::path const&, std::chrono::time_point<std::filesystem::__file_clock, std::chrono::duration<long, std::ratio<1l, 1000000000l>>>, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem16create_directoryERKNS_7__cxx114pathES3_@@GLIBCXX_3.4.26	std::filesystem::create_directory(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem16filesystem_errorC1ERKSsSt10error_code@@GLIBCXX_3.4.26	std::filesystem::filesystem_error::filesystem_error(std::string const&, std::error_code)@@GLIBCXX_3.4.26
+_ZNSt10filesystem16weakly_canonicalERKNS_4pathERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::weakly_canonical(std::filesystem::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem18directory_iteratorC1ERKNS_4pathENS_17directory_optionsEPSt10error_code@@GLIBCXX_3.4.26	std::filesystem::directory_iterator::directory_iterator(std::filesystem::path const&, std::filesystem::directory_options, std::error_code*)@@GLIBCXX_3.4.26
+_ZNSt10filesystem24create_directory_symlinkERKNS_4pathES2_RSt10error_code@@GLIBCXX_3.4.26	std::filesystem::create_directory_symlink(std::filesystem::path const&, std::filesystem::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem28recursive_directory_iteratorC2ERKNS_4pathENS_17directory_optionsEPSt10error_code@@GLIBCXX_3.4.26	std::filesystem::recursive_directory_iterator::recursive_directory_iterator(std::filesystem::path const&, std::filesystem::directory_options, std::error_code*)@@GLIBCXX_3.4.26
+_ZNSt10filesystem4copyERKNS_7__cxx114pathES3_NS_12copy_optionsE@@GLIBCXX_3.4.26	std::filesystem::copy(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&, std::filesystem::copy_options)@@GLIBCXX_3.4.26
+_ZNSt10filesystem4path5_ListC1Ev@@GLIBCXX_3.4.26	std::filesystem::path::_List::_List()@@GLIBCXX_3.4.26
+_ZNSt10filesystem5spaceERKNS_7__cxx114pathE@@GLIBCXX_3.4.26	std::filesystem::space(std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem6renameERKNS_7__cxx114pathES3_@@GLIBCXX_3.4.26	std::filesystem::rename(std::filesystem::__cxx11::path const&, std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem7__cxx1116filesystem_errorC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKNS0_4pathESt10error_code@@GLIBCXX_3.4.26	std::filesystem::__cxx11::filesystem_error::filesystem_error(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::filesystem::__cxx11::path const&, std::error_code)@@GLIBCXX_3.4.26
+_ZNSt10filesystem7__cxx1118directory_iterator9incrementERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::__cxx11::directory_iterator::increment(std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem7__cxx1128recursive_directory_iteratorC1ERKNS0_4pathENS_17directory_optionsEPSt10error_code@@GLIBCXX_3.4.26	std::filesystem::__cxx11::recursive_directory_iterator::recursive_directory_iterator(std::filesystem::__cxx11::path const&, std::filesystem::directory_options, std::error_code*)@@GLIBCXX_3.4.26
+_ZNSt10filesystem7__cxx114path14_S_convert_locEPKcS3_RKSt6locale@@GLIBCXX_3.4.26	std::filesystem::__cxx11::path::_S_convert_loc(char const*, char const*, std::locale const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem7__cxx114pathaSERKS1_@@GLIBCXX_3.4.26	std::filesystem::__cxx11::path::operator=(std::filesystem::__cxx11::path const&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem8is_emptyERKNS_4pathERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::is_empty(std::filesystem::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem9canonicalERKNS_4pathERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::canonical(std::filesystem::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10filesystem9file_sizeERKNS_4pathERSt10error_code@@GLIBCXX_3.4.26	std::filesystem::file_size(std::filesystem::path const&, std::error_code&)@@GLIBCXX_3.4.26
+_ZNSt10istrstreamC1EPKc@@GLIBCXX_3.4	std::istrstream::istrstream(char const*)@@GLIBCXX_3.4
+_ZNSt10istrstreamD0Ev@@GLIBCXX_3.4	std::istrstream::~istrstream()@@GLIBCXX_3.4
+_ZNSt10moneypunctIcLb0EE4intlE@@GLIBCXX_3.4	std::moneypunct<char, false>::intl@@GLIBCXX_3.4
+_ZNSt10moneypunctIcLb0EED1Ev@@GLIBCXX_3.4	std::moneypunct<char, false>::~moneypunct()@@GLIBCXX_3.4
+_ZNSt10moneypunctIcLb1EEC2EP15__locale_structPKcm@@GLIBCXX_3.4	std::moneypunct<char, true>::moneypunct(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt10moneypunctIwLb0EE4intlE@@GLIBCXX_3.4	std::moneypunct<wchar_t, false>::intl@@GLIBCXX_3.4
+_ZNSt10moneypunctIwLb0EED1Ev@@GLIBCXX_3.4	std::moneypunct<wchar_t, false>::~moneypunct()@@GLIBCXX_3.4
+_ZNSt10moneypunctIwLb1EEC2EP15__locale_structPKcm@@GLIBCXX_3.4	std::moneypunct<wchar_t, true>::moneypunct(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt10ostrstreamC1EPciSt13_Ios_Openmode@@GLIBCXX_3.4	std::ostrstream::ostrstream(char*, int, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt11__timepunctIcE2idE@@GLIBCXX_3.4	std::__timepunct<char>::id@@GLIBCXX_3.4
+_ZNSt11__timepunctIcED1Ev@@GLIBCXX_3.4	std::__timepunct<char>::~__timepunct()@@GLIBCXX_3.4
+_ZNSt11__timepunctIwEC2EPSt17__timepunct_cacheIwEm@@GLIBCXX_3.4	std::__timepunct<wchar_t>::__timepunct(std::__timepunct_cache<wchar_t>*, unsigned long)@@GLIBCXX_3.4
+_ZNSt11char_traitsIwE2eqERKwS2_@GLIBCXX_3.4	std::char_traits<wchar_t>::eq(wchar_t const&, wchar_t const&)@GLIBCXX_3.4
+_ZNSt11logic_errorC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	std::logic_error::logic_error(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt11range_errorC1EPKc@@GLIBCXX_3.4.21	std::range_error::range_error(char const*)@@GLIBCXX_3.4.21
+_ZNSt11range_errorD2Ev@@GLIBCXX_3.4.15	std::range_error::~range_error()@@GLIBCXX_3.4.15
+_ZNSt12__basic_fileIcE4fileEv@@GLIBCXX_3.4.1	std::__basic_file<char>::file()@@GLIBCXX_3.4.1
+_ZNSt12__basic_fileIcE8sys_openEiSt13_Ios_Openmode@@GLIBCXX_3.4	std::__basic_file<char>::sys_open(int, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt12__shared_ptrINSt10filesystem28recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EEC1Ev@@GLIBCXX_3.4.26	std::__shared_ptr<std::filesystem::recursive_directory_iterator::_Dir_stack, (__gnu_cxx::_Lock_policy)2>::__shared_ptr()@@GLIBCXX_3.4.26
+_ZNSt12__shared_ptrINSt10filesystem7__cxx1128recursive_directory_iterator10_Dir_stackELN9__gnu_cxx12_Lock_policyE2EEC1EOS6_@@GLIBCXX_3.4.26	std::__shared_ptr<std::filesystem::__cxx11::recursive_directory_iterator::_Dir_stack, (__gnu_cxx::_Lock_policy)2>::__shared_ptr(std::__shared_ptr<std::filesystem::__cxx11::recursive_directory_iterator::_Dir_stack, (__gnu_cxx::_Lock_policy)2>&&)@@GLIBCXX_3.4.26
+_ZNSt12__shared_ptrINSt10filesystem7__cxx114_DirELN9__gnu_cxx12_Lock_policyE2EEaSEOS5_@@GLIBCXX_3.4.26	std::__shared_ptr<std::filesystem::__cxx11::_Dir, (__gnu_cxx::_Lock_policy)2>::operator=(std::__shared_ptr<std::filesystem::__cxx11::_Dir, (__gnu_cxx::_Lock_policy)2>&&)@@GLIBCXX_3.4.26
+_ZNSt12ctype_bynameIcEC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm@@GLIBCXX_3.4.21	std::ctype_byname<char>::ctype_byname(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt12ctype_bynameIwEC2EPKcm@@GLIBCXX_3.4	std::ctype_byname<wchar_t>::ctype_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt12domain_errorC1ERKSs@@GLIBCXX_3.4	std::domain_error::domain_error(std::string const&)@@GLIBCXX_3.4
+_ZNSt12future_errorD1Ev@@GLIBCXX_3.4.14	std::future_error::~future_error()@@GLIBCXX_3.4.14
+_ZNSt12length_errorD0Ev@@GLIBCXX_3.4	std::length_error::~length_error()@@GLIBCXX_3.4
+_ZNSt12out_of_rangeC2ERKSs@@GLIBCXX_3.4	std::out_of_range::out_of_range(std::string const&)@@GLIBCXX_3.4
+_ZNSt12placeholders2_5E@@GLIBCXX_3.4.15	std::placeholders::_5@@GLIBCXX_3.4.15
+_ZNSt12placeholders3_13E@@GLIBCXX_3.4.15	std::placeholders::_13@@GLIBCXX_3.4.15
+_ZNSt12placeholders3_21E@@GLIBCXX_3.4.15	std::placeholders::_21@@GLIBCXX_3.4.15
+_ZNSt12placeholders3_29E@@GLIBCXX_3.4.15	std::placeholders::_29@@GLIBCXX_3.4.15
+_ZNSt12strstreambuf8_M_setupEPcS0_l@@GLIBCXX_3.4	std::strstreambuf::_M_setup(char*, char*, long)@@GLIBCXX_3.4
+_ZNSt12strstreambufC1EPalS0_@@GLIBCXX_3.4	std::strstreambuf::strstreambuf(signed char*, long, signed char*)@@GLIBCXX_3.4
+_ZNSt12strstreambufC2EPalS0_@@GLIBCXX_3.4	std::strstreambuf::strstreambuf(signed char*, long, signed char*)@@GLIBCXX_3.4
+_ZNSt12system_errorD1Ev@@GLIBCXX_3.4.11	std::system_error::~system_error()@@GLIBCXX_3.4.11
+_ZNSt13__future_base12_Result_baseD1Ev@@GLIBCXX_3.4.15	std::__future_base::_Result_base::~_Result_base()@@GLIBCXX_3.4.15
+_ZNSt13bad_exceptionD2Ev@@GLIBCXX_3.4	std::bad_exception::~bad_exception()@@GLIBCXX_3.4
+_ZNSt13basic_filebufIcSt11char_traitsIcEE27_M_allocate_internal_bufferEv@@GLIBCXX_3.4	std::basic_filebuf<char, std::char_traits<char>>::_M_allocate_internal_buffer()@@GLIBCXX_3.4
+_ZNSt13basic_filebufIcSt11char_traitsIcEE6setbufEPcl@@GLIBCXX_3.4	std::basic_filebuf<char, std::char_traits<char>>::setbuf(char*, long)@@GLIBCXX_3.4
+_ZNSt13basic_filebufIcSt11char_traitsIcEE9showmanycEv@@GLIBCXX_3.4	std::basic_filebuf<char, std::char_traits<char>>::showmanyc()@@GLIBCXX_3.4
+_ZNSt13basic_filebufIcSt11char_traitsIcEED2Ev@@GLIBCXX_3.4	std::basic_filebuf<char, std::char_traits<char>>::~basic_filebuf()@@GLIBCXX_3.4
+_ZNSt13basic_filebufIwSt11char_traitsIwEE26_M_destroy_internal_bufferEv@@GLIBCXX_3.4	std::basic_filebuf<wchar_t, std::char_traits<wchar_t>>::_M_destroy_internal_buffer()@@GLIBCXX_3.4
+_ZNSt13basic_filebufIwSt11char_traitsIwEE5imbueERKSt6locale@@GLIBCXX_3.4	std::basic_filebuf<wchar_t, std::char_traits<wchar_t>>::imbue(std::locale const&)@@GLIBCXX_3.4
+_ZNSt13basic_filebufIwSt11char_traitsIwEE9pbackfailEj@@GLIBCXX_3.4	std::basic_filebuf<wchar_t, std::char_traits<wchar_t>>::pbackfail(unsigned int)@@GLIBCXX_3.4
+_ZNSt13basic_filebufIwSt11char_traitsIwEED1Ev@@GLIBCXX_3.4	std::basic_filebuf<wchar_t, std::char_traits<wchar_t>>::~basic_filebuf()@@GLIBCXX_3.4
+_ZNSt13basic_fstreamIcSt11char_traitsIcEE7is_openEv@@GLIBCXX_3.4	std::basic_fstream<char, std::char_traits<char>>::is_open()@@GLIBCXX_3.4
+_ZNSt13basic_fstreamIcSt11char_traitsIcEEC2ERKNSt7__cxx1112basic_stringIcS1_SaIcEEESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::basic_fstream<char, std::char_traits<char>>::basic_fstream(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt13basic_fstreamIwSt11char_traitsIwEE4openERKNSt7__cxx1112basic_stringIcS0_IcESaIcEEESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::basic_fstream<wchar_t, std::char_traits<wchar_t>>::open(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt13basic_fstreamIwSt11char_traitsIwEEC1ERKSsSt13_Ios_Openmode@@GLIBCXX_3.4.13	std::basic_fstream<wchar_t, std::char_traits<wchar_t>>::basic_fstream(std::string const&, std::_Ios_Openmode)@@GLIBCXX_3.4.13
+_ZNSt13basic_fstreamIwSt11char_traitsIwEED1Ev@@GLIBCXX_3.4	std::basic_fstream<wchar_t, std::char_traits<wchar_t>>::~basic_fstream()@@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEE10_M_extractIjEERS2_RT_@@GLIBCXX_3.4.9	std::basic_istream<wchar_t, std::char_traits<wchar_t>>& std::basic_istream<wchar_t, std::char_traits<wchar_t>>::_M_extract<unsigned int>(unsigned int&)@@GLIBCXX_3.4.9
+_ZNSt13basic_istreamIwSt11char_traitsIwEE3getERSt15basic_streambufIwS1_E@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::get(std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>&)@@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEE5seekgESt4fposI11__mbstate_tE@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::seekg(std::fpos<__mbstate_t>)@@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEE6ignoreEv@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::ignore()@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEEC1EPSt15basic_streambufIwS1_E@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::basic_istream(std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>*)@@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEEaSEOS2_@@GLIBCXX_3.4.21	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::operator=(std::basic_istream<wchar_t, std::char_traits<wchar_t>>&&)@@GLIBCXX_3.4.21
+_ZNSt13basic_istreamIwSt11char_traitsIwEErsERe@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::operator>>(long double&)@@GLIBCXX_3.4
+_ZNSt13basic_istreamIwSt11char_traitsIwEErsERx@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>::operator>>(long long&)@@GLIBCXX_3.4
+_ZNSt13basic_ostreamIwSt11char_traitsIwEE5writeEPKwl@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::write(wchar_t const*, long)@@GLIBCXX_3.4
+_ZNSt13basic_ostreamIwSt11char_traitsIwEE9_M_insertIdEERS2_T_@@GLIBCXX_3.4.9	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>& std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::_M_insert<double>(double)@@GLIBCXX_3.4.9
+_ZNSt13basic_ostreamIwSt11char_traitsIwEEC1ERSt14basic_iostreamIwS1_E@@GLIBCXX_3.4.21	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::basic_ostream(std::basic_iostream<wchar_t, std::char_traits<wchar_t>>&)@@GLIBCXX_3.4.21
+_ZNSt13basic_ostreamIwSt11char_traitsIwEED2Ev@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::~basic_ostream()@@GLIBCXX_3.4
+_ZNSt13basic_ostreamIwSt11char_traitsIwEElsEb@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::operator<<(bool)@@GLIBCXX_3.4
+_ZNSt13basic_ostreamIwSt11char_traitsIwEElsEs@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>::operator<<(short)@@GLIBCXX_3.4
+_ZNSt13random_device7_M_initERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	std::random_device::_M_init(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt13runtime_errorC2EOS_@@GLIBCXX_3.4.26	std::runtime_error::runtime_error(std::runtime_error&&)@@GLIBCXX_3.4.26
+_ZNSt13runtime_erroraSEOS_@@GLIBCXX_3.4.26	std::runtime_error::operator=(std::runtime_error&&)@@GLIBCXX_3.4.26
+_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EOS2_@@GLIBCXX_3.4.21	std::basic_ifstream<char, std::char_traits<char>>::basic_ifstream(std::basic_ifstream<char, std::char_traits<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC2ERKSsSt13_Ios_Openmode@@GLIBCXX_3.4.13	std::basic_ifstream<char, std::char_traits<char>>::basic_ifstream(std::string const&, std::_Ios_Openmode)@@GLIBCXX_3.4.13
+_ZNSt14basic_ifstreamIwSt11char_traitsIwEE4openERKSsSt13_Ios_Openmode@@GLIBCXX_3.4.13	std::basic_ifstream<wchar_t, std::char_traits<wchar_t>>::open(std::string const&, std::_Ios_Openmode)@@GLIBCXX_3.4.13
+_ZNSt14basic_ifstreamIwSt11char_traitsIwEEC1Ev@@GLIBCXX_3.4	std::basic_ifstream<wchar_t, std::char_traits<wchar_t>>::basic_ifstream()@@GLIBCXX_3.4
+_ZNSt14basic_ifstreamIwSt11char_traitsIwEED2Ev@@GLIBCXX_3.4	std::basic_ifstream<wchar_t, std::char_traits<wchar_t>>::~basic_ifstream()@@GLIBCXX_3.4
+_ZNSt14basic_iostreamIwSt11char_traitsIwEEC2Ev@@GLIBCXX_3.4	std::basic_iostream<wchar_t, std::char_traits<wchar_t>>::basic_iostream()@@GLIBCXX_3.4
+_ZNSt14basic_ofstreamIcSt11char_traitsIcEE4swapERS2_@@GLIBCXX_3.4.21	std::basic_ofstream<char, std::char_traits<char>>::swap(std::basic_ofstream<char, std::char_traits<char>>&)@@GLIBCXX_3.4.21
+_ZNSt14basic_ofstreamIcSt11char_traitsIcEEC2EOS2_@@GLIBCXX_3.4.21	std::basic_ofstream<char, std::char_traits<char>>::basic_ofstream(std::basic_ofstream<char, std::char_traits<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt14basic_ofstreamIcSt11char_traitsIcEEaSEOS2_@@GLIBCXX_3.4.21	std::basic_ofstream<char, std::char_traits<char>>::operator=(std::basic_ofstream<char, std::char_traits<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt14basic_ofstreamIwSt11char_traitsIwEEC1EPKcSt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_ofstream<wchar_t, std::char_traits<wchar_t>>::basic_ofstream(char const*, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt14basic_ofstreamIwSt11char_traitsIwEEC2Ev@@GLIBCXX_3.4	std::basic_ofstream<wchar_t, std::char_traits<wchar_t>>::basic_ofstream()@@GLIBCXX_3.4
+_ZNSt14codecvt_bynameIcc11__mbstate_tEC2EPKcm@@GLIBCXX_3.4	std::codecvt_byname<char, char, __mbstate_t>::codecvt_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt14codecvt_bynameIwc11__mbstate_tEC1ERKSsm@@GLIBCXX_3.4.21	std::codecvt_byname<wchar_t, char, __mbstate_t>::codecvt_byname(std::string const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt14collate_bynameIcEC1ERKSsm@@GLIBCXX_3.4.26	std::collate_byname<char>::collate_byname(std::string const&, unsigned long)@@GLIBCXX_3.4.26
+_ZNSt14collate_bynameIwEC2EPKcm@@GLIBCXX_3.4	std::collate_byname<wchar_t>::collate_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt14error_categoryD1Ev@@GLIBCXX_3.4.15	std::error_category::~error_category()@@GLIBCXX_3.4.15
+_ZNSt14numeric_limitsIDiE12max_exponentE@@GLIBCXX_3.4.11	std::numeric_limits<char32_t>::max_exponent@@GLIBCXX_3.4.11
+_ZNSt14numeric_limitsIDiE17has_signaling_NaNE@@GLIBCXX_3.4.11	std::numeric_limits<char32_t>::has_signaling_NaN@@GLIBCXX_3.4.11
+_ZNSt14numeric_limitsIDiE9is_signedE@@GLIBCXX_3.4.11	std::numeric_limits<char32_t>::is_signed@@GLIBCXX_3.4.11
+_ZNSt14numeric_limitsIDsE12min_exponentE@@GLIBCXX_3.4.11	std::numeric_limits<char16_t>::min_exponent@@GLIBCXX_3.4.11
+_ZNSt14numeric_limitsIDsE5radixE@@GLIBCXX_3.4.11	std::numeric_limits<char16_t>::radix@@GLIBCXX_3.4.11
+_ZNSt14numeric_limitsIDuE10has_denormE@@GLIBCXX_3.4.26	std::numeric_limits<char8_t>::has_denorm@@GLIBCXX_3.4.26
+_ZNSt14numeric_limitsIDuE14is_specializedE@@GLIBCXX_3.4.26	std::numeric_limits<char8_t>::is_specialized@@GLIBCXX_3.4.26
+_ZNSt14numeric_limitsIDuE6digitsE@@GLIBCXX_3.4.26	std::numeric_limits<char8_t>::digits@@GLIBCXX_3.4.26
+_ZNSt14numeric_limitsIaE10is_integerE@@GLIBCXX_3.4	std::numeric_limits<signed char>::is_integer@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIaE14max_exponent10E@@GLIBCXX_3.4	std::numeric_limits<signed char>::max_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIaE8digits10E@@GLIBCXX_3.4	std::numeric_limits<signed char>::digits10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIbE11round_styleE@@GLIBCXX_3.4	std::numeric_limits<bool>::round_style@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIbE14min_exponent10E@@GLIBCXX_3.4	std::numeric_limits<bool>::min_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIbE8is_exactE@@GLIBCXX_3.4	std::numeric_limits<bool>::is_exact@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIcE12has_infinityE@@GLIBCXX_3.4	std::numeric_limits<char>::has_infinity@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIcE15has_denorm_lossE@@GLIBCXX_3.4	std::numeric_limits<char>::has_denorm_loss@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIcE9is_iec559E@@GLIBCXX_3.4	std::numeric_limits<char>::is_iec559@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIdE12max_digits10E@@GLIBCXX_3.4.14	std::numeric_limits<double>::max_digits10@@GLIBCXX_3.4.14
+_ZNSt14numeric_limitsIdE15tinyness_beforeE@@GLIBCXX_3.4	std::numeric_limits<double>::tinyness_before@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIdE9is_moduloE@@GLIBCXX_3.4	std::numeric_limits<double>::is_modulo@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIeE12max_exponentE@@GLIBCXX_3.4	std::numeric_limits<long double>::max_exponent@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIeE17has_signaling_NaNE@@GLIBCXX_3.4	std::numeric_limits<long double>::has_signaling_NaN@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIeE9is_signedE@@GLIBCXX_3.4	std::numeric_limits<long double>::is_signed@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIfE12min_exponentE@@GLIBCXX_3.4	std::numeric_limits<float>::min_exponent@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIfE5radixE@@GLIBCXX_3.4	std::numeric_limits<float>::radix@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIhE10has_denormE@@GLIBCXX_3.4	std::numeric_limits<unsigned char>::has_denorm@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIhE13has_quiet_NaNE@@GLIBCXX_3.4	std::numeric_limits<unsigned char>::has_quiet_NaN@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIhE5trapsE@@GLIBCXX_3.4	std::numeric_limits<unsigned char>::traps@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIiE10is_boundedE@@GLIBCXX_3.4	std::numeric_limits<int>::is_bounded@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIiE14is_specializedE@@GLIBCXX_3.4	std::numeric_limits<int>::is_specialized@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIiE6digitsE@@GLIBCXX_3.4	std::numeric_limits<int>::digits@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIjE10is_integerE@@GLIBCXX_3.4	std::numeric_limits<unsigned int>::is_integer@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIjE14max_exponent10E@@GLIBCXX_3.4	std::numeric_limits<unsigned int>::max_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIjE8digits10E@@GLIBCXX_3.4	std::numeric_limits<unsigned int>::digits10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIlE11round_styleE@@GLIBCXX_3.4	std::numeric_limits<long>::round_style@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIlE14min_exponent10E@@GLIBCXX_3.4	std::numeric_limits<long>::min_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIlE8is_exactE@@GLIBCXX_3.4	std::numeric_limits<long>::is_exact@@GLIBCXX_3.4
+_ZNSt14numeric_limitsImE12has_infinityE@@GLIBCXX_3.4	std::numeric_limits<unsigned long>::has_infinity@@GLIBCXX_3.4
+_ZNSt14numeric_limitsImE15has_denorm_lossE@@GLIBCXX_3.4	std::numeric_limits<unsigned long>::has_denorm_loss@@GLIBCXX_3.4
+_ZNSt14numeric_limitsImE9is_iec559E@@GLIBCXX_3.4	std::numeric_limits<unsigned long>::is_iec559@@GLIBCXX_3.4
+_ZNSt14numeric_limitsInE12max_digits10E@@GLIBCXX_3.4.17	std::numeric_limits<__int128>::max_digits10@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsInE15tinyness_beforeE@@GLIBCXX_3.4.17	std::numeric_limits<__int128>::tinyness_before@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsInE9is_moduloE@@GLIBCXX_3.4.17	std::numeric_limits<__int128>::is_modulo@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsIoE12max_exponentE@@GLIBCXX_3.4.17	std::numeric_limits<unsigned __int128>::max_exponent@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsIoE17has_signaling_NaNE@@GLIBCXX_3.4.17	std::numeric_limits<unsigned __int128>::has_signaling_NaN@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsIoE9is_signedE@@GLIBCXX_3.4.17	std::numeric_limits<unsigned __int128>::is_signed@@GLIBCXX_3.4.17
+_ZNSt14numeric_limitsIsE12min_exponentE@@GLIBCXX_3.4	std::numeric_limits<short>::min_exponent@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIsE5radixE@@GLIBCXX_3.4	std::numeric_limits<short>::radix@@GLIBCXX_3.4
+_ZNSt14numeric_limitsItE10has_denormE@@GLIBCXX_3.4	std::numeric_limits<unsigned short>::has_denorm@@GLIBCXX_3.4
+_ZNSt14numeric_limitsItE13has_quiet_NaNE@@GLIBCXX_3.4	std::numeric_limits<unsigned short>::has_quiet_NaN@@GLIBCXX_3.4
+_ZNSt14numeric_limitsItE5trapsE@@GLIBCXX_3.4	std::numeric_limits<unsigned short>::traps@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIwE10is_boundedE@@GLIBCXX_3.4	std::numeric_limits<wchar_t>::is_bounded@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIwE14is_specializedE@@GLIBCXX_3.4	std::numeric_limits<wchar_t>::is_specialized@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIwE6digitsE@@GLIBCXX_3.4	std::numeric_limits<wchar_t>::digits@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIxE10is_integerE@@GLIBCXX_3.4	std::numeric_limits<long long>::is_integer@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIxE14max_exponent10E@@GLIBCXX_3.4	std::numeric_limits<long long>::max_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIxE8digits10E@@GLIBCXX_3.4	std::numeric_limits<long long>::digits10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIyE11round_styleE@@GLIBCXX_3.4	std::numeric_limits<unsigned long long>::round_style@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIyE14min_exponent10E@@GLIBCXX_3.4	std::numeric_limits<unsigned long long>::min_exponent10@@GLIBCXX_3.4
+_ZNSt14numeric_limitsIyE8is_exactE@@GLIBCXX_3.4	std::numeric_limits<unsigned long long>::is_exact@@GLIBCXX_3.4
+_ZNSt14overflow_errorC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	std::overflow_error::overflow_error(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt15_List_node_base4swapERS_S0_@@GLIBCXX_3.4	std::_List_node_base::swap(std::_List_node_base&, std::_List_node_base&)@@GLIBCXX_3.4
+_ZNSt15__exception_ptr13exception_ptr9_M_addrefEv@@CXXABI_1.3.13	std::__exception_ptr::exception_ptr::_M_addref()@@CXXABI_1.3.13
+_ZNSt15__exception_ptr13exception_ptrD1Ev@@CXXABI_1.3.3	std::__exception_ptr::exception_ptr::~exception_ptr()@@CXXABI_1.3.3
+_ZNSt15basic_streambufIcSt11char_traitsIcEE12__safe_pbumpEl@@GLIBCXX_3.4.16	std::basic_streambuf<char, std::char_traits<char>>::__safe_pbump(long)@@GLIBCXX_3.4.16
+_ZNSt15basic_streambufIcSt11char_traitsIcEE5sgetcEv@@GLIBCXX_3.4	std::basic_streambuf<char, std::char_traits<char>>::sgetc()@@GLIBCXX_3.4
+_ZNSt15basic_streambufIcSt11char_traitsIcEE6stosscEv@@GLIBCXX_3.4.10	std::basic_streambuf<char, std::char_traits<char>>::stossc()@@GLIBCXX_3.4.10
+_ZNSt15basic_streambufIcSt11char_traitsIcEE8overflowEi@@GLIBCXX_3.4	std::basic_streambuf<char, std::char_traits<char>>::overflow(int)@@GLIBCXX_3.4
+_ZNSt15basic_streambufIcSt11char_traitsIcEEC1Ev@@GLIBCXX_3.4	std::basic_streambuf<char, std::char_traits<char>>::basic_streambuf()@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEE10pubseekposESt4fposI11__mbstate_tESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::pubseekpos(std::fpos<__mbstate_t>, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEE5imbueERKSt6locale@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::imbue(std::locale const&)@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEE6setbufEPwl@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::setbuf(wchar_t*, long)@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEE7sungetcEv@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::sungetc()@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEE9underflowEv@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::underflow()@@GLIBCXX_3.4
+_ZNSt15basic_streambufIwSt11char_traitsIwEEaSERKS2_@@GLIBCXX_3.4	std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>::operator=(std::basic_streambuf<wchar_t, std::char_traits<wchar_t>> const&)@@GLIBCXX_3.4
+_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEE7seekposESt4fposI11__mbstate_tESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::seekpos(std::fpos<__mbstate_t>, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEEC1ESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::basic_stringbuf(std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt15basic_stringbufIcSt11char_traitsIcESaIcEEaSEOS3_@@GLIBCXX_3.4.21	std::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::operator=(std::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt15basic_stringbufIwSt11char_traitsIwESaIwEE7seekposESt4fposI11__mbstate_tESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::seekpos(std::fpos<__mbstate_t>, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt15basic_stringbufIwSt11char_traitsIwESaIwEEC1ESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringbuf(std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt15basic_stringbufIwSt11char_traitsIwESaIwEEaSEOS3_@@GLIBCXX_3.4.21	std::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::operator=(std::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&&)@@GLIBCXX_3.4.21
+_ZNSt15messages_bynameIwEC1EPKcm@@GLIBCXX_3.4	std::messages_byname<wchar_t>::messages_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt15numpunct_bynameIcEC1ERKSsm@@GLIBCXX_3.4.21	std::numpunct_byname<char>::numpunct_byname(std::string const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt15numpunct_bynameIwEC2EPKcm@@GLIBCXX_3.4	std::numpunct_byname<wchar_t>::numpunct_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt15time_get_bynameIcSt19istreambuf_iteratorIcSt11char_traitsIcEEEC2ERKSsm@@GLIBCXX_3.4.21	std::time_get_byname<char, std::istreambuf_iterator<char, std::char_traits<char>>>::time_get_byname(std::string const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt15time_get_bynameIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED0Ev@@GLIBCXX_3.4	std::time_get_byname<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~time_get_byname()@@GLIBCXX_3.4
+_ZNSt15time_put_bynameIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEC2ERKSsm@@GLIBCXX_3.4.21	std::time_put_byname<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::time_put_byname(std::string const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt15time_put_bynameIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED0Ev@@GLIBCXX_3.4	std::time_put_byname<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~time_put_byname()@@GLIBCXX_3.4
+_ZNSt15underflow_errorC2ERKSs@@GLIBCXX_3.4	std::underflow_error::underflow_error(std::string const&)@@GLIBCXX_3.4
+_ZNSt16__numpunct_cacheIcED1Ev@@GLIBCXX_3.4	std::__numpunct_cache<char>::~__numpunct_cache()@@GLIBCXX_3.4
+_ZNSt16__time_get_state17_M_finalize_stateEP2tm@@GLIBCXX_3.4.30	std::__time_get_state::_M_finalize_state(tm*)@@GLIBCXX_3.4.30
+_ZNSt16invalid_argumentC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	std::invalid_argument::invalid_argument(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt17__timepunct_cacheIcE12_S_timezonesE@@GLIBCXX_3.4	std::__timepunct_cache<char>::_S_timezones@@GLIBCXX_3.4
+_ZNSt17__timepunct_cacheIwEC2Em@@GLIBCXX_3.4	std::__timepunct_cache<wchar_t>::__timepunct_cache(unsigned long)@@GLIBCXX_3.4
+_ZNSt17moneypunct_bynameIcLb0EEC1EPKcm@@GLIBCXX_3.4	std::moneypunct_byname<char, false>::moneypunct_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt17moneypunct_bynameIcLb1EEC1EPKcm@@GLIBCXX_3.4	std::moneypunct_byname<char, true>::moneypunct_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt17moneypunct_bynameIwLb0EEC1EPKcm@@GLIBCXX_3.4	std::moneypunct_byname<wchar_t, false>::moneypunct_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt17moneypunct_bynameIwLb1EEC1EPKcm@@GLIBCXX_3.4	std::moneypunct_byname<wchar_t, true>::moneypunct_byname(char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt18__moneypunct_cacheIcLb0EEC1Em@@GLIBCXX_3.4	std::__moneypunct_cache<char, false>::__moneypunct_cache(unsigned long)@@GLIBCXX_3.4
+_ZNSt18__moneypunct_cacheIcLb1EED0Ev@@GLIBCXX_3.4	std::__moneypunct_cache<char, true>::~__moneypunct_cache()@@GLIBCXX_3.4
+_ZNSt18__moneypunct_cacheIwLb0EED2Ev@@GLIBCXX_3.4	std::__moneypunct_cache<wchar_t, false>::~__moneypunct_cache()@@GLIBCXX_3.4
+_ZNSt18basic_stringstreamIcSt11char_traitsIcESaIcEE4swapERS3_@@GLIBCXX_3.4.21	std::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::swap(std::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>&)@@GLIBCXX_3.4.21
+_ZNSt18basic_stringstreamIcSt11char_traitsIcESaIcEEC2Ev@@GLIBCXX_3.4.26	std::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::basic_stringstream()@@GLIBCXX_3.4.26
+_ZNSt18basic_stringstreamIwSt11char_traitsIwESaIwEEC1ERKSbIwS1_S2_ESt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_stringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringstream(std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt18basic_stringstreamIwSt11char_traitsIwESaIwEED1Ev@@GLIBCXX_3.4	std::basic_stringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::~basic_stringstream()@@GLIBCXX_3.4
+_ZNSt18condition_variableC2Ev@@GLIBCXX_3.4.11	std::condition_variable::condition_variable()@@GLIBCXX_3.4.11
+_ZNSt19__codecvt_utf8_baseIDsED1Ev@@GLIBCXX_3.4.21	std::__codecvt_utf8_base<char16_t>::~__codecvt_utf8_base()@@GLIBCXX_3.4.21
+_ZNSt19basic_istringstreamIcSt11char_traitsIcESaIcEEC1ERKSsSt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::basic_istringstream(std::string const&, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt19basic_istringstreamIcSt11char_traitsIcESaIcEED1Ev@@GLIBCXX_3.4	std::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::~basic_istringstream()@@GLIBCXX_3.4
+_ZNSt19basic_istringstreamIwSt11char_traitsIwESaIwEEC1Ev@@GLIBCXX_3.4.26	std::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_istringstream()@@GLIBCXX_3.4.26
+_ZNSt19basic_istringstreamIwSt11char_traitsIwESaIwEEaSEOS3_@@GLIBCXX_3.4.21	std::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::operator=(std::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&&)@@GLIBCXX_3.4.21
+_ZNSt19basic_ostringstreamIcSt11char_traitsIcESaIcEEC2ERKSsSt13_Ios_Openmode@@GLIBCXX_3.4	std::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>::basic_ostringstream(std::string const&, std::_Ios_Openmode)@@GLIBCXX_3.4
+_ZNSt19basic_ostringstreamIwSt11char_traitsIwESaIwEE4swapERS3_@@GLIBCXX_3.4.21	std::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::swap(std::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&)@@GLIBCXX_3.4.21
+_ZNSt19basic_ostringstreamIwSt11char_traitsIwESaIwEEC2Ev@@GLIBCXX_3.4.26	std::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_ostringstream()@@GLIBCXX_3.4.26
+_ZNSt19istreambuf_iteratorIwSt11char_traitsIwEEppEv@GLIBCXX_3.4	std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>::operator++()@GLIBCXX_3.4
+_ZNSt20__codecvt_utf16_baseIwED1Ev@@GLIBCXX_3.4.21	std::__codecvt_utf16_base<wchar_t>::~__codecvt_utf16_base()@@GLIBCXX_3.4.21
+_ZNSt21__numeric_limits_base11round_styleE@@GLIBCXX_3.4	std::__numeric_limits_base::round_style@@GLIBCXX_3.4
+_ZNSt21__numeric_limits_base14min_exponent10E@@GLIBCXX_3.4	std::__numeric_limits_base::min_exponent10@@GLIBCXX_3.4
+_ZNSt21__numeric_limits_base8is_exactE@@GLIBCXX_3.4	std::__numeric_limits_base::is_exact@@GLIBCXX_3.4
+_ZNSt25__codecvt_utf8_utf16_baseIDiED0Ev@@GLIBCXX_3.4.21	std::__codecvt_utf8_utf16_base<char32_t>::~__codecvt_utf8_utf16_base()@@GLIBCXX_3.4.21
+_ZNSt25__codecvt_utf8_utf16_baseIwED2Ev@@GLIBCXX_3.4.21	std::__codecvt_utf8_utf16_base<wchar_t>::~__codecvt_utf8_utf16_base()@@GLIBCXX_3.4.21
+_ZNSt3_V216generic_categoryEv@@GLIBCXX_3.4.21	std::_V2::generic_category()@@GLIBCXX_3.4.21
+_ZNSt3pmr25monotonic_buffer_resource13_M_new_bufferEmm@@GLIBCXX_3.4.26	std::pmr::monotonic_buffer_resource::_M_new_buffer(unsigned long, unsigned long)@@GLIBCXX_3.4.26
+_ZNSt3pmr26synchronized_pool_resourceC1ERKNS_12pool_optionsEPNS_15memory_resourceE@@GLIBCXX_3.4.26	std::pmr::synchronized_pool_resource::synchronized_pool_resource(std::pmr::pool_options const&, std::pmr::memory_resource*)@@GLIBCXX_3.4.26
+_ZNSt3pmr28unsynchronized_pool_resourceC2ERKNS_12pool_optionsEPNS_15memory_resourceE@@GLIBCXX_3.4.26	std::pmr::unsynchronized_pool_resource::unsynchronized_pool_resource(std::pmr::pool_options const&, std::pmr::memory_resource*)@@GLIBCXX_3.4.26
+_ZNSt5ctypeIcEC1EPKtbm@@GLIBCXX_3.4	std::ctype<char>::ctype(unsigned short const*, bool, unsigned long)@@GLIBCXX_3.4
+_ZNSt5ctypeIwEC1EP15__locale_structm@@GLIBCXX_3.4	std::ctype<wchar_t>::ctype(__locale_struct*, unsigned long)@@GLIBCXX_3.4
+_ZNSt6__norm15_List_node_base11_M_transferEPS0_S1_@@GLIBCXX_3.4.14	std::__norm::_List_node_base::_M_transfer(std::__norm::_List_node_base*, std::__norm::_List_node_base*)@@GLIBCXX_3.4.14
+_ZNSt6chrono11locate_zoneESt17basic_string_viewIcSt11char_traitsIcEE@@GLIBCXX_3.4.31	std::chrono::locate_zone(std::basic_string_view<char, std::char_traits<char>>)@@GLIBCXX_3.4.31
+_ZNSt6chrono3_V212steady_clock9is_steadyE@@GLIBCXX_3.4.19	std::chrono::_V2::steady_clock::is_steady@@GLIBCXX_3.4.19
+_ZNSt6gslice8_IndexerC2EmRKSt8valarrayImES4_@@GLIBCXX_3.4	std::gslice::_Indexer::_Indexer(unsigned long, std::valarray<unsigned long> const&, std::valarray<unsigned long> const&)@@GLIBCXX_3.4
+_ZNSt6locale5_Impl16_M_replace_facetEPKS0_PKNS_2idE@@GLIBCXX_3.4	std::locale::_Impl::_M_replace_facet(std::locale::_Impl const*, std::locale::id const*)@@GLIBCXX_3.4
+_ZNSt6locale5_ImplC2Em@@GLIBCXX_3.4	std::locale::_Impl::_Impl(unsigned long)@@GLIBCXX_3.4
+_ZNSt6locale5facet19_S_destroy_c_localeERP15__locale_struct@@GLIBCXX_3.4	std::locale::facet::_S_destroy_c_locale(__locale_struct*&)@@GLIBCXX_3.4
+_ZNSt6locale8messagesE@@GLIBCXX_3.4	std::locale::messages@@GLIBCXX_3.4
+_ZNSt6localeC2EPKc@@GLIBCXX_3.4	std::locale::locale(char const*)@@GLIBCXX_3.4
+_ZNSt6localeaSERKS_@@GLIBCXX_3.4	std::locale::operator=(std::locale const&)@@GLIBCXX_3.4
+_ZNSt6thread6_StateD2Ev@@GLIBCXX_3.4.22	std::thread::_State::~_State()@@GLIBCXX_3.4.22
+_ZNSt7__cxx1110moneypunctIcLb0EEC2EP15__locale_structPKcm@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, false>::moneypunct(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1110moneypunctIcLb1EE4intlE@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, true>::intl@@GLIBCXX_3.4.21
+_ZNSt7__cxx1110moneypunctIcLb1EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<char, true>::~moneypunct()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1110moneypunctIwLb0EEC2EP15__locale_structPKcm@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, false>::moneypunct(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1110moneypunctIwLb1EE4intlE@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, true>::intl@@GLIBCXX_3.4.21
+_ZNSt7__cxx1110moneypunctIwLb1EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, true>::~moneypunct()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderC1EPcOS3_@@GLIBCXX_3.4.23	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_Alloc_hider::_Alloc_hider(char*, std::allocator<char>&&)@@GLIBCXX_3.4.23
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPcEEvT_S7_St20forward_iterator_tag@@GLIBCXX_3.4.21	void std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_construct<char*>(char*, char*, std::forward_iterator_tag)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13_S_copy_charsEPcS5_S5_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_S_copy_chars(char*, char*, char*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE3endEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::end()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE5eraseEN9__gnu_cxx17__normal_iteratorIPKcS4_EE@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::erase(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendERKS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::append(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6assignERKS4_mm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6insertEN9__gnu_cxx17__normal_iteratorIPcS4_EEmc@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::insert(__gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, unsigned long, char)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6resizeEm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::resize(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEN9__gnu_cxx17__normal_iteratorIPKcS4_EES9_S8_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::replace(__gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, char const*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEN9__gnu_cxx17__normal_iteratorIPcS4_EES8_PKcSA_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::replace(__gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, __gnu_cxx::__normal_iterator<char*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>>, char const*, char const*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7replaceEmmRKS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::replace(unsigned long, unsigned long, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::_M_assign(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EOS4_RKS3_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&, std::allocator<char> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1ERKS4_mmRKS3_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long, unsigned long, std::allocator<char> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2EOS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2ERKS4_mm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::basic_string(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED1Ev@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::~basic_string()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEpLEPKc@@GLIBCXX_3.4.21	std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>::operator+=(char const*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE11_M_capacityEm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_capacity(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE12_M_constructIN9__gnu_cxx17__normal_iteratorIPwS4_EEEEvT_SA_St20forward_iterator_tag@@GLIBCXX_3.4.21	void std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_construct<__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>>(__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, std::forward_iterator_tag)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE13_S_copy_charsEPwN9__gnu_cxx17__normal_iteratorIS5_S4_EES8_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_S_copy_chars(wchar_t*, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE18_M_construct_aux_2Emw@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_construct_aux_2(unsigned long, wchar_t)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE5beginEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::begin()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE6appendEPKw@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::append(wchar_t const*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE6assignEPKwm@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::assign(wchar_t const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE6insertEN9__gnu_cxx17__normal_iteratorIPwS4_EESt16initializer_listIwE@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::insert(__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, std::initializer_list<wchar_t>)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE6insertIN9__gnu_cxx17__normal_iteratorIPwS4_EEEEvS9_T_SA_@@GLIBCXX_3.4.21	void std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::insert<__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>>(__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPKwS4_EES9_PwSA_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::replace(__gnu_cxx::__normal_iterator<wchar_t const*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t const*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, wchar_t*, wchar_t*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE7replaceEN9__gnu_cxx17__normal_iteratorIPwS4_EES8_NS6_IPKwS4_EESB_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::replace(__gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t const*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>, __gnu_cxx::__normal_iterator<wchar_t const*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>>)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE7replaceEmmPKw@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::replace(unsigned long, unsigned long, wchar_t const*)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE8pop_backEv@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::pop_back()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC1ENS4_12__sv_wrapperERKS3_@@GLIBCXX_3.4.26	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::__sv_wrapper, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.26
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC1ERKS4_mRKS3_@@GLIBCXX_3.4.23	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, unsigned long, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.23
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC1IPwvEET_S7_RKS3_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string<wchar_t*, void>(wchar_t*, wchar_t*, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC2ERKS4_RKS3_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEC2IPKwvEET_S8_RKS3_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_string<wchar_t const*, void>(wchar_t const*, wchar_t const*, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEEaSEw@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::operator=(wchar_t)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1114collate_bynameIcEC2EPKcm@@GLIBCXX_3.4.21	std::__cxx11::collate_byname<char>::collate_byname(char const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1114collate_bynameIwEC2ERKNS_12basic_stringIcSt11char_traitsIcESaIcEEEm@@GLIBCXX_3.4.21	std::__cxx11::collate_byname<wchar_t>::collate_byname(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEE15_M_update_egptrEv@@GLIBCXX_3.4.21	std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::_M_update_egptr()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEE7seekposESt4fposI11__mbstate_tESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::seekpos(std::fpos<__mbstate_t>, std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEEC1EOS4_ONS4_14__xfer_bufptrsE@@GLIBCXX_3.4.21	std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::basic_stringbuf(std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>&&, std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::__xfer_bufptrs&&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEEC2EONS_12basic_stringIcS2_S3_EESt13_Ios_Openmode@@GLIBCXX_3.4.29	std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::basic_stringbuf(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&, std::_Ios_Openmode)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1115basic_stringbufIcSt11char_traitsIcESaIcEEC2ESt13_Ios_OpenmodeRKS3_@@GLIBCXX_3.4.29	std::__cxx11::basic_stringbuf<char, std::char_traits<char>, std::allocator<char>>::basic_stringbuf(std::_Ios_Openmode, std::allocator<char> const&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEE14__xfer_bufptrsD1Ev@@GLIBCXX_3.4.21	std::__cxx11::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::__xfer_bufptrs::~__xfer_bufptrs()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEE7_M_syncEPwmm@@GLIBCXX_3.4.21	std::__cxx11::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::_M_sync(wchar_t*, unsigned long, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEEC1EONS_12basic_stringIwS2_S3_EESt13_Ios_Openmode@@GLIBCXX_3.4.29	std::__cxx11::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringbuf(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&&, std::_Ios_Openmode)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEEC1ESt13_Ios_OpenmodeRKS3_@@GLIBCXX_3.4.29	std::__cxx11::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringbuf(std::_Ios_Openmode, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1115basic_stringbufIwSt11char_traitsIwESaIwEEC2ERKS3_@@GLIBCXX_3.4.29	std::__cxx11::basic_stringbuf<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringbuf(std::allocator<wchar_t> const&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1115messages_bynameIcEC1EPKcm@@GLIBCXX_3.4.21	std::__cxx11::messages_byname<char>::messages_byname(char const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115messages_bynameIwEC1ERKNS_12basic_stringIcSt11char_traitsIcESaIcEEEm@@GLIBCXX_3.4.21	std::__cxx11::messages_byname<wchar_t>::messages_byname(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115numpunct_bynameIcEC2EPKcm@@GLIBCXX_3.4.21	std::__cxx11::numpunct_byname<char>::numpunct_byname(char const*, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115numpunct_bynameIwEC2ERKNS_12basic_stringIcSt11char_traitsIcESaIcEEEm@@GLIBCXX_3.4.21	std::__cxx11::numpunct_byname<wchar_t>::numpunct_byname(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115time_get_bynameIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED0Ev@@GLIBCXX_3.4.21	std::__cxx11::time_get_byname<char, std::istreambuf_iterator<char, std::char_traits<char>>>::~time_get_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1115time_get_bynameIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev@@GLIBCXX_3.4.21	std::__cxx11::time_get_byname<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~time_get_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1117moneypunct_bynameIcLb0EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct_byname<char, false>::~moneypunct_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1117moneypunct_bynameIcLb1EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct_byname<char, true>::~moneypunct_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1117moneypunct_bynameIwLb0EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct_byname<wchar_t, false>::~moneypunct_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1117moneypunct_bynameIwLb1EED1Ev@@GLIBCXX_3.4.21	std::__cxx11::moneypunct_byname<wchar_t, true>::~moneypunct_byname()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEEC1ESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::basic_stringstream(std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEEC2Ev@@GLIBCXX_3.4.26	std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::basic_stringstream()@@GLIBCXX_3.4.26
+_ZNSt7__cxx1118basic_stringstreamIwSt11char_traitsIwESaIwEEC1EONS_12basic_stringIwS2_S3_EESt13_Ios_Openmode@@GLIBCXX_3.4.29	std::__cxx11::basic_stringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringstream(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>&&, std::_Ios_Openmode)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1118basic_stringstreamIwSt11char_traitsIwESaIwEEC2ERKNS_12basic_stringIwS2_S3_EESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::__cxx11::basic_stringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_stringstream(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_istringstreamIcSt11char_traitsIcESaIcEE3strEONS_12basic_stringIcS2_S3_EE@@GLIBCXX_3.4.29	std::__cxx11::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::str(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1119basic_istringstreamIcSt11char_traitsIcESaIcEEC1Ev@@GLIBCXX_3.4.26	std::__cxx11::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::basic_istringstream()@@GLIBCXX_3.4.26
+_ZNSt7__cxx1119basic_istringstreamIcSt11char_traitsIcESaIcEED1Ev@@GLIBCXX_3.4.21	std::__cxx11::basic_istringstream<char, std::char_traits<char>, std::allocator<char>>::~basic_istringstream()@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEEC1ERKNS_12basic_stringIwS2_S3_EESt13_Ios_Openmode@@GLIBCXX_3.4.21	std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_istringstream(std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&, std::_Ios_Openmode)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEEC2ESt13_Ios_OpenmodeRKS3_@@GLIBCXX_3.4.29	std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_istringstream(std::_Ios_Openmode, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEE4swapERS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>::swap(std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEC2EOS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>::basic_ostringstream(std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_ostringstreamIcSt11char_traitsIcESaIcEEaSEOS4_@@GLIBCXX_3.4.21	std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>::operator=(std::__cxx11::basic_ostringstream<char, std::char_traits<char>, std::allocator<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt7__cxx1119basic_ostringstreamIwSt11char_traitsIwESaIwEEC1ESt13_Ios_OpenmodeRKS3_@@GLIBCXX_3.4.29	std::__cxx11::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::basic_ostringstream(std::_Ios_Openmode, std::allocator<wchar_t> const&)@@GLIBCXX_3.4.29
+_ZNSt7__cxx1119basic_ostringstreamIwSt11char_traitsIwESaIwEED0Ev@@GLIBCXX_3.4.21	std::__cxx11::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::~basic_ostringstream()@@GLIBCXX_3.4.21
+_ZNSt7__cxx117collateIcEC2Em@@GLIBCXX_3.4.21	std::__cxx11::collate<char>::collate(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx117collateIwEC2Em@@GLIBCXX_3.4.21	std::__cxx11::collate<wchar_t>::collate(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx118messagesIcEC2Em@@GLIBCXX_3.4.21	std::__cxx11::messages<char>::messages(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx118messagesIwEC2Em@@GLIBCXX_3.4.21	std::__cxx11::messages<wchar_t>::messages(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx118numpunctIcEC1Em@@GLIBCXX_3.4.21	std::__cxx11::numpunct<char>::numpunct(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx118numpunctIwE2idE@@GLIBCXX_3.4.21	std::__cxx11::numpunct<wchar_t>::id@@GLIBCXX_3.4.21
+_ZNSt7__cxx118numpunctIwED1Ev@@GLIBCXX_3.4.21	std::__cxx11::numpunct<wchar_t>::~numpunct()@@GLIBCXX_3.4.21
+_ZNSt7__cxx118time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE2idE@@GLIBCXX_3.4.21	std::__cxx11::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::id@@GLIBCXX_3.4.21
+_ZNSt7__cxx119money_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEEC2Em@@GLIBCXX_3.4.21	std::__cxx11::money_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::money_get(unsigned long)@@GLIBCXX_3.4.21
+_ZNSt7__cxx119money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev@@GLIBCXX_3.4.21	std::__cxx11::money_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~money_get()@@GLIBCXX_3.4.21
+_ZNSt7__cxx119money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE2idE@@GLIBCXX_3.4.21	std::__cxx11::money_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::id@@GLIBCXX_3.4.21
+_ZNSt7codecvtIDiDu11__mbstate_tED1Ev@@GLIBCXX_3.4.26	std::codecvt<char32_t, char8_t, __mbstate_t>::~codecvt()@@GLIBCXX_3.4.26
+_ZNSt7codecvtIDsDu11__mbstate_tED1Ev@@GLIBCXX_3.4.26	std::codecvt<char16_t, char8_t, __mbstate_t>::~codecvt()@@GLIBCXX_3.4.26
+_ZNSt7codecvtIcc11__mbstate_tEC1Em@@GLIBCXX_3.4	std::codecvt<char, char, __mbstate_t>::codecvt(unsigned long)@@GLIBCXX_3.4
+_ZNSt7codecvtIwc11__mbstate_tEC1Em@@GLIBCXX_3.4	std::codecvt<wchar_t, char, __mbstate_t>::codecvt(unsigned long)@@GLIBCXX_3.4
+_ZNSt7collateIcEC1Em@@GLIBCXX_3.4	std::collate<char>::collate(unsigned long)@@GLIBCXX_3.4
+_ZNSt7collateIwEC1Em@@GLIBCXX_3.4	std::collate<wchar_t>::collate(unsigned long)@@GLIBCXX_3.4
+_ZNSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEEC2Em@@GLIBCXX_3.4	std::num_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::num_get(unsigned long)@@GLIBCXX_3.4
+_ZNSt7num_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED1Ev@@GLIBCXX_3.4	std::num_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~num_get()@@GLIBCXX_3.4
+_ZNSt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE2idE@@GLIBCXX_3.4	std::num_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::id@@GLIBCXX_3.4
+_ZNSt8__detail15_List_node_base11_M_transferEPS0_S1_@@GLIBCXX_3.4.15	std::__detail::_List_node_base::_M_transfer(std::__detail::_List_node_base*, std::__detail::_List_node_base*)@@GLIBCXX_3.4.15
+_ZNSt8ios_base10scientificE@@GLIBCXX_3.4	std::ios_base::scientific@@GLIBCXX_3.4
+_ZNSt8ios_base3appE@@GLIBCXX_3.4	std::ios_base::app@@GLIBCXX_3.4
+_ZNSt8ios_base3outE@@GLIBCXX_3.4	std::ios_base::out@@GLIBCXX_3.4
+_ZNSt8ios_base5rightE@@GLIBCXX_3.4	std::ios_base::right@@GLIBCXX_3.4
+_ZNSt8ios_base7_M_moveERS_@@GLIBCXX_3.4.21	std::ios_base::_M_move(std::ios_base&)@@GLIBCXX_3.4.21
+_ZNSt8ios_base7failureB5cxx11C2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKSt10error_code@@GLIBCXX_3.4.21	std::ios_base::failure[abi:cxx11]::failure(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>> const&, std::error_code const&)@@GLIBCXX_3.4.21
+_ZNSt8ios_base7failureD2Ev@@GLIBCXX_3.4	std::ios_base::failure::~failure()@@GLIBCXX_3.4
+_ZNSt8ios_base9showpointE@@GLIBCXX_3.4	std::ios_base::showpoint@@GLIBCXX_3.4
+_ZNSt8messagesIcEC1EP15__locale_structPKcm@@GLIBCXX_3.4	std::messages<char>::messages(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt8messagesIwEC1EP15__locale_structPKcm@@GLIBCXX_3.4	std::messages<wchar_t>::messages(__locale_struct*, char const*, unsigned long)@@GLIBCXX_3.4
+_ZNSt8numpunctIcE2idE@@GLIBCXX_3.4	std::numpunct<char>::id@@GLIBCXX_3.4
+_ZNSt8numpunctIcED1Ev@@GLIBCXX_3.4	std::numpunct<char>::~numpunct()@@GLIBCXX_3.4
+_ZNSt8numpunctIwEC2EPSt16__numpunct_cacheIwEm@@GLIBCXX_3.4	std::numpunct<wchar_t>::numpunct(std::__numpunct_cache<wchar_t>*, unsigned long)@@GLIBCXX_3.4
+_ZNSt8time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEED0Ev@@GLIBCXX_3.4	std::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>::~time_get()@@GLIBCXX_3.4
+_ZNSt8time_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEED2Ev@@GLIBCXX_3.4	std::time_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~time_get()@@GLIBCXX_3.4
+_ZNSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEEC1Em@@GLIBCXX_3.4	std::time_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::time_put(unsigned long)@@GLIBCXX_3.4
+_ZNSt8valarrayImEC2Em@@GLIBCXX_3.4	std::valarray<unsigned long>::valarray(unsigned long)@@GLIBCXX_3.4
+_ZNSt9__cxx199815_List_node_base4hookEPS0_@@GLIBCXX_3.4.10	std::__cxx1998::_List_node_base::hook(std::__cxx1998::_List_node_base*)@@GLIBCXX_3.4.10
+_ZNSt9bad_allocD1Ev@@GLIBCXX_3.4	std::bad_alloc::~bad_alloc()@@GLIBCXX_3.4
+_ZNSt9basic_iosIcSt11char_traitsIcEE4moveEOS2_@@GLIBCXX_3.4.21	std::basic_ios<char, std::char_traits<char>>::move(std::basic_ios<char, std::char_traits<char>>&&)@@GLIBCXX_3.4.21
+_ZNSt9basic_iosIcSt11char_traitsIcEE9set_rdbufEPSt15basic_streambufIcS1_E@@GLIBCXX_3.4.21	std::basic_ios<char, std::char_traits<char>>::set_rdbuf(std::basic_streambuf<char, std::char_traits<char>>*)@@GLIBCXX_3.4.21
+_ZNSt9basic_iosIwSt11char_traitsIwEE10exceptionsESt12_Ios_Iostate@@GLIBCXX_3.4	std::basic_ios<wchar_t, std::char_traits<wchar_t>>::exceptions(std::_Ios_Iostate)@@GLIBCXX_3.4
+_ZNSt9basic_iosIwSt11char_traitsIwEE4swapERS2_@@GLIBCXX_3.4.21	std::basic_ios<wchar_t, std::char_traits<wchar_t>>::swap(std::basic_ios<wchar_t, std::char_traits<wchar_t>>&)@@GLIBCXX_3.4.21
+_ZNSt9basic_iosIwSt11char_traitsIwEEC1Ev@@GLIBCXX_3.4	std::basic_ios<wchar_t, std::char_traits<wchar_t>>::basic_ios()@@GLIBCXX_3.4
+_ZNSt9exceptionD2Ev@@GLIBCXX_3.4	std::exception::~exception()@@GLIBCXX_3.4
+_ZNSt9money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEEC1Em@@GLIBCXX_3.4	std::money_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::money_get(unsigned long)@@GLIBCXX_3.4
+_ZNSt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEED0Ev@@GLIBCXX_3.4	std::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>::~money_put()@@GLIBCXX_3.4
+_ZNSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEED2Ev@@GLIBCXX_3.4	std::money_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>::~money_put()@@GLIBCXX_3.4
+_ZNSt9strstreamD1Ev@@GLIBCXX_3.4	std::strstream::~strstream()@@GLIBCXX_3.4
+_ZSt10defer_lock@@GLIBCXX_3.4.11	std::defer_lock@@GLIBCXX_3.4.11
+_ZSt11try_to_lock@@GLIBCXX_3.4.11	std::try_to_lock@@GLIBCXX_3.4.11
+_ZSt15_Fnv_hash_bytesPKvmm@@CXXABI_1.3.5	std::_Fnv_hash_bytes(void const*, unsigned long, unsigned long)@@CXXABI_1.3.5
+_ZSt15__try_use_facetINSt7__cxx118messagesIcEEEPKT_RKSt6locale@@GLIBCXX_3.4.31	std::__cxx11::messages<char> const* std::__try_use_facet<std::__cxx11::messages<char>>(std::locale const&)@@GLIBCXX_3.4.31
+_ZSt15__try_use_facetINSt7__cxx119money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEEEPKT_RKSt6locale@@GLIBCXX_3.4.31	std::__cxx11::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>> const* std::__try_use_facet<std::__cxx11::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>>(std::locale const&)@@GLIBCXX_3.4.31
+_ZSt15__try_use_facetISt5ctypeIcEEPKT_RKSt6locale@@GLIBCXX_3.4.31	std::ctype<char> const* std::__try_use_facet<std::ctype<char>>(std::locale const&)@@GLIBCXX_3.4.31
+_ZSt15__try_use_facetISt7num_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEEPKT_RKSt6locale@@GLIBCXX_3.4.31	std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>> const* std::__try_use_facet<std::num_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>>(std::locale const&)@@GLIBCXX_3.4.31
+_ZSt15__try_use_facetISt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEEPKT_RKSt6locale@@GLIBCXX_3.4.31	std::time_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>> const* std::__try_use_facet<std::time_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>>(std::locale const&)@@GLIBCXX_3.4.31
+_ZSt15get_new_handlerv@@GLIBCXX_3.4.20	std::get_new_handler()@@GLIBCXX_3.4.20
+_ZSt17__copy_streambufsIwSt11char_traitsIwEElPSt15basic_streambufIT_T0_ES6_@@GLIBCXX_3.4.8	long std::__copy_streambufs<wchar_t, std::char_traits<wchar_t>>(std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>*, std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>*)@@GLIBCXX_3.4.8
+_ZSt17rethrow_exceptionNSt15__exception_ptr13exception_ptrE@@CXXABI_1.3.3	std::rethrow_exception(std::__exception_ptr::exception_ptr)@@CXXABI_1.3.3
+_ZSt19__throw_ios_failurePKci@@GLIBCXX_3.4.26	std::__throw_ios_failure(char const*, int)@@GLIBCXX_3.4.26
+_ZSt20__throw_future_errori@@GLIBCXX_3.4.14	std::__throw_future_error(int)@@GLIBCXX_3.4.14
+_ZSt21__glibcxx_assert_failPKciS0_S0_@@GLIBCXX_3.4.30	std::__glibcxx_assert_fail(char const*, int, char const*, char const*)@@GLIBCXX_3.4.30
+_ZSt23__throw_underflow_errorPKc@@GLIBCXX_3.4	std::__throw_underflow_error(char const*)@@GLIBCXX_3.4
+_ZSt2wsIcSt11char_traitsIcEERSt13basic_istreamIT_T0_ES6_@@GLIBCXX_3.4	std::basic_istream<char, std::char_traits<char>>& std::ws<char, std::char_traits<char>>(std::basic_istream<char, std::char_traits<char>>&)@@GLIBCXX_3.4
+_ZSt4endsIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_@@GLIBCXX_3.4	std::basic_ostream<char, std::char_traits<char>>& std::ends<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&)@@GLIBCXX_3.4
+_ZSt7getlineIcSt11char_traitsIcESaIcEERSt13basic_istreamIT_T0_ES7_RNSt7__cxx1112basic_stringIS4_S5_T1_EE@@GLIBCXX_3.4.21	std::basic_istream<char, std::char_traits<char>>& std::getline<char, std::char_traits<char>, std::allocator<char>>(std::basic_istream<char, std::char_traits<char>>&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&)@@GLIBCXX_3.4.21
+_ZSt7nothrow@@GLIBCXX_3.4	std::nothrow@@GLIBCXX_3.4
+_ZSt8to_charsPcS_eSt12chars_format@@GLIBCXX_3.4.29	std::to_chars(char*, char*, long double, std::chars_format)@@GLIBCXX_3.4.29
+_ZSt9has_facetINSt7__cxx117collateIwEEEbRKSt6locale@@GLIBCXX_3.4.21	bool std::has_facet<std::__cxx11::collate<wchar_t>>(std::locale const&)@@GLIBCXX_3.4.21
+_ZSt9has_facetINSt7__cxx119money_getIwSt19istreambuf_iteratorIwSt11char_traitsIwEEEEEbRKSt6locale@@GLIBCXX_3.4.21	bool std::has_facet<std::__cxx11::money_get<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>>(std::locale const&)@@GLIBCXX_3.4.21
+_ZSt9has_facetISt5ctypeIwEEbRKSt6locale@@GLIBCXX_3.4	bool std::has_facet<std::ctype<wchar_t>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9has_facetISt7num_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEEEbRKSt6locale@@GLIBCXX_3.4	bool std::has_facet<std::num_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9has_facetISt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEEEbRKSt6locale@@GLIBCXX_3.4	bool std::has_facet<std::time_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9use_facetINSt7__cxx1110moneypunctIwLb0EEEERKT_RKSt6locale@@GLIBCXX_3.4.21	std::__cxx11::moneypunct<wchar_t, false> const& std::use_facet<std::__cxx11::moneypunct<wchar_t, false>>(std::locale const&)@@GLIBCXX_3.4.21
+_ZSt9use_facetINSt7__cxx118time_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEEEERKT_RKSt6locale@@GLIBCXX_3.4.21	std::__cxx11::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>> const& std::use_facet<std::__cxx11::time_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>>(std::locale const&)@@GLIBCXX_3.4.21
+_ZSt9use_facetISt10moneypunctIwLb0EEERKT_RKSt6locale@@GLIBCXX_3.4	std::moneypunct<wchar_t, false> const& std::use_facet<std::moneypunct<wchar_t, false>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9use_facetISt7collateIcEERKT_RKSt6locale@@GLIBCXX_3.4	std::collate<char> const& std::use_facet<std::collate<char>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9use_facetISt8numpunctIcEERKT_RKSt6locale@@GLIBCXX_3.4	std::numpunct<char> const& std::use_facet<std::numpunct<char>>(std::locale const&)@@GLIBCXX_3.4
+_ZSt9use_facetISt9money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEERKT_RKSt6locale@@GLIBCXX_3.4	std::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>> const& std::use_facet<std::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>>(std::locale const&)@@GLIBCXX_3.4
+_ZStlsIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_St12_Setiosflags@@GLIBCXX_3.4	std::basic_ostream<char, std::char_traits<char>>& std::operator<<<char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::_Setiosflags)@@GLIBCXX_3.4
+_ZStlsIdcSt11char_traitsIcEERSt13basic_ostreamIT0_T1_ES6_RKSt7complexIT_E@@GLIBCXX_3.4	std::basic_ostream<char, std::char_traits<char>>& std::operator<<<double, char, std::char_traits<char>>(std::basic_ostream<char, std::char_traits<char>>&, std::complex<double> const&)@@GLIBCXX_3.4
+_ZStlsIwSt11char_traitsIwEERSt13basic_ostreamIT_T0_ES6_S3_@@GLIBCXX_3.4	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>& std::operator<<<wchar_t, std::char_traits<wchar_t>>(std::basic_ostream<wchar_t, std::char_traits<wchar_t>>&, wchar_t)@@GLIBCXX_3.4
+_ZStlsIwSt11char_traitsIwESaIwEERSt13basic_ostreamIT_T0_ES7_RKNSt7__cxx1112basic_stringIS4_S5_T1_EE@@GLIBCXX_3.4.21	std::basic_ostream<wchar_t, std::char_traits<wchar_t>>& std::operator<<<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>(std::basic_ostream<wchar_t, std::char_traits<wchar_t>>&, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4.21
+_ZStplIwSt11char_traitsIwESaIwEENSt7__cxx1112basic_stringIT_T0_T1_EEPKS5_RKS8_@@GLIBCXX_3.4.21	std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> std::operator+<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>(wchar_t const*, std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>> const&)@@GLIBCXX_3.4.21
+_ZStrsISt11char_traitsIcEERSt13basic_istreamIcT_ES5_Ra@@GLIBCXX_3.4	std::basic_istream<char, std::char_traits<char>>& std::operator>><std::char_traits<char>>(std::basic_istream<char, std::char_traits<char>>&, signed char&)@@GLIBCXX_3.4
+_ZStrsIcSt11char_traitsIcEERSt13basic_istreamIT_T0_ES6_St8_Setbase@@GLIBCXX_3.4	std::basic_istream<char, std::char_traits<char>>& std::operator>><char, std::char_traits<char>>(std::basic_istream<char, std::char_traits<char>>&, std::_Setbase)@@GLIBCXX_3.4
+_ZStrsIfcSt11char_traitsIcEERSt13basic_istreamIT0_T1_ES6_RSt7complexIT_E@@GLIBCXX_3.4	std::basic_istream<char, std::char_traits<char>>& std::operator>><float, char, std::char_traits<char>>(std::basic_istream<char, std::char_traits<char>>&, std::complex<float>&)@@GLIBCXX_3.4
+_ZStrsIwSt11char_traitsIwEERSt13basic_istreamIT_T0_ES6_St8_Setbase@@GLIBCXX_3.4	std::basic_istream<wchar_t, std::char_traits<wchar_t>>& std::operator>><wchar_t, std::char_traits<wchar_t>>(std::basic_istream<wchar_t, std::char_traits<wchar_t>>&, std::_Setbase)@@GLIBCXX_3.4
+_ZTIDs@@CXXABI_1.3.3	typeinfo for char16_t@@CXXABI_1.3.3
+_ZTIN10__cxxabiv119__pointer_type_infoE@@CXXABI_1.3	typeinfo for __cxxabiv1::__pointer_type_info@@CXXABI_1.3
+_ZTIN9__gnu_cxx18stdio_sync_filebufIcSt11char_traitsIcEEE@@GLIBCXX_3.4	typeinfo for __gnu_cxx::stdio_sync_filebuf<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTINSt3pmr15memory_resourceE@@GLIBCXX_3.4.28	typeinfo for std::pmr::memory_resource@@GLIBCXX_3.4.28
+_ZTINSt7__cxx1110moneypunctIwLb0EEE@@GLIBCXX_3.4.21	typeinfo for std::__cxx11::moneypunct<wchar_t, false>@@GLIBCXX_3.4.21
+_ZTINSt7__cxx1115numpunct_bynameIcEE@@GLIBCXX_3.4.21	typeinfo for std::__cxx11::numpunct_byname<char>@@GLIBCXX_3.4.21
+_ZTINSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	typeinfo for std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>@@GLIBCXX_3.4.21
+_ZTINSt7__cxx118messagesIcEE@@GLIBCXX_3.4.21	typeinfo for std::__cxx11::messages<char>@@GLIBCXX_3.4.21
+_ZTINSt7__cxx119money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEE@@GLIBCXX_3.4.21	typeinfo for std::__cxx11::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>@@GLIBCXX_3.4.21
+_ZTIPDs@@CXXABI_1.3.3	typeinfo for char16_t*@@CXXABI_1.3.3
+_ZTIPKa@@CXXABI_1.3	typeinfo for signed char const*@@CXXABI_1.3
+_ZTIPKi@@CXXABI_1.3	typeinfo for int const*@@CXXABI_1.3
+_ZTIPKv@@CXXABI_1.3	typeinfo for void const*@@CXXABI_1.3
+_ZTIPe@@CXXABI_1.3	typeinfo for long double*@@CXXABI_1.3
+_ZTIPn@@CXXABI_1.3.5	typeinfo for __int128*@@CXXABI_1.3.5
+_ZTISd@@GLIBCXX_3.4	typeinfo for std::iostream@@GLIBCXX_3.4
+_ZTISt10moneypunctIcLb0EE@@GLIBCXX_3.4	typeinfo for std::moneypunct<char, false>@@GLIBCXX_3.4
+_ZTISt11range_error@@GLIBCXX_3.4	typeinfo for std::range_error@@GLIBCXX_3.4
+_ZTISt12length_error@@GLIBCXX_3.4	typeinfo for std::length_error@@GLIBCXX_3.4
+_ZTISt13basic_fstreamIwSt11char_traitsIwEE@@GLIBCXX_3.4	typeinfo for std::basic_fstream<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTISt14basic_ofstreamIcSt11char_traitsIcEE@@GLIBCXX_3.4	typeinfo for std::basic_ofstream<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTISt15basic_streambufIcSt11char_traitsIcEE@@GLIBCXX_3.4	typeinfo for std::basic_streambuf<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTISt15time_get_bynameIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE@@GLIBCXX_3.4	typeinfo for std::time_get_byname<char, std::istreambuf_iterator<char, std::char_traits<char>>>@@GLIBCXX_3.4
+_ZTISt17bad_function_call@@GLIBCXX_3.4.15	typeinfo for std::bad_function_call@@GLIBCXX_3.4.15
+_ZTISt19__codecvt_utf8_baseIDsE@@GLIBCXX_3.4.21	typeinfo for std::__codecvt_utf8_base<char16_t>@@GLIBCXX_3.4.21
+_ZTISt20__codecvt_utf16_baseIwE@@GLIBCXX_3.4.21	typeinfo for std::__codecvt_utf16_base<wchar_t>@@GLIBCXX_3.4.21
+_ZTISt25__codecvt_utf8_utf16_baseIwE@@GLIBCXX_3.4.21	typeinfo for std::__codecvt_utf8_utf16_base<wchar_t>@@GLIBCXX_3.4.21
+_ZTISt7codecvtIwc11__mbstate_tE@@GLIBCXX_3.4	typeinfo for std::codecvt<wchar_t, char, __mbstate_t>@@GLIBCXX_3.4
+_ZTISt8ios_base@@GLIBCXX_3.4	typeinfo for std::ios_base@@GLIBCXX_3.4
+_ZTISt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE@@GLIBCXX_3.4	typeinfo for std::time_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4
+_ZTISt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE@@GLIBCXX_3.4	typeinfo for std::money_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4
+_ZTIe@@CXXABI_1.3	typeinfo for long double@@CXXABI_1.3
+_ZTIn@@CXXABI_1.3.5	typeinfo for __int128@@CXXABI_1.3.5
+_ZTSN10__cxxabiv116__enum_type_infoE@@CXXABI_1.3	typeinfo name for __cxxabiv1::__enum_type_info@@CXXABI_1.3
+_ZTSN10__cxxabiv123__fundamental_type_infoE@@CXXABI_1.3	typeinfo name for __cxxabiv1::__fundamental_type_info@@CXXABI_1.3
+_ZTSNSt3pmr25monotonic_buffer_resourceE@@GLIBCXX_3.4.28	typeinfo name for std::pmr::monotonic_buffer_resource@@GLIBCXX_3.4.28
+_ZTSNSt7__cxx1114collate_bynameIwEE@@GLIBCXX_3.4.21	typeinfo name for std::__cxx11::collate_byname<wchar_t>@@GLIBCXX_3.4.21
+_ZTSNSt7__cxx1115time_get_bynameIwSt19istreambuf_iteratorIwSt11char_traitsIwEEEE@@GLIBCXX_3.4.21	typeinfo name for std::__cxx11::time_get_byname<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4.21
+_ZTSNSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEEE@@GLIBCXX_3.4.21	typeinfo name for std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>@@GLIBCXX_3.4.21
+_ZTSNSt7__cxx118numpunctIwEE@@GLIBCXX_3.4.21	typeinfo name for std::__cxx11::numpunct<wchar_t>@@GLIBCXX_3.4.21
+_ZTSNSt8ios_base7failureE@@GLIBCXX_3.4	typeinfo name for std::ios_base::failure@@GLIBCXX_3.4
+_ZTSPKh@@CXXABI_1.3	typeinfo name for unsigned char const*@@CXXABI_1.3
+_ZTSPKt@@CXXABI_1.3	typeinfo name for unsigned short const*@@CXXABI_1.3
+_ZTSPd@@CXXABI_1.3	typeinfo name for double*@@CXXABI_1.3
+_ZTSPm@@CXXABI_1.3	typeinfo name for unsigned long*@@CXXABI_1.3
+_ZTSPy@@CXXABI_1.3	typeinfo name for unsigned long long*@@CXXABI_1.3
+_ZTSSt10money_base@@GLIBCXX_3.4	typeinfo name for std::money_base@@GLIBCXX_3.4
+_ZTSSt11logic_error@@GLIBCXX_3.4	typeinfo name for std::logic_error@@GLIBCXX_3.4
+_ZTSSt12out_of_range@@GLIBCXX_3.4	typeinfo name for std::out_of_range@@GLIBCXX_3.4
+_ZTSSt13basic_istreamIwSt11char_traitsIwEE@@GLIBCXX_3.4	typeinfo name for std::basic_istream<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTSSt14basic_ofstreamIwSt11char_traitsIwEE@@GLIBCXX_3.4	typeinfo name for std::basic_ofstream<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTSSt15basic_streambufIwSt11char_traitsIwEE@@GLIBCXX_3.4	typeinfo name for std::basic_streambuf<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTSSt15time_get_bynameIwSt19istreambuf_iteratorIwSt11char_traitsIwEEE@@GLIBCXX_3.4	typeinfo name for std::time_get_byname<wchar_t, std::istreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4
+_ZTSSt17moneypunct_bynameIwLb0EE@@GLIBCXX_3.4	typeinfo name for std::moneypunct_byname<wchar_t, false>@@GLIBCXX_3.4
+_ZTSSt19basic_istringstreamIwSt11char_traitsIwESaIwEE@@GLIBCXX_3.4	typeinfo name for std::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>@@GLIBCXX_3.4
+_ZTSSt21__ctype_abstract_baseIwE@@GLIBCXX_3.4	typeinfo name for std::__ctype_abstract_base<wchar_t>@@GLIBCXX_3.4
+_ZTSSt7codecvtIDiDu11__mbstate_tE@@GLIBCXX_3.4.26	typeinfo name for std::codecvt<char32_t, char8_t, __mbstate_t>@@GLIBCXX_3.4.26
+_ZTSSt7num_getIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE@@GLIBCXX_3.4	typeinfo name for std::num_get<char, std::istreambuf_iterator<char, std::char_traits<char>>>@@GLIBCXX_3.4
+_ZTSSt8numpunctIcE@@GLIBCXX_3.4	typeinfo name for std::numpunct<char>@@GLIBCXX_3.4
+_ZTSSt9basic_iosIwSt11char_traitsIwEE@@GLIBCXX_3.4	typeinfo name for std::basic_ios<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTSSt9type_info@@GLIBCXX_3.4	typeinfo name for std::type_info@@GLIBCXX_3.4
+_ZTSh@@CXXABI_1.3	typeinfo name for unsigned char@@CXXABI_1.3
+_ZTSt@@CXXABI_1.3	typeinfo name for unsigned short@@CXXABI_1.3
+_ZTTNSt7__cxx1119basic_istringstreamIwSt11char_traitsIwESaIwEEE@@GLIBCXX_3.4.21	VTT for std::__cxx11::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>@@GLIBCXX_3.4.21
+_ZTTSt13basic_fstreamIcSt11char_traitsIcEE@@GLIBCXX_3.4	VTT for std::basic_fstream<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTTSt14basic_ofstreamIwSt11char_traitsIwEE@@GLIBCXX_3.4	VTT for std::basic_ofstream<wchar_t, std::char_traits<wchar_t>>@@GLIBCXX_3.4
+_ZTVN10__cxxabiv116__enum_type_infoE@@CXXABI_1.3	vtable for __cxxabiv1::__enum_type_info@@CXXABI_1.3
+_ZTVN10__cxxabiv123__fundamental_type_infoE@@CXXABI_1.3	vtable for __cxxabiv1::__fundamental_type_info@@CXXABI_1.3
+_ZTVNSt13__future_base19_Async_state_commonE@@GLIBCXX_3.4.17	vtable for std::__future_base::_Async_state_common@@GLIBCXX_3.4.17
+_ZTVNSt7__cxx1110moneypunctIwLb0EEE@@GLIBCXX_3.4.21	vtable for std::__cxx11::moneypunct<wchar_t, false>@@GLIBCXX_3.4.21
+_ZTVNSt7__cxx1115numpunct_bynameIcEE@@GLIBCXX_3.4.21	vtable for std::__cxx11::numpunct_byname<char>@@GLIBCXX_3.4.21
+_ZTVNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEEE@@GLIBCXX_3.4.21	vtable for std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>@@GLIBCXX_3.4.21
+_ZTVNSt7__cxx118messagesIcEE@@GLIBCXX_3.4.21	vtable for std::__cxx11::messages<char>@@GLIBCXX_3.4.21
+_ZTVNSt7__cxx119money_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEEE@@GLIBCXX_3.4.21	vtable for std::__cxx11::money_put<char, std::ostreambuf_iterator<char, std::char_traits<char>>>@@GLIBCXX_3.4.21
+_ZTVSt10istrstream@@GLIBCXX_3.4	vtable for std::istrstream@@GLIBCXX_3.4
+_ZTVSt11__timepunctIwE@@GLIBCXX_3.4	vtable for std::__timepunct<wchar_t>@@GLIBCXX_3.4
+_ZTVSt12future_error@@GLIBCXX_3.4.14	vtable for std::future_error@@GLIBCXX_3.4.14
+_ZTVSt13basic_fstreamIcSt11char_traitsIcEE@@GLIBCXX_3.4	vtable for std::basic_fstream<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTVSt14basic_ofstreamIcSt11char_traitsIcEE@@GLIBCXX_3.4	vtable for std::basic_ofstream<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTVSt15basic_streambufIcSt11char_traitsIcEE@@GLIBCXX_3.4	vtable for std::basic_streambuf<char, std::char_traits<char>>@@GLIBCXX_3.4
+_ZTVSt15time_get_bynameIcSt19istreambuf_iteratorIcSt11char_traitsIcEEE@@GLIBCXX_3.4	vtable for std::time_get_byname<char, std::istreambuf_iterator<char, std::char_traits<char>>>@@GLIBCXX_3.4
+_ZTVSt17bad_function_call@@GLIBCXX_3.4.15	vtable for std::bad_function_call@@GLIBCXX_3.4.15
+_ZTVSt19__codecvt_utf8_baseIDsE@@GLIBCXX_3.4.21	vtable for std::__codecvt_utf8_base<char16_t>@@GLIBCXX_3.4.21
+_ZTVSt20__codecvt_utf16_baseIwE@@GLIBCXX_3.4.21	vtable for std::__codecvt_utf16_base<wchar_t>@@GLIBCXX_3.4.21
+_ZTVSt25__codecvt_utf8_utf16_baseIwE@@GLIBCXX_3.4.21	vtable for std::__codecvt_utf8_utf16_base<wchar_t>@@GLIBCXX_3.4.21
+_ZTVSt7codecvtIwc11__mbstate_tE@@GLIBCXX_3.4	vtable for std::codecvt<wchar_t, char, __mbstate_t>@@GLIBCXX_3.4
+_ZTVSt8ios_base@@GLIBCXX_3.4	vtable for std::ios_base@@GLIBCXX_3.4
+_ZTVSt8time_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE@@GLIBCXX_3.4	vtable for std::time_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4
+_ZTVSt9money_putIwSt19ostreambuf_iteratorIwSt11char_traitsIwEEE@@GLIBCXX_3.4	vtable for std::money_put<wchar_t, std::ostreambuf_iterator<wchar_t, std::char_traits<wchar_t>>>@@GLIBCXX_3.4
+_ZThn16_NSt13basic_fstreamIwSt11char_traitsIwEED1Ev@@GLIBCXX_3.4	non-virtual thunk to std::basic_fstream<wchar_t, std::char_traits<wchar_t>>::~basic_fstream()@@GLIBCXX_3.4
+_ZThn16_NSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEED1Ev@@GLIBCXX_3.4.21	non-virtual thunk to std::__cxx11::basic_stringstream<char, std::char_traits<char>, std::allocator<char>>::~basic_stringstream()@@GLIBCXX_3.4.21
+_ZTv0_n24_NSiD1Ev@@GLIBCXX_3.4	virtual thunk to std::basic_istream<char, std::char_traits<char>>::~basic_istream()@@GLIBCXX_3.4
+_ZTv0_n24_NSt13basic_fstreamIcSt11char_traitsIcEED1Ev@@GLIBCXX_3.4	virtual thunk to std::basic_fstream<char, std::char_traits<char>>::~basic_fstream()@@GLIBCXX_3.4
+_ZTv0_n24_NSt14basic_ifstreamIcSt11char_traitsIcEED1Ev@@GLIBCXX_3.4	virtual thunk to std::basic_ifstream<char, std::char_traits<char>>::~basic_ifstream()@@GLIBCXX_3.4
+_ZTv0_n24_NSt14basic_ofstreamIwSt11char_traitsIwEED1Ev@@GLIBCXX_3.4	virtual thunk to std::basic_ofstream<wchar_t, std::char_traits<wchar_t>>::~basic_ofstream()@@GLIBCXX_3.4
+_ZTv0_n24_NSt19basic_istringstreamIwSt11char_traitsIwESaIwEED1Ev@@GLIBCXX_3.4	virtual thunk to std::basic_istringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::~basic_istringstream()@@GLIBCXX_3.4
+_ZTv0_n24_NSt7__cxx1118basic_stringstreamIwSt11char_traitsIwESaIwEED1Ev@@GLIBCXX_3.4.21	virtual thunk to std::__cxx11::basic_stringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::~basic_stringstream()@@GLIBCXX_3.4.21
+_ZTv0_n24_NSt7__cxx1119basic_ostringstreamIwSt11char_traitsIwESaIwEED1Ev@@GLIBCXX_3.4.21	virtual thunk to std::__cxx11::basic_ostringstream<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t>>::~basic_ostringstream()@@GLIBCXX_3.4.21
+_ZdaPvmSt11align_val_t@@CXXABI_1.3.11	operator delete[](void*, unsigned long, std::align_val_t)@@CXXABI_1.3.11
+_ZnamRKSt9nothrow_t@@GLIBCXX_3.4	operator new[](unsigned long, std::nothrow_t const&)@@GLIBCXX_3.4
