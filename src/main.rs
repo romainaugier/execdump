@@ -22,6 +22,9 @@ mod x86_64;
 mod aarch64;
 mod char_utils;
 mod decompiler;
+mod eh_frame;
+mod program;
+mod analysis;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();

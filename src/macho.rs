@@ -949,6 +949,12 @@ pub struct MachOBinary {
     pub load_commands: Vec<LoadCommand>,
     pub sections: HashMap<String, MachOSection>,
     pub symbols: Vec<MachOSymbol>,
+    /// Indirect symbol table (LC_DYSYMTAB), indices into the symbol table
+    pub indirect_symbols: Vec<u32>,
+    /// Function start addresses decoded from LC_FUNCTION_STARTS
+    pub function_starts: Vec<u64>,
+    /// Entry point address (LC_MAIN)
+    pub entry_point: Option<u64>,
 }
 
 impl MachOBinary {
@@ -973,6 +979,9 @@ impl MachOBinary {
 
         binary.parse_sections(&mut reader)?;
         binary.parse_symbols(&mut reader)?;
+        binary.parse_indirect_symbols(&mut reader)?;
+        binary.parse_function_starts(&mut reader)?;
+        binary.entry_point = binary.find_entry_point();
 
         return Ok(binary);
     }
@@ -1018,6 +1027,84 @@ impl MachOBinary {
         }
 
         return Ok(());
+    }
+
+    fn parse_indirect_symbols(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+        let dysymtab = self.load_commands.iter().find_map(|c| match c.data {
+            LoadCommandData::Dysymtab(fields) => Some((fields[12], fields[13])),
+            _ => None,
+        });
+
+        let Some((indirectsymoff, nindirectsyms)) = dysymtab else {
+            return Ok(());
+        };
+
+        if nindirectsyms == 0 {
+            return Ok(());
+        }
+
+        reader.set_position(indirectsymoff as usize)?;
+
+        for _ in 0..nindirectsyms {
+            self.indirect_symbols.push(reader.read_u32()?);
+        }
+
+        return Ok(());
+    }
+
+    fn parse_function_starts(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+        let function_starts = self.load_commands.iter().find_map(|c| match c.data {
+            LoadCommandData::LinkeditData { dataoff, datasize } if c.cmd == LoadCommandType::LcFunctionStarts as u32 => Some((dataoff, datasize)),
+            _ => None,
+        });
+
+        let Some((dataoff, datasize)) = function_starts else {
+            return Ok(());
+        };
+
+        let Some(text) = self.segment("__TEXT") else {
+            return Ok(());
+        };
+
+        let mut address = text.vmaddr;
+
+        reader.set_position(dataoff as usize)?;
+        let end = dataoff as usize + datasize as usize;
+
+        while reader.position() < end {
+            let delta = reader.read_uleb128()?;
+
+            if delta == 0 {
+                break;
+            }
+
+            address += delta;
+            self.function_starts.push(address);
+        }
+
+        return Ok(());
+    }
+
+    fn find_entry_point(&self) -> Option<u64> {
+        let entryoff = self.load_commands.iter().find_map(|c| match c.data {
+            LoadCommandData::Main { entryoff, .. } => Some(entryoff),
+            _ => None,
+        })?;
+
+        return self.segments()
+            .find(|s| s.filesize > 0 && entryoff >= s.fileoff && entryoff < s.fileoff + s.filesize)
+            .map(|s| s.vmaddr + (entryoff - s.fileoff));
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = &SegmentCommand> {
+        return self.load_commands.iter().filter_map(|c| match &c.data {
+            LoadCommandData::Segment(segment) => Some(segment),
+            _ => None,
+        });
+    }
+
+    pub fn segment(&self, name: &str) -> Option<&SegmentCommand> {
+        return self.segments().find(|s| s.segname == name);
     }
 
     pub fn cpu_name(&self) -> String {
