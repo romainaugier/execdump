@@ -344,6 +344,44 @@ mod tests {
     }
 
     #[test]
+    fn elf_x86_64_analysis() {
+        use crate::analysis::function::EdgeKind;
+
+        let program = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_analysis")).unwrap())).remove(0);
+        let analysis = analyze(&program, None).unwrap();
+
+        // The switch is compiled to a jump table with one entry per case
+        let classify = analysis.function_by_name("classify").unwrap();
+        let switch_edges: usize = classify.blocks.values().map(|b| b.succs.iter().filter(|e| e.kind == EdgeKind::Switch).count()).sum();
+        assert_eq!(switch_edges, 7);
+        assert_eq!(classify.unresolved_jumps, 0);
+
+        let fatal = analysis.function_by_name("fatal").unwrap();
+        assert!(fatal.noreturn);
+
+        let main = analysis.function_by_name("main").unwrap();
+        let callees: Vec<String> = analysis.callees(main).iter().map(|(t, _)| analysis.call_target_name(t)).collect();
+
+        for name in ["classify", "count_chars", "fatal", "lib_add"] {
+            assert!(callees.iter().any(|c| c == name), "{} not in {:?}", name, callees);
+        }
+
+        // The loop in count_chars has a back edge
+        let count_chars = analysis.function_by_name("count_chars").unwrap();
+        assert!(count_chars.blocks.values().any(|b| b.succs.iter().any(|e| e.to <= b.start)));
+
+        // String references are annotated
+        let decoder = Decoder::new(program.architecture()).unwrap();
+        let comments: Vec<String> = main.blocks.values()
+            .flat_map(|b| b.insns.iter())
+            .filter_map(|i| analysis.insn_text(&program, &decoder, i).2)
+            .collect();
+
+        assert!(comments.iter().any(|c| c.contains("hello from the analysis fixture")), "{:?}", comments);
+        assert!(analysis.callers[&classify.addr].contains(&main.addr));
+    }
+
+    #[test]
     fn elf_aarch64_static() {
         let program = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_aarch64_static")).unwrap())).remove(0);
         let analysis = analyze(&program, None).unwrap();

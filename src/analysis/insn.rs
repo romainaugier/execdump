@@ -29,13 +29,6 @@ impl Flow {
     pub fn ends_block(&self) -> bool {
         return matches!(self, Flow::Jump(_) | Flow::CondJump(_) | Flow::IndirectJump | Flow::Ret | Flow::Trap);
     }
-
-    pub fn target(&self) -> Option<u64> {
-        match self {
-            Flow::Jump(t) | Flow::CondJump(t) | Flow::Call(t) => Some(*t),
-            _ => None,
-        }
-    }
 }
 
 /// Compact instruction kept in the analysis results, the text is decoded again on demand
@@ -343,10 +336,6 @@ impl Aarch64Tracker {
         if let Some(value) = value {
             self.regs.push((reg, value));
         }
-    }
-
-    pub fn reset(&mut self) {
-        self.regs.clear();
     }
 
     /// Updates the tracked registers with the instruction and fills its references
