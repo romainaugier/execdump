@@ -78,6 +78,12 @@ Options:
 
       --disasm
           Disassemble the code found in the Sections containing code
+      --decompile <DECOMPILE>
+          Analyze the code and output the requested decompilation stages (comma separated):
+          functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
+          callgraph (call graph as Graphviz dot) [possible values: functions, cfg, callgraph]
+      --functions-filter <FUNCTIONS_FILTER>
+          Regular expression to filter the functions (by name or hexadecimal address) used by --decompile [default: .*]
 
       --padding-size <PADDING_SIZE>
           Padding size to apply when dumping information for better readability [default: 4]
@@ -176,8 +182,18 @@ Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC) and Rust legacy
   - :x: Known symbols loading (kernel32, user32, glibc...)
 
+Analysis:
+  - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
+  - :heavy_check_mark: Function discovery by recursive descent, seeded by the entry point, symbols, exports, PE exception table (.pdata), Mach-O LC_FUNCTION_STARTS, ELF .eh_frame and init arrays, then call targets and code references (works on stripped binaries)
+  - :heavy_check_mark: Control flow graphs (true/false branches, tail calls, x86 jump tables)
+  - :heavy_check_mark: Noreturn functions (known names and propagation)
+  - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking)
+  - :heavy_check_mark: Call graph and cross references
+  - :heavy_check_mark: Strings (ASCII, UTF-16 for PE) and references annotations
+  - :x: aarch64 jump tables
+
 Decompiler:
-  - :x: CFG recovery
+  - :heavy_check_mark: CFG recovery
   - :x: SSA construction
   - :x: Data-flow analysis
   - :x: Control-flow structuring
@@ -191,12 +207,60 @@ Decompiler:
 
 Viewers:
   - :heavy_check_mark: Headers
-  - :clock9: PE Sections
-  - :clock9: ELF Sections
-  - :clock9: Mach-O Sections
+  - :heavy_check_mark: PE Sections
+  - :heavy_check_mark: ELF Sections
+  - :heavy_check_mark: Mach-O Sections
   - :heavy_check_mark: Hex Viewer
-  - :clock9: Disasm Viewer
+  - :heavy_check_mark: Disasm Viewer (linear, with function labels and annotations)
+  - :heavy_check_mark: Control flow graph viewer (radare2-like node graph)
+  - :heavy_check_mark: Call graph viewer
+  - :heavy_check_mark: Functions, strings, imports and memory map tables
   - :x: Decompiler Viewer
+
+The analysis runs in the background when the TUI starts, its progress is shown in the title bar.
+
+Key bindings (vim-like, the main ones can be changed in `~/.execdumprc`):
+
+| Keys | Action |
+|---|---|
+| `Tab` | Switch between the explorer and the content |
+| `e` | Show/hide the explorer |
+| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `q` |
+| `/` | Search: filters the tables, finds the next matching node or line |
+| `Ctrl-o` / `Backspace` | Go back to the previous view |
+| `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
+| `?` | Help |
+| `q` | Quit |
+
+In the graphs:
+
+| Keys | Action |
+|---|---|
+| `h` `j` `k` `l` | Scroll by one cell (`H` `J` `K` `L` scroll faster, `Ctrl-d` / `Ctrl-u` by half a page) |
+| `n` / `p` | Next / previous node (top to bottom, left to right) |
+| `g` / `G` | First / last node |
+| `t` / `f` | Follow the true / false branch of the selected block |
+| `c` | Center on the selected node |
+| `Enter` | Go to a function called from the selected block / open the selected function of the call graph |
+| `Space` | Switch between the graph and the linear disassembly of the function |
+| `x` | Cross references to the function |
+| `C` | Call graph from the function |
+| `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
+
+Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
+
+```toml
+# ~/.execdumprc
+quit = 'q'
+down = 'j'
+up = 'k'
+left = 'h'
+right = 'l'
+next_node = 'n'
+prev_node = 'p'
+follow_true = 't'
+follow_false = 'f'
+```
 
 ![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
 

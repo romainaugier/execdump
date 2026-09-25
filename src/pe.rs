@@ -7,7 +7,6 @@ use strum_macros::{EnumIter, IntoStaticStr};
 
 use crate::demangle::demangle;
 use crate::disasm::{Architecture, disasm_and_format_code};
-use crate::decompiler::decompile_and_format_pe_code;
 use crate::dump::*;
 use crate::format::format_u32_as_ctime;
 use crate::reader::{LEReader, Reader};
@@ -848,6 +847,20 @@ impl OptionalHeader {
         }
     }
 
+    pub fn image_base(&self) -> u64 {
+        match self {
+            Self::PE32(h) => h.image_base as u64,
+            Self::PE64(h) => h.image_base,
+        }
+    }
+
+    pub fn address_of_entry_point(&self) -> u32 {
+        match self {
+            Self::PE32(h) => h.address_of_entry_point,
+            Self::PE64(h) => h.address_of_entry_point,
+        }
+    }
+
     pub fn get_debug_idd(&self) -> &ImageDataDirectory {
         match self {
             Self::PE32(h) => &h.debug,
@@ -1108,32 +1121,21 @@ impl Section {
         return (self.header.characteristics & (SectionFlags::CntCode as u32)) > 0;
     }
 
-    pub fn dump(&self, pe: &PE, disasm_code: bool, decompile_code: bool) -> Dump {
+    pub fn dump(&self, pe: &PE, data: bool, disasm_code: bool) -> Dump {
         let mut dump = Dump::new_from_string(format!("Section ({})", self.header.name));
 
         dump.push_child(self.header.dump());
 
-        if self.contains_code() {
-            if disasm_code || (decompile_code && pe.architecture() != Architecture::X86_64) {
-                let res = disasm_and_format_code(pe.architecture(), &self.data, self.header.virtual_address as u64);
+        let address = pe.get_optional_header().image_base() + self.header.virtual_address as u64;
 
-                if let Ok(code) = res {
-                    dump.set_raw_data(DumpRawData::Code(code));
-                } else {
-                    dump.set_raw_data(DumpRawData::Bytes(self.data.clone()));
-                }
+        if disasm_code && self.contains_code() {
+            if let Ok(code) = disasm_and_format_code(pe.architecture(), &self.data, address) {
+                dump.set_raw_data(DumpRawData::Code(code));
+                return dump;
             }
+        }
 
-            if decompile_code && pe.architecture() == Architecture::X86_64 {
-                let res = decompile_and_format_pe_code(&pe, &self.data, self.header.virtual_address as u64);
-
-                if let Ok(code) = res {
-                    dump.set_raw_data(DumpRawData::Code(code));
-                } else {
-                    dump.set_raw_data(DumpRawData::Bytes(self.data.clone()));
-                }
-            }
-        } else {
+        if data {
             dump.set_raw_data(DumpRawData::Bytes(self.data.clone()));
         }
 
@@ -2412,12 +2414,12 @@ mod tests {
         let pe = parse_pe(&fixture("pe_arm64.exe")).unwrap();
         let text = &pe.sections[".text"];
 
-        let dump = text.dump(&pe, true, false);
+        let dump = text.dump(&pe, false, true);
 
         let DumpRawData::Code(code) = dump.raw_data() else {
             panic!("Expected disassembled code");
         };
 
-        assert_eq!(code[0], "0x00001000 add w0, w1, w0");
+        assert_eq!(code[0], format!("0x{:08x} add w0, w1, w0", pe.get_optional_header().image_base() + 0x1000));
     }
 }

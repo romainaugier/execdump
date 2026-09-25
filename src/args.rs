@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use std::path::PathBuf;
 
@@ -137,10 +137,15 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub disasm: bool,
 
-    /// Decompile the code found in the Sections containing code.
-    /// It will override disasm if not set
-    #[arg(long, default_value_t = false)]
-    pub decompile: bool,
+    /// Analyze the code and output the requested decompilation stages (comma separated):
+    /// functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
+    /// callgraph (call graph as Graphviz dot)
+    #[arg(long, value_enum, value_delimiter = ',')]
+    pub decompile: Vec<DecompileOutput>,
+
+    /// Regular expression to filter the functions (by name or hexadecimal address) used by --decompile
+    #[arg(long, default_value = ".*")]
+    pub functions_filter: String,
 
     /*
      * Formatting
@@ -151,4 +156,14 @@ pub struct Args {
     pub padding_size: usize,
 
     pub file_path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum DecompileOutput {
+    /// List of the recovered functions
+    Functions,
+    /// Control flow graphs of the functions (Graphviz dot)
+    Cfg,
+    /// Call graph (Graphviz dot)
+    Callgraph,
 }

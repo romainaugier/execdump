@@ -1,27 +1,3 @@
-pub fn is_type_qualifier(s: &str) -> bool {
-    return matches!(s, "byte" | "word" | "dword" | "qword");
-}
-
-pub fn starts_with_type_qualifier(s: &str) -> bool {
-    if s.len() < 4 {
-        return false;
-    }
-
-    if matches!(&s[..4], "byte" | "word") {
-        return true;
-    }
-
-    if s.len() < 5 {
-        return false;
-    }
-
-    if matches!(&s[..5], "dword" | "qword") {
-        return true;
-    }
-
-    return false;
-}
-
 pub fn is_x86_64_register(s: &str) -> bool {
     if s.is_empty() || s.len() > 4 {
         return false;

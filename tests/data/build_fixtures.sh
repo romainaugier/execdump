@@ -22,6 +22,10 @@ clang --target=x86_64-linux-gnu -nostdlib -fPIC -shared -fuse-ld=lld -Wl,-soname
 clang --target=x86_64-linux-gnu -nostdlib -fPIE -pie -fuse-ld=lld -Wl,--dynamic-linker,/lib64/ld-linux-x86-64.so.2 \
     -Wl,--build-id=sha1 src/main_nostdlib.c "$TMP"/libfoo_x86_64.so -o elf_x86_64_dyn
 
+# ELF x86_64, optimized code for the analysis (jump table, loops, noreturn, strings)
+clang --target=x86_64-linux-gnu -O2 -nostdlib -fPIE -pie -fuse-ld=lld -Wl,--dynamic-linker,/lib64/ld-linux-x86-64.so.2 \
+    src/analysis.c "$TMP"/libfoo_x86_64.so -o elf_x86_64_analysis
+
 # PE ARM64
 clang --target=aarch64-pc-windows-msvc -O1 -c src/main_windows.c -o "$TMP"/main_windows.obj
 "$LLVM_BIN"/lld-link /Brepro /entry:mainCRTStartup /subsystem:console /nodefaultlib /out:pe_arm64.exe "$TMP"/main_windows.obj

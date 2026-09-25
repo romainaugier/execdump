@@ -475,11 +475,70 @@ impl<'a> Reader<'a> {
         }
     }
 
+    pub fn read_uleb128(&mut self) -> ReaderResult<u64> {
+        let mut result = 0u64;
+        let mut shift = 0u32;
+
+        loop {
+            let byte = self.read_u8()?;
+
+            if shift < 64 {
+                result |= ((byte & 0x7f) as u64) << shift;
+            }
+
+            shift += 7;
+
+            if byte & 0x80 == 0 {
+                return Ok(result);
+            }
+        }
+    }
+
+    pub fn read_sleb128(&mut self) -> ReaderResult<i64> {
+        let mut result = 0i64;
+        let mut shift = 0u32;
+
+        loop {
+            let byte = self.read_u8()?;
+
+            if shift < 64 {
+                result |= ((byte & 0x7f) as i64) << shift;
+            }
+
+            shift += 7;
+
+            if byte & 0x80 == 0 {
+                if shift < 64 && (byte & 0x40) != 0 {
+                    result |= -1i64 << shift;
+                }
+
+                return Ok(result);
+            }
+        }
+    }
+
     #[inline]
     pub fn remaining(&self) -> usize {
         match self {
             Reader::LittleEndian(r) => r.remaining(),
             Reader::BigEndian(r) => r.remaining(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leb128() {
+        let data = [0xe5, 0x8e, 0x26, 0x7f, 0x80, 0x7f, 0x02];
+        let mut reader = Reader::new_le(&data);
+
+        assert_eq!(reader.read_uleb128().unwrap(), 624485);
+        assert_eq!(reader.read_sleb128().unwrap(), -1);
+        assert_eq!(reader.read_sleb128().unwrap(), -128);
+        assert_eq!(reader.read_sleb128().unwrap(), 2);
+        assert!(reader.read_uleb128().is_err());
     }
 }

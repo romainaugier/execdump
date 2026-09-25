@@ -1,7 +1,12 @@
 use crate::elf::ELF;
 use crate::exec::Exec;
 use crate::macho::MachO;
-use crate::args::Args;
+use crate::args::{Args, DecompileOutput};
+use crate::analysis::analyze;
+use crate::analysis::dot::{callgraph_dot, cfg_dot};
+use crate::analysis::function::Function;
+use crate::analysis::insn::Decoder;
+use crate::program::programs_from_exec;
 use crate::pe::PE;
 
 use regex::Regex;
@@ -183,11 +188,7 @@ pub fn dump_pe(pe: &PE, args: &Args) {
 
         for (_, section) in pe.sections.iter() {
             if sections_filter_regex.is_match(section.header.name.as_str()) {
-                if args.decompile {
-                    section.dump(pe, false, true).print(0, args.padding_size);
-                } else if args.disasm {
-                    section.dump(pe, true, false).print(0, args.padding_size);
-                }
+                section.dump(pe, args.sections_data, args.disasm).print(0, args.padding_size);
             }
         }
     }
@@ -377,10 +378,72 @@ pub fn dump_macho(macho: &MachO, args: &Args) {
     }
 }
 
+pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+    let filter = Regex::new(&args.functions_filter)?;
+
+    for program in programs_from_exec(exec) {
+        let analysis = analyze(&program, None)?;
+        let decoder = Decoder::new(program.architecture())?;
+
+        let functions: Vec<&Function> = analysis.functions.values()
+            .filter(|f| filter.is_match(&f.name) || filter.is_match(&format!("{:x}", f.addr)))
+            .collect();
+
+        for output in args.decompile.iter() {
+            match output {
+                DecompileOutput::Functions => {
+                    println!("Functions ({}, {})", program.name, functions.len());
+                    println!("");
+                    println!("{:<18} {:>8} {:>6} {:>6} {:<16} {}", "Address", "Size", "Blocks", "Insns", "Source", "Name");
+
+                    for function in functions.iter() {
+                        let mut flags = Vec::new();
+
+                        if function.thunk.is_some() {
+                            flags.push("thunk");
+                        }
+
+                        if function.noreturn {
+                            flags.push("noreturn");
+                        }
+
+                        if function.unresolved_jumps > 0 {
+                            flags.push("unresolved jumps");
+                        }
+
+                        println!(
+                            "{:#018x} {:>8} {:>6} {:>6} {:<16} {}{}",
+                            function.addr,
+                            function.size(),
+                            function.blocks.len(),
+                            function.num_insns(),
+                            function.source.name(),
+                            function.name,
+                            if flags.is_empty() { String::new() } else { format!(" ({})", flags.join(", ")) },
+                        );
+                    }
+
+                    println!("");
+                }
+                DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
+                DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
+            }
+        }
+    }
+
+    return Ok(());
+}
+
 pub fn dump_exec(exec: &Exec, args: &Args) {
     match exec {
         Exec::PE(pe) => dump_pe(pe, args),
         Exec::ELF(elf) => dump_elf(elf, args),
         Exec::MachO(macho) => dump_macho(macho, args),
+    }
+
+    if !args.decompile.is_empty() {
+        if let Err(error) = dump_decompile(exec, args) {
+            eprintln!("Decompilation failed: {}", error);
+        }
     }
 }

@@ -545,6 +545,20 @@ impl ELFHeader {
         }
     }
 
+    pub fn entry(&self) -> u64 {
+        match self {
+            Self::ELFHeader32(h) => h.e_entry as u64,
+            Self::ELFHeader64(h) => h.e_entry,
+        }
+    }
+
+    pub fn file_type(&self) -> ELFFileType {
+        match self {
+            Self::ELFHeader32(h) => h.e_type.into(),
+            Self::ELFHeader64(h) => h.e_type.into(),
+        }
+    }
+
     pub fn shstr_index(&self) -> usize {
         match self {
             Self::ELFHeader32(h) => h.e_shstrndx as usize,
@@ -849,6 +863,27 @@ impl ELFProgramHeader {
         match self {
             Self::ELFProgramHeader32(h) => h.p_filesz as u64,
             Self::ELFProgramHeader64(h) => h.p_filesz,
+        }
+    }
+
+    pub fn virtual_address(&self) -> u64 {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_vaddr as u64,
+            Self::ELFProgramHeader64(h) => h.p_vaddr,
+        }
+    }
+
+    pub fn memory_size(&self) -> u64 {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_memsz as u64,
+            Self::ELFProgramHeader64(h) => h.p_memsz,
+        }
+    }
+
+    pub fn flags(&self) -> u32 {
+        match self {
+            Self::ELFProgramHeader32(h) => h.p_flags,
+            Self::ELFProgramHeader64(h) => h.p_flags,
         }
     }
 
@@ -1866,6 +1901,8 @@ pub struct ELF {
     pub dynamic: Option<ELFDynamic>,
     pub relocation_tables: Vec<ELFRelocationTable>,
     pub notes: Vec<ELFNote>,
+    /// Raw file bytes, only kept when the file has no section headers (loadable segments are read from it)
+    pub raw: Vec<u8>,
 }
 
 impl ELF {
@@ -2169,6 +2206,10 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
     elf.parse_dynamic(&sections)?;
     elf.parse_relocation_tables(&sections)?;
     elf.parse_notes(&sections)?;
+
+    if sections.is_empty() {
+        elf.raw = file_bytes.clone();
+    }
 
     elf.sections = sections.into_iter().map(|s| (s.name.clone(), s)).collect();
 
