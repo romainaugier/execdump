@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, IntoStaticStr};
 
-use crate::demangle::{demangle_msvc, is_mangled_symbol};
+use crate::demangle::demangle;
 use crate::disasm::{Architecture, disasm_and_format_code};
 use crate::decompiler::decompile_and_format_pe_code;
 use crate::dump::*;
@@ -1390,10 +1390,7 @@ impl HintNameEntry {
 
         let name = String::from_utf8(name_buffer).expect("Invalid name found in Hint/Name Table");
 
-        entry.name = match is_mangled_symbol(name.as_str()) {
-            true => demangle_msvc(name.as_str()).unwrap(),
-            false => name,
-        };
+        entry.name = demangle(&name).unwrap_or(name);
 
         return Ok(entry);
     }

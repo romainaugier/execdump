@@ -1,0 +1,76 @@
+_Z14use_everythingv	use_everything()
+_ZGVZN2ns17with_local_staticEvE5local	guard variable for ns::with_local_static()::local
+_ZN2ns10overloadedEDn	ns::overloaded(std::nullptr_t)
+_ZN2ns10overloadedEDsDi	ns::overloaded(char16_t, char32_t)
+_ZN2ns10overloadedENS_3IntILi0EEENS0_ILin1EEENS0_ILi42EEENS_4BoolILb1EEENS_3PtrIXadL_ZNS_6globalEEEEE	ns::overloaded(ns::Int<0>, ns::Int<-1>, ns::Int<42>, ns::Bool<true>, ns::Ptr<&ns::global>)
+_ZN2ns10overloadedENS_5ColorENS_6ScopedENS_5UnionE	ns::overloaded(ns::Color, ns::Scoped, ns::Union)
+_ZN2ns10overloadedEPFicEMNS_4BaseEFvvEMS2_i	ns::overloaded(int (*)(char), void (ns::Base::*)(), int ns::Base::*)
+_ZN2ns10overloadedEPKcPViPVKv	ns::overloaded(char const*, int volatile*, void const volatile*)
+_ZN2ns10overloadedERA4_iPA4_A5_i	ns::overloaded(int (&) [4], int (*) [4][5])
+_ZN2ns10overloadedERKSsRSo	ns::overloaded(std::string const&, std::ostream&)
+_ZN2ns10overloadedERiOiRKi	ns::overloaded(int&, int&&, int const&)
+_ZN2ns10overloadedESt6vectorIiSaIiEES0_IS0_INS_3BoxIiEESaIS4_EESaIS6_EE	ns::overloaded(std::vector<int, std::allocator<int>>, std::vector<std::vector<ns::Box<int>, std::allocator<ns::Box<int>>>, std::allocator<std::vector<ns::Box<int>, std::allocator<ns::Box<int>>>>>)
+_ZN2ns10overloadedEcahst	ns::overloaded(char, signed char, unsigned char, short, unsigned short)
+_ZN2ns10overloadedEfdebw	ns::overloaded(float, double, long double, bool, wchar_t)
+_ZN2ns10overloadedEi	ns::overloaded(int)
+_ZN2ns10overloadedEjxy	ns::overloaded(unsigned int, long long, unsigned long long)
+_ZN2ns11with_lambdaEv	ns::with_lambda()
+_ZN2ns12_GLOBAL__N_19anonymousEv	ns::(anonymous namespace)::anonymous()
+_ZN2ns12global_arrayE	ns::global_array
+_ZN2ns13free_functionEv	ns::free_function()
+_ZN2ns14string_literalEv	ns::string_literal()
+_ZN2ns16global_with_dtorE	ns::global_with_dtor
+_ZN2ns17noexcept_functionEv	ns::noexcept_function()
+_ZN2ns17template_functionINS_3BoxIiEEEEPT_S3_RKS3_	ns::Box<int>* ns::template_function<ns::Box<int>>(ns::Box<int>, ns::Box<int> const&)
+_ZN2ns17template_functionIiEEPT_S1_RKS1_	int* ns::template_function<int>(int, int const&)
+_ZN2ns17with_local_staticEv	ns::with_local_static()
+_ZN2ns25function_pointer_noexceptEPDoFvvE	ns::function_pointer_noexcept(void (*)() noexcept)
+_ZN2ns2v116inline_namespaceEv	ns::v1::inline_namespace()
+_ZN2ns3BoxINS0_IdEEEC1Ev	ns::Box<ns::Box<double>>::Box()
+_ZN2ns3BoxIcE8instanceE	ns::Box<char>::instance
+_ZN2ns3BoxIiEC1Ev	ns::Box<int>::Box()
+_ZN2ns4Base7counterE	ns::Base::counter
+_ZN2ns4BaseC2Ev	ns::Base::Base()
+_ZN2ns4BaseD2Ev	ns::Base::~Base()
+_ZN2ns4packIJEEEvDpT_	void ns::pack<>()
+_ZN2ns4packIJidcEEEvDpT_	void ns::pack<int, double, char>(int, double, char)
+_ZN2ns6globalE	ns::global
+_ZN2ns7Derived13static_methodEv	ns::Derived::static_method()
+_ZN2ns7DerivedC1ERKS0_	ns::Derived::Derived(ns::Derived const&)
+_ZN2ns7DerivedC1Ev	ns::Derived::Derived()
+_ZN2ns7DerivedD1Ev	ns::Derived::~Derived()
+_ZN2ns7DerivedaSERKS0_	ns::Derived::operator=(ns::Derived const&)
+_ZN2ns7DeriveddlEPv	ns::Derived::operator delete(void*)
+_ZN2ns7DerivednwEm	ns::Derived::operator new(unsigned long)
+_ZN2ns7DerivedpLEi	ns::Derived::operator+=(int)
+_ZN2ns7DerivedppEi	ns::Derived::operator++(int)
+_ZN2ns7DerivedppEv	ns::Derived::operator++()
+_ZN2ns7VirtualC1Ev	ns::Virtual::Virtual()
+_ZN2ns7VirtualD1Ev	ns::Virtual::~Virtual()
+_ZN2ns7VirtualD2Ev	ns::Virtual::~Virtual()
+_ZN2ns8DtorOnlyD1Ev	ns::DtorOnly::~DtorOnly()
+_ZN2ns8trailingEi	ns::trailing(int)
+_ZN2ns8variadicEiz	ns::variadic(int, ...)
+_ZN2ns9array_refIiLi4EEEvRAT0__T_	void ns::array_ref<int, 4>(int (&) [4])
+_ZNK2ns3BoxINS0_IdEEE3getEv	ns::Box<ns::Box<double>>::get() const
+_ZNK2ns3BoxIiE3getEv	ns::Box<int>::get() const
+_ZNK2ns3BoxIiE7convertIfEET_S3_	float ns::Box<int>::convert<float>(float) const
+_ZNK2ns7DerivedcviEv	ns::Derived::operator int() const
+_ZNK2ns7DerivedeqERKS0_	ns::Derived::operator==(ns::Derived const&) const
+_ZNK2ns7DerivedixEi	ns::Derived::operator[](int) const
+_ZNK2ns7DerivedngEv	ns::Derived::operator-() const
+_ZNK2ns7DerivedntEv	ns::Derived::operator!() const
+_ZNO2ns7DerivedclEic	ns::Derived::operator()(int, char) &&
+_ZNR2ns7DerivedclEic	ns::Derived::operator()(int, char) &
+_ZNSolsEPKc	std::ostream::operator<<(char const*)
+_ZNSt6vectorIiSaIiEE9push_backERKi	std::vector<int, std::allocator<int>>::push_back(int const&)
+_ZNSt6vectorIiSaIiEEixEm	std::vector<int, std::allocator<int>>::operator[](unsigned long)
+_ZNV2ns7Derived15volatile_methodEv	ns::Derived::volatile_method() volatile
+_ZTTN2ns7VirtualE	VTT for ns::Virtual
+_ZTVN2ns4BaseE	vtable for ns::Base
+_ZTVN2ns7VirtualE	vtable for ns::Virtual
+_ZTv0_n24_N2ns7VirtualD1Ev	virtual thunk to ns::Virtual::~Virtual()
+_ZZ14use_everythingvE3arr	use_everything()::arr
+_ZZN2ns11with_lambdaEvENK3$_1clEi	ns::with_lambda()::$_1::operator()(int) const
+_ZZN2ns17with_local_staticEvE5local	ns::with_local_static()::local
+_ZZN2ns17with_local_staticEvEN5Local3getEv	ns::with_local_static()::Local::get()

@@ -924,10 +924,7 @@ impl MachOSymbol {
     }
 
     pub fn demangled_name(&self) -> String {
-        return self.name
-            .strip_prefix('_')
-            .and_then(|n| demangle(n).ok())
-            .unwrap_or(self.name.clone());
+        return demangle(&self.name).unwrap_or(self.name.clone());
     }
 
     pub fn as_string(&self) -> String {
