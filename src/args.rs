@@ -147,6 +147,11 @@ pub struct Args {
     #[arg(long, default_value = ".*")]
     pub functions_filter: String,
 
+    /// Improves the decompiled C code with the LLM of the [llm] section of ~/.execdumprc
+    /// (names, types and a summary of each function, the callees first)
+    #[arg(long, default_value_t = false)]
+    pub llm: bool,
+
     /*
      * Formatting
      */

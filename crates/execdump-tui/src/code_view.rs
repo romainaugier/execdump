@@ -27,6 +27,8 @@ pub struct CodeView {
     pub lines: Vec<String>,
     pub addrs: Vec<Option<u64>>,
     pub state: CodeState,
+    /// Improved by the LLM
+    pub improved: bool,
     pub cursor: usize,
     pub scroll: usize,
     pub height: usize,
@@ -45,6 +47,7 @@ impl CodeView {
             lines: Vec::new(),
             addrs: Vec::new(),
             state: CodeState::Loading,
+            improved: false,
             cursor: 0,
             scroll: 0,
             height: 1,

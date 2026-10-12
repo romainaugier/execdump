@@ -215,6 +215,7 @@ Decompiler:
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
   - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
   - :heavy_check_mark: C code generation (`--decompile c`)
+  - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
 
 ### TUI
 
@@ -276,6 +277,19 @@ next_node = 'n'
 prev_node = 'p'
 follow_true = 't'
 follow_false = 'f'
+```
+
+The LLM assistance uses the `[llm]` section (any backend of the [llm](https://crates.io/crates/llm) crate):
+
+```toml
+# ~/.execdumprc
+[llm]
+backend = "anthropic"              # openai, anthropic, ollama, google, deepseek, mistral, groq, xai, openrouter
+model = "..."
+api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
+# base_url = "http://localhost:11434"
+# max_tokens = 2048
+# temperature = 0.2
 ```
 
 ![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)

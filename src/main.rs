@@ -24,11 +24,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ExecType::MachO => Exec::MachO(parse_macho(&args.file_path)?),
     };
 
+    let config = Config::load()?;
+
     if args.tui {
-        let config = Config::load()?;
-        return execdump_tui::main(&args.file_path, exec, config.keys);
+        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm);
     } else {
-        dump_exec(&exec, &args);
+        dump_exec(&exec, &args, &config);
     }
 
     return Ok(());

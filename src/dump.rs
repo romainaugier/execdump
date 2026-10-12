@@ -7,6 +7,8 @@ use execdump_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
 use execdump_decompiler::analysis::function::Function;
 use execdump_decompiler::analysis::insn::Decoder;
 use execdump_decompiler::Decompiler;
+
+use crate::config::Config;
 use execdump_core::program::programs_from_exec;
 use execdump_core::pe::PE;
 
@@ -230,7 +232,7 @@ pub fn dump_macho(macho: &MachO, args: &Args) {
     }
 }
 
-pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     let filter = Regex::new(&args.functions_filter)?;
 
     for program in programs_from_exec(exec) {
@@ -280,13 +282,31 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
                 DecompileOutput::C => {
-                    let decompiler = Decompiler::new(&program, &analysis)?;
+                    let mut decompiler = Decompiler::new(&program, &analysis)?;
 
-                    for function in functions.iter().filter(|f| f.thunk.is_none()) {
-                        match decompiler.c_code(function.addr) {
-                            Ok(code) => println!("// {:#x}\n{}", function.addr, code),
-                            Err(error) => println!("// {} ({:#x}): {}\n", function.name, function.addr, error),
-                        }
+                    if args.llm {
+                        decompiler = decompiler.with_assistant(&config.llm)?;
+                    }
+
+                    // With the LLM the callees come first, their new names show in their callers
+                    let order: Vec<u64> = if args.llm { callees_first(&analysis, &functions) } else { functions.iter().map(|f| f.addr).collect() };
+                    let mut outputs: Vec<(u64, String)> = Vec::new();
+
+                    for addr in order {
+                        let function = if args.llm { decompiler.c_function_improved(addr) } else { decompiler.c_function(addr) };
+
+                        let text = match function {
+                            Ok(function) => format!("// {:#x}\n{}", addr, function.print().text),
+                            Err(error) => format!("// {} ({:#x}): {}\n", analysis.functions[&addr].name, addr, error),
+                        };
+
+                        outputs.push((addr, text));
+                    }
+
+                    outputs.sort_by_key(|(addr, _)| *addr);
+
+                    for (_, text) in outputs {
+                        println!("{}", text);
                     }
                 }
                 DecompileOutput::Llvm => {
@@ -306,7 +326,44 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
     return Ok(());
 }
 
-pub fn dump_exec(exec: &Exec, args: &Args) {
+/// Functions in post order of the call graph (callees before their callers)
+fn callees_first(analysis: &execdump_decompiler::analysis::Analysis, functions: &[&Function]) -> Vec<u64> {
+    let wanted: std::collections::HashSet<u64> = functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
+    let mut visited = std::collections::HashSet::new();
+    let mut order = Vec::new();
+
+    for &start in functions.iter().map(|f| &f.addr) {
+        let mut stack = vec![(start, false)];
+
+        while let Some((addr, done)) = stack.pop() {
+            if done {
+                if wanted.contains(&addr) {
+                    order.push(addr);
+                }
+
+                continue;
+            }
+
+            if !visited.insert(addr) {
+                continue;
+            }
+
+            stack.push((addr, true));
+
+            if let Some(function) = analysis.functions.get(&addr) {
+                for call in function.calls.iter() {
+                    if let execdump_decompiler::analysis::function::CallTarget::Function(callee) = call.target {
+                        stack.push((callee, false));
+                    }
+                }
+            }
+        }
+    }
+
+    return order;
+}
+
+pub fn dump_exec(exec: &Exec, args: &Args, config: &Config) {
     match exec {
         Exec::PE(pe) => dump_pe(pe, args),
         Exec::ELF(elf) => dump_elf(elf, args),
@@ -314,7 +371,7 @@ pub fn dump_exec(exec: &Exec, args: &Args) {
     }
 
     if !args.decompile.is_empty() {
-        if let Err(error) = dump_decompile(exec, args) {
+        if let Err(error) = dump_decompile(exec, args, config) {
             eprintln!("Decompilation failed: {}", error);
         }
     }

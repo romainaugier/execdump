@@ -31,6 +31,7 @@ use crossterm::{
 use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::Decoder;
 use execdump_decompiler::analysis::{analyze, Analysis};
+use execdump_decompiler::llm::LlmConfig;
 use execdump_decompiler::Decompiler;
 use execdump_core::dump::Dump;
 use execdump_core::exec::Exec;
@@ -244,7 +245,7 @@ impl View {
             View::Hex(v) => v.title.clone(),
             View::Disasm(v) => v.title.clone(),
             View::Graph(v) => v.title.clone(),
-            View::Code(v) => v.title.clone(),
+            View::Code(v) => if v.improved { format!("{} [LLM]", v.title) } else { v.title.clone() },
             View::Table(v) => if v.filter.is_empty() { v.title.clone() } else { format!("{} [/{}] ({} matches)", v.title, v.filter, v.filtered.len()) },
         }
     }
@@ -308,14 +309,15 @@ struct App {
     should_quit: bool,
 
     /// Decompilation workers (one per program, started on demand) and their results
-    decompilers: Vec<Option<Sender<u64>>>,
+    decompilers: Vec<Option<Sender<(u64, bool)>>>,
+    llm: LlmConfig,
     decompiled_sender: Sender<Decompiled>,
     decompiled: Receiver<Decompiled>,
-    code_cache: HashMap<(usize, u64), Result<(String, Vec<Option<u64>>), String>>,
+    code_cache: HashMap<(usize, u64, bool), Result<(String, Vec<Option<u64>>), String>>,
 }
 
-/// Result of a decompilation worker: program, function, C code and the address of each line
-type Decompiled = (usize, u64, Result<(String, Vec<Option<u64>>), String>);
+/// Result of a decompilation worker: program, function, improved by the LLM, C code and the address of each line
+type Decompiled = (usize, u64, bool, Result<(String, Vec<Option<u64>>), String>);
 
 impl App {
     fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings) -> Self {
@@ -370,6 +372,7 @@ impl App {
             decompiled_sender,
             decompiled,
             code_cache: HashMap::new(),
+            llm: LlmConfig::default(),
         };
     }
 
@@ -401,10 +404,16 @@ impl App {
 
     /// Results of the decompilation workers, shown in their views
     fn poll_decompiled(&mut self) {
-        while let Ok((program, function, result)) = self.decompiled.try_recv() {
+        while let Ok((program, function, improved, result)) = self.decompiled.try_recv() {
+            if let (true, Err(error)) = (improved, &result) {
+                self.error(format!("LLM: {}", error));
+            }
+
             for view in std::iter::once(&mut self.view).chain(self.back.iter_mut()).chain(self.forward.iter_mut()) {
                 if let View::Code(code) = view {
-                    if code.program == program && code.function == function {
+                    if code.program == program && code.function == function && (code.improved == improved || improved && result.is_ok()) {
+                        code.improved = improved;
+
                         match &result {
                             Ok((text, lines)) => code.set_code(text, lines.clone()),
                             Err(error) => code.state = CodeState::Failed(error.clone()),
@@ -413,12 +422,12 @@ impl App {
                 }
             }
 
-            self.code_cache.insert((program, function), result);
+            self.code_cache.insert((program, function, improved), result);
         }
     }
 
     /// Worker thread decompiling the functions of a program, one request at a time
-    fn decompiler(&mut self, program: usize) -> Option<Sender<u64>> {
+    fn decompiler(&mut self, program: usize) -> Option<Sender<(u64, bool)>> {
         if let Some(sender) = &self.decompilers[program] {
             return Some(sender.clone());
         }
@@ -426,21 +435,37 @@ impl App {
         let analysis = self.analysis(program)?;
         let program_ref = self.programs[program].clone();
         let results = self.decompiled_sender.clone();
-        let (sender, requests) = channel::<u64>();
+        let (sender, requests) = channel::<(u64, bool)>();
+        let llm = self.llm.clone();
 
         std::thread::spawn(move || {
             let decompiler = Decompiler::new(&program_ref, &analysis);
 
-            while let Ok(function) = requests.recv() {
+            // The LLM is optional: without it (or when it cannot be set up) only the plain decompilation works
+            let mut llm_error = "no [llm] configuration in ~/.execdumprc".to_string();
+
+            let decompiler = decompiler.and_then(|d| match llm.is_enabled() {
+                true => d.with_assistant(&llm).or_else(|error| {
+                    llm_error = error;
+                    Decompiler::new(&program_ref, &analysis)
+                }),
+                false => Ok(d),
+            });
+
+            while let Ok((function, improve)) = requests.recv() {
                 let result = match &decompiler {
-                    Ok(decompiler) => decompiler.c_function(function).map(|f| {
-                        let printed = f.print();
-                        (printed.text, printed.lines)
-                    }),
+                    Ok(decompiler) if improve && !decompiler.has_assistant() => Err(llm_error.clone()),
+                    Ok(decompiler) => {
+                        let function = if improve { decompiler.c_function_improved(function) } else { decompiler.c_function(function) };
+                        function.map(|f| {
+                            let printed = f.print();
+                            (printed.text, printed.lines)
+                        })
+                    }
                     Err(error) => Err(error.clone()),
                 };
 
-                if results.send((program, function, result)).is_err() {
+                if results.send((program, function, improve, result)).is_err() {
                     break;
                 }
             }
@@ -464,21 +489,45 @@ impl App {
 
         let mut view = CodeView::loading(program, function.addr, &function.name);
 
-        match self.code_cache.get(&(program, function.addr)) {
-            Some(Ok((text, lines))) => view.set_code(text, lines.clone()),
-            Some(Err(error)) => view.state = CodeState::Failed(error.clone()),
+        let cached = self.code_cache.get(&(program, function.addr, true)).filter(|r| r.is_ok()).map(|r| (r, true)).or(self.code_cache.get(&(program, function.addr, false)).map(|r| (r, false)));
+
+        match cached {
+            Some((Ok((text, lines)), improved)) => {
+                view.set_code(text, lines.clone());
+                view.improved = improved;
+            }
+            Some((Err(error), _)) => view.state = CodeState::Failed(error.clone()),
             None => {
                 let Some(sender) = self.decompiler(program) else {
                     return;
                 };
 
-                let _ = sender.send(function.addr);
+                let _ = sender.send((function.addr, false));
             }
         }
 
         view.height = 20;
         view.goto(addr);
         self.open(View::Code(view));
+    }
+
+    /// Asks the LLM to improve the C code of the current view
+    fn improve_code(&mut self) {
+        let View::Code(view) = &self.view else {
+            return;
+        };
+
+        let (program, function) = (view.program, view.function);
+
+        if !self.llm.is_enabled() {
+            self.error("No [llm] section in ~/.execdumprc (backend, model, api_key_env...)".to_string());
+            return;
+        }
+
+        if let Some(sender) = self.decompiler(program) {
+            let _ = sender.send((function, true));
+            self.info("Asking the LLM to improve the code...".to_string());
+        }
     }
 
     /// C code of the function shown by the current view
@@ -1413,6 +1462,7 @@ impl App {
                     _ if c == keys.toggle_view || c == keys.decompile => self.decompile_current(),
                     _ if c == keys.xrefs => self.xrefs_current(),
                     _ if c == keys.call_graph => self.call_graph_current(),
+                    _ if c == keys.improve => self.improve_code(),
                     _ => {}
                 }
             }
@@ -1727,7 +1777,7 @@ impl App {
                 GraphKind::CallGraph { .. } => "hjkl scroll  n/p node  Enter open  +/- depth  i imports  r re-root  U up  x xrefs  ^o back  ? help",
             },
             View::Disasm(_) => "j/k move  n/p function  Enter follow  Space graph  D decompile  x xrefs  / search  ^o back  ? help",
-            View::Code(_) => "j/k move  Enter open call  Space/D graph  x xrefs  C callgraph  / search  ^o back  ? help",
+            View::Code(_) => "j/k move  Enter open call  Space/D graph  L improve (LLM)  x xrefs  C callgraph  / search  ^o back  ? help",
             View::Table(_) => "j/k move  Enter open  / filter  Esc clear  ^o back  ? help",
             _ => "j/k scroll  ^d/^u page  g/G top/bottom  / search  ^o back  ? help",
         }
@@ -1767,6 +1817,7 @@ const HELP: &[(&str, &str)] = &[
     ("x", "cross references to the function"),
     ("C", "call graph from the function"),
     ("D", "decompiled C code of the function (back to the graph from the C code)"),
+    ("L", "C code: improve the names, types and summary with the LLM of the [llm] configuration"),
     ("+ / - / i / r", "call graph depth / imports / re-root at the selection"),
     ("U", "call graph: go up to a caller of the root (parent graph)"),
     ("Linear disassembly", ""),
@@ -1942,7 +1993,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 }
 
-pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings) -> Result<(), Box<dyn Error>> {
+pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -1951,6 +2002,7 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings) -> Result<(), Bo
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(exec, exec_path.clone(), keys);
+    app.llm = llm;
 
     let result: Result<(), Box<dyn Error>> = (|| {
         loop {

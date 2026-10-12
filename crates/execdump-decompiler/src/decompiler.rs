@@ -14,6 +14,7 @@ use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, r
 use crate::typedb::{Platform, TypeDb};
 use crate::analysis::insn::Decoder;
 use crate::c::{self, ast::CFunction};
+use crate::llm::{self, Assistant, LlmConfig, Renames};
 use crate::types::{CType, DataModel, FuncType, Param, Prototype};
 
 use execdump_core::demangle::demangle_symbol;
@@ -48,6 +49,9 @@ pub struct Decompiler<'a> {
     globals: RefCell<HashMap<String, u64>>,
     prototypes: RefCell<HashMap<String, Prototype>>,
     decoder: Decoder,
+    /// LLM improvement pass and the names it gave to the functions
+    assistant: Option<Assistant>,
+    renames: RefCell<Renames>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -80,7 +84,43 @@ impl<'a> Decompiler<'a> {
             globals: RefCell::new(HashMap::new()),
             prototypes: RefCell::new(HashMap::new()),
             decoder: Decoder::new(arch).map_err(|e| e.to_string())?,
+            assistant: None,
+            renames: RefCell::new(Renames::new()),
         });
+    }
+
+    /// Enables the LLM improvement pass of the C code
+    pub fn with_assistant(mut self, config: &LlmConfig) -> Result<Self, String> {
+        self.assistant = Some(Assistant::new(config)?);
+        return Ok(self);
+    }
+
+    pub fn has_assistant(&self) -> bool {
+        return self.assistant.is_some();
+    }
+
+    /// The C function improved by the LLM (names, types and a summary), the function rename is
+    /// remembered for the functions decompiled afterwards
+    pub fn c_function_improved(&self, addr: u64) -> Result<CFunction, String> {
+        let mut function = self.c_function(addr)?;
+        let assistant = self.assistant.as_ref().ok_or("no LLM configured")?;
+
+        let mut suggestions = assistant.suggest(&function.print().text)?;
+
+        // Names from the symbols are authoritative, only the unnamed functions are renamed
+        if !function.name.starts_with("sub_") {
+            suggestions.function_name = None;
+        }
+
+        let mut taken: HashSet<String> = self.prototypes.borrow().keys().cloned().collect();
+        taken.extend(self.globals.borrow().keys().cloned());
+        taken.extend(self.renames.borrow().values().cloned());
+
+        if let Some((old, new)) = llm::apply(&mut function, &suggestions, &self.typedb, &taken) {
+            self.renames.borrow_mut().insert(old, new);
+        }
+
+        return Ok(function);
     }
 
     /// The optimized LLVM IR of a function
@@ -129,7 +169,10 @@ impl<'a> Decompiler<'a> {
             instruction: Box::new(|a| self.instruction_text(a)),
         };
 
-        return Ok(c::decompile(&module, function, &ctx, prototype.as_ref(), addr));
+        let mut function = c::decompile(&module, function, &ctx, prototype.as_ref(), addr);
+        llm::apply_renames(&mut function, &self.renames.borrow());
+
+        return Ok(function);
     }
 
     fn instruction_text(&self, addr: u64) -> String {

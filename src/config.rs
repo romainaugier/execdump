@@ -2,6 +2,7 @@
  * Global configuration, loaded from ~/.execdumprc (TOML), one section per feature
  */
 
+use execdump_decompiler::llm::LlmConfig;
 use execdump_tui::KeyBindings;
 
 use serde::Deserialize;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub keys: KeyBindings,
+    pub llm: LlmConfig,
 }
 
 impl Config {
@@ -40,5 +42,10 @@ mod tests {
 
         let config: Config = toml::from_str("").unwrap();
         assert_eq!(config.keys.call_graph, 'C');
+        assert!(!config.llm.is_enabled());
+
+        let config: Config = toml::from_str("[llm]\nbackend = 'ollama'\nmodel = 'qwen'\nbase_url = 'http://localhost:11434'\n").unwrap();
+        assert!(config.llm.is_enabled());
+        assert_eq!(config.llm.max_tokens, 2048);
     }
 }
