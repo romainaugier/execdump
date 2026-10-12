@@ -32,11 +32,11 @@ pub struct Context<'a> {
     pub program: &'a Program,
     pub typedb: &'a TypeDb,
     /// LLVM global name to its address
-    pub globals: HashMap<String, u64>,
+    pub globals: &'a HashMap<String, u64>,
     /// Prototypes of the functions, by C name
-    pub prototypes: HashMap<String, Prototype>,
+    pub prototypes: &'a HashMap<String, Prototype>,
     /// Functions that do not return
-    pub noreturn: HashSet<String>,
+    pub noreturn: &'a HashSet<String>,
     /// Text of the instruction at an address (kept as inline assembly)
     pub instruction: Box<dyn Fn(u64) -> String + 'a>,
 }

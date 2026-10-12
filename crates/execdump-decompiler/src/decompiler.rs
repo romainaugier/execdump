@@ -48,6 +48,8 @@ pub struct Decompiler<'a> {
     /// Names given to the globals, and the C prototypes of the functions, for the C backend
     globals: RefCell<HashMap<String, u64>>,
     prototypes: RefCell<HashMap<String, Prototype>>,
+    /// Names of the functions that do not return (from their signature or their name)
+    noreturn: RefCell<HashSet<String>>,
     decoder: Decoder,
     /// LLM improvement pass and the names it gave to the functions
     assistant: Option<Assistant>,
@@ -83,6 +85,7 @@ impl<'a> Decompiler<'a> {
             in_progress: RefCell::new(HashSet::new()),
             globals: RefCell::new(HashMap::new()),
             prototypes: RefCell::new(HashMap::new()),
+            noreturn: RefCell::new(HashSet::new()),
             decoder: Decoder::new(arch).map_err(|e| e.to_string())?,
             assistant: None,
             renames: RefCell::new(Renames::new()),
@@ -153,19 +156,14 @@ impl<'a> Decompiler<'a> {
         let function = module.get_function(&sig.name).ok_or("the lifted function is missing")?;
         let prototype = self.prototypes.borrow().get(&sig.name).cloned();
 
+        let (globals, prototypes, noreturn) = (self.globals.borrow(), self.prototypes.borrow(), self.noreturn.borrow());
+
         let ctx = c::Context {
             program: self.program,
             typedb: &self.typedb,
-            globals: self.globals.borrow().clone(),
-            prototypes: self.prototypes.borrow().clone(),
-            noreturn: self
-                .signatures
-                .borrow()
-                .values()
-                .filter(|s| s.noreturn)
-                .map(|s| s.name.clone())
-                .chain(self.prototypes.borrow().keys().filter(|n| crate::analysis::function::is_noreturn_name(n)).cloned())
-                .collect(),
+            globals: &globals,
+            prototypes: &prototypes,
+            noreturn: &noreturn,
             instruction: Box::new(|a| self.instruction_text(a)),
         };
 
@@ -350,7 +348,11 @@ impl<'a> Decompiler<'a> {
 
         let sig = self.compute_signature(addr);
         let prototype = self.prototype_of(&sig);
-        self.prototypes.borrow_mut().entry(sig.name.clone()).or_insert(prototype);
+        self.add_prototype(prototype);
+
+        if sig.noreturn {
+            self.noreturn.borrow_mut().insert(sig.name.clone());
+        }
 
         self.in_progress.borrow_mut().remove(&addr);
         self.signatures.borrow_mut().insert(addr, sig.clone());
@@ -435,6 +437,15 @@ impl<'a> Decompiler<'a> {
         return Ok(refine(&module, llvm, &discovery, &self.abi));
     }
 
+    /// Keeps the first prototype given to a name
+    fn add_prototype(&self, prototype: Prototype) {
+        if crate::analysis::function::is_noreturn_name(&prototype.name) {
+            self.noreturn.borrow_mut().insert(prototype.name.clone());
+        }
+
+        self.prototypes.borrow_mut().entry(prototype.name.clone()).or_insert(prototype);
+    }
+
     /// C prototype of a discovered signature: integers and floats of the register widths
     fn prototype_of(&self, sig: &Signature) -> Prototype {
         let ctype = |ty: LType| match ty {
@@ -485,7 +496,9 @@ impl<'a> Decompiler<'a> {
             Value { loc: Loc::Reg(reg), ty, name: None }
         });
 
-        self.prototypes.borrow_mut().entry(name.to_string()).or_insert_with(|| Prototype { name: name.to_string(), ty: prototype.ty.clone() });
+        if !self.prototypes.borrow().contains_key(name) {
+            self.add_prototype(Prototype { name: name.to_string(), ty: prototype.ty.clone() });
+        }
 
         return Signature { name: name.to_string(), params, ret, variadic: prototype.ty.variadic, noreturn: false, guessed: false };
     }

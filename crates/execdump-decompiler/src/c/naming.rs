@@ -131,16 +131,15 @@ pub fn name(function: &mut CFunction, ctx: &Context) {
     let mut hints = Hints { names: HashMap::new(), loop_depth: 0 };
     hints.stmts(&function.body, ctx);
 
+    // The names of the program (functions and globals) are looked up in place, they are too many to copy
     let mut taken: HashSet<String> = KEYWORDS.iter().map(|k| k.to_string()).collect();
-    taken.extend(ctx.prototypes.keys().cloned());
-    taken.extend(ctx.globals.keys().cloned());
     taken.insert(function.name.clone());
 
     let unique = |base: &str, taken: &mut HashSet<String>| -> String {
         let mut name = base.to_string();
         let mut n = 2;
 
-        while taken.contains(&name) {
+        while taken.contains(&name) || ctx.prototypes.contains_key(&name) || ctx.globals.contains_key(&name) {
             name = format!("{}{}", base, n);
             n += 1;
         }
