@@ -51,6 +51,8 @@ pub struct Decompiler<'a> {
     /// Names of the functions that do not return (from their signature or their name)
     noreturn: RefCell<HashSet<String>>,
     decoder: Decoder,
+    /// Created once: a target machine is expensive to set up (and caches its subtargets)
+    machine: TargetMachine,
     /// LLM improvement pass and the names it gave to the functions
     assistant: Option<Assistant>,
     renames: RefCell<Renames>,
@@ -87,6 +89,7 @@ impl<'a> Decompiler<'a> {
             prototypes: RefCell::new(HashMap::new()),
             noreturn: RefCell::new(HashSet::new()),
             decoder: Decoder::new(arch).map_err(|e| e.to_string())?,
+            machine: target_machine(program)?,
             assistant: None,
             renames: RefCell::new(Renames::new()),
         });
@@ -202,47 +205,16 @@ impl<'a> Decompiler<'a> {
 
     fn module<'ctx>(&self, cx: &'ctx Context, name: &str) -> Result<Module<'ctx>, String> {
         let module = cx.create_module(name);
-        let machine = self.target_machine()?;
-
-        module.set_triple(&machine.get_triple());
-        module.set_data_layout(&machine.get_target_data().get_data_layout());
+        module.set_triple(&self.machine.get_triple());
+        module.set_data_layout(&self.machine.get_target_data().get_data_layout());
 
         return Ok(module);
-    }
-
-    fn target_machine(&self) -> Result<TargetMachine, String> {
-        let config = InitializationConfig::default();
-
-        let triple = match (self.program.architecture(), self.program.format) {
-            (Architecture::X86_64, Format::Pe) => "x86_64-pc-windows-msvc",
-            (Architecture::X86_64, Format::MachO) => "x86_64-apple-macosx",
-            (Architecture::X86_64, _) => "x86_64-pc-linux-gnu",
-            (Architecture::X86, Format::Pe) => "i686-pc-windows-msvc",
-            (Architecture::X86, _) => "i686-pc-linux-gnu",
-            (Architecture::Aarch64, Format::Pe) => "aarch64-pc-windows-msvc",
-            (Architecture::Aarch64, Format::MachO) => "arm64-apple-macosx",
-            (Architecture::Aarch64, _) => "aarch64-unknown-linux-gnu",
-            (Architecture::Unsupported, _) => return Err("unsupported architecture".to_string()),
-        };
-
-        match self.program.architecture() {
-            Architecture::Aarch64 => Target::initialize_aarch64(&config),
-            _ => Target::initialize_x86(&config),
-        }
-
-        let triple = TargetTriple::create(triple);
-        let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-
-        return target
-            .create_target_machine(&triple, "generic", "", OptimizationLevel::Default, RelocMode::Default, CodeModel::Default)
-            .ok_or_else(|| "cannot create the target machine".to_string());
     }
 
     fn optimize(&self, module: &Module) -> Result<(), String> {
         module.verify().map_err(|e| format!("invalid IR: {}", e.to_string()))?;
 
-        let machine = self.target_machine()?;
-        module.run_passes(PASSES, &machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+        module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
 
         // Helpers and globals the optimizations made useless
         for function in module.get_functions().filter(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
@@ -524,6 +496,35 @@ impl<'a> Decompiler<'a> {
             CType::Unknown(bits) => LType::Int(*bits as u32),
         });
     }
+}
+
+/// Target machine of the program (its triple and data layout for the modules, its cost model for the passes)
+fn target_machine(program: &Program) -> Result<TargetMachine, String> {
+    let config = InitializationConfig::default();
+
+    let triple = match (program.architecture(), program.format) {
+        (Architecture::X86_64, Format::Pe) => "x86_64-pc-windows-msvc",
+        (Architecture::X86_64, Format::MachO) => "x86_64-apple-macosx",
+        (Architecture::X86_64, _) => "x86_64-pc-linux-gnu",
+        (Architecture::X86, Format::Pe) => "i686-pc-windows-msvc",
+        (Architecture::X86, _) => "i686-pc-linux-gnu",
+        (Architecture::Aarch64, Format::Pe) => "aarch64-pc-windows-msvc",
+        (Architecture::Aarch64, Format::MachO) => "arm64-apple-macosx",
+        (Architecture::Aarch64, _) => "aarch64-unknown-linux-gnu",
+        (Architecture::Unsupported, _) => return Err("unsupported architecture".to_string()),
+    };
+
+    match program.architecture() {
+        Architecture::Aarch64 => Target::initialize_aarch64(&config),
+        _ => Target::initialize_x86(&config),
+    }
+
+    let triple = TargetTriple::create(triple);
+    let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
+
+    return target
+        .create_target_machine(&triple, "generic", "", OptimizationLevel::Default, RelocMode::Default, CodeModel::Default)
+        .ok_or_else(|| "cannot create the target machine".to_string());
 }
 
 /// Import name without its decorations (__imp_, symbol versions, stdcall suffixes)
