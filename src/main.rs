@@ -13,6 +13,10 @@ mod args;
 mod config;
 mod dump;
 
+// Linked for its malloc: the decompiler (LLVM above all) makes many small short lived allocations
+#[cfg(target_os = "linux")]
+use mimalloc as _;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 

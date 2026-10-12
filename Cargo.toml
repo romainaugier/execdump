@@ -37,3 +37,7 @@ dirs.workspace = true
 regex.workspace = true
 serde.workspace = true
 toml.workspace = true
+
+# mimalloc replaces malloc for the whole process (LLVM included), the static override is only reliable on Linux
+[target.'cfg(target_os = "linux")'.dependencies]
+mimalloc = { version = "0.1.52", default-features = false, features = ["override"] }
