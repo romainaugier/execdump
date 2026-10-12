@@ -202,6 +202,7 @@ pub struct KeyBindings {
     pub xrefs: char,
     pub call_graph: char,
     pub call_graph_up: char,
+    pub decompile: char,
 }
 
 impl Default for KeyBindings {
@@ -226,6 +227,7 @@ impl Default for KeyBindings {
             xrefs: 'x',
             call_graph: 'C',
             call_graph_up: 'U',
+            decompile: 'D',
         };
     }
 }

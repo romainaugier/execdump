@@ -5,6 +5,7 @@
  * Views (graphs, disassembly, tables, dumps) are stacked in a jumplist (Ctrl-o / Ctrl-i like in vim).
  */
 
+mod code_view;
 mod graph_view;
 mod layout;
 mod theme;
@@ -30,10 +31,12 @@ use crossterm::{
 use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::Decoder;
 use execdump_decompiler::analysis::{analyze, Analysis};
+use execdump_decompiler::Decompiler;
 use execdump_core::dump::Dump;
 use execdump_core::exec::Exec;
 use execdump_core::program::{programs_from_exec, Program};
 
+use code_view::{CodeState, CodeView};
 use graph_view::{GraphKind, GraphView, NodeKind};
 use theme::Theme;
 use views::{insn_target, DisasmView, DumpView, HexView, TableRow, TableView, Target};
@@ -42,7 +45,8 @@ use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -229,6 +233,7 @@ enum View {
     Disasm(DisasmView),
     Graph(GraphView),
     Table(TableView),
+    Code(CodeView),
 }
 
 impl View {
@@ -239,6 +244,7 @@ impl View {
             View::Hex(v) => v.title.clone(),
             View::Disasm(v) => v.title.clone(),
             View::Graph(v) => v.title.clone(),
+            View::Code(v) => v.title.clone(),
             View::Table(v) => if v.filter.is_empty() { v.title.clone() } else { format!("{} [/{}] ({} matches)", v.title, v.filter, v.filtered.len()) },
         }
     }
@@ -247,6 +253,7 @@ impl View {
         match self {
             View::Disasm(v) => Some(v.program),
             View::Graph(v) => Some(v.program),
+            View::Code(v) => Some(v.program),
             _ => None,
         }
     }
@@ -299,7 +306,16 @@ struct App {
     popup: Option<Popup>,
     help: bool,
     should_quit: bool,
+
+    /// Decompilation workers (one per program, started on demand) and their results
+    decompilers: Vec<Option<Sender<u64>>>,
+    decompiled_sender: Sender<Decompiled>,
+    decompiled: Receiver<Decompiled>,
+    code_cache: HashMap<(usize, u64), Result<(String, Vec<Option<u64>>), String>>,
 }
+
+/// Result of a decompilation worker: program, function, C code and the address of each line
+type Decompiled = (usize, u64, Result<(String, Vec<Option<u64>>), String>);
 
 impl App {
     fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings) -> Self {
@@ -320,6 +336,8 @@ impl App {
             });
         }
 
+        let (decompiled_sender, decompiled) = channel();
+        let decompilers_count = programs.len();
         let explorer_items = explorer_items(&exec, &programs);
         let mut explorer_state = ListState::default();
         explorer_state.select(Some(1));
@@ -348,6 +366,10 @@ impl App {
             popup: None,
             help: false,
             should_quit: false,
+            decompilers: vec![None; decompilers_count],
+            decompiled_sender,
+            decompiled,
+            code_cache: HashMap::new(),
         };
     }
 
@@ -375,6 +397,139 @@ impl App {
                 Err(error) => self.analysis_errors[index] = Some(error),
             }
         }
+    }
+
+    /// Results of the decompilation workers, shown in their views
+    fn poll_decompiled(&mut self) {
+        while let Ok((program, function, result)) = self.decompiled.try_recv() {
+            for view in std::iter::once(&mut self.view).chain(self.back.iter_mut()).chain(self.forward.iter_mut()) {
+                if let View::Code(code) = view {
+                    if code.program == program && code.function == function {
+                        match &result {
+                            Ok((text, lines)) => code.set_code(text, lines.clone()),
+                            Err(error) => code.state = CodeState::Failed(error.clone()),
+                        }
+                    }
+                }
+            }
+
+            self.code_cache.insert((program, function), result);
+        }
+    }
+
+    /// Worker thread decompiling the functions of a program, one request at a time
+    fn decompiler(&mut self, program: usize) -> Option<Sender<u64>> {
+        if let Some(sender) = &self.decompilers[program] {
+            return Some(sender.clone());
+        }
+
+        let analysis = self.analysis(program)?;
+        let program_ref = self.programs[program].clone();
+        let results = self.decompiled_sender.clone();
+        let (sender, requests) = channel::<u64>();
+
+        std::thread::spawn(move || {
+            let decompiler = Decompiler::new(&program_ref, &analysis);
+
+            while let Ok(function) = requests.recv() {
+                let result = match &decompiler {
+                    Ok(decompiler) => decompiler.c_function(function).map(|f| {
+                        let printed = f.print();
+                        (printed.text, printed.lines)
+                    }),
+                    Err(error) => Err(error.clone()),
+                };
+
+                if results.send((program, function, result)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        self.decompilers[program] = Some(sender.clone());
+
+        return Some(sender);
+    }
+
+    /// Opens the C code of the function containing an address
+    fn open_code(&mut self, program: usize, addr: u64) {
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        let Some(function) = analysis.function_containing(addr) else {
+            self.error(format!("No function at {:#x}", addr));
+            return;
+        };
+
+        let mut view = CodeView::loading(program, function.addr, &function.name);
+
+        match self.code_cache.get(&(program, function.addr)) {
+            Some(Ok((text, lines))) => view.set_code(text, lines.clone()),
+            Some(Err(error)) => view.state = CodeState::Failed(error.clone()),
+            None => {
+                let Some(sender) = self.decompiler(program) else {
+                    return;
+                };
+
+                let _ = sender.send(function.addr);
+            }
+        }
+
+        view.height = 20;
+        view.goto(addr);
+        self.open(View::Code(view));
+    }
+
+    /// C code of the function shown by the current view
+    fn decompile_current(&mut self) {
+        let target = match &self.view {
+            View::Graph(view) => match view.kind {
+                GraphKind::Cfg { .. } => Some((view.program, view.selected_node().addr)),
+                GraphKind::CallGraph { .. } => self.current_function(),
+            },
+            View::Disasm(view) => view.cursor_addr().map(|a| (view.program, a)),
+            View::Code(view) => {
+                // Back to the graph, on the block of the line
+                let (program, addr) = (view.program, view.cursor_addr().unwrap_or(view.function));
+                self.open_function(program, addr, Some(addr));
+                return;
+            }
+            _ => None,
+        };
+
+        if let Some((program, addr)) = target {
+            self.open_code(program, addr);
+        }
+    }
+
+    /// Follows a call of the line under the cursor of the C view
+    fn code_enter(&mut self) {
+        let View::Code(view) = &self.view else {
+            return;
+        };
+
+        let program = view.program;
+        let names = view.called_names();
+
+        let Some(analysis) = self.analyses[program].clone() else {
+            return;
+        };
+
+        for name in names {
+            let addr = u64::from_str_radix(name.trim_start_matches("sub_"), 16)
+                .ok()
+                .filter(|_| name.starts_with("sub_"))
+                .or_else(|| analysis.function_by_name(&name).map(|f| f.addr))
+                .or_else(|| analysis.functions.values().find(|f| f.thunk.is_none() && sanitize(&f.name) == name).map(|f| f.addr));
+
+            if let Some(addr) = addr.filter(|a| analysis.functions.contains_key(a)) {
+                self.open_code(program, addr);
+                return;
+            }
+        }
+
+        self.info("No function called on this line".to_string());
     }
 
     fn analysis(&mut self, program: usize) -> Option<Arc<Analysis>> {
@@ -881,6 +1036,17 @@ impl App {
                 let root = argument.and_then(|a| self.resolve_address(program, a));
                 self.open_call_graph(program, root, DEFAULT_CALL_GRAPH_DEPTH, false);
             }
+            "c" | "decompile" => {
+                let addr = match argument {
+                    Some(a) => self.resolve_address(program, a),
+                    None => self.current_function().map(|(_, f)| f),
+                };
+
+                match addr {
+                    Some(addr) => self.open_code(program, addr),
+                    None => self.error("Usage: c [function or address]".to_string()),
+                }
+            }
             "functions" | "fn" => {
                 if let Some(table) = self.functions_table(program) {
                     self.open(View::Table(table));
@@ -955,6 +1121,7 @@ impl App {
             }
             View::Graph(view) => view.search(&pattern),
             View::Disasm(view) => view.search(&pattern),
+            View::Code(view) => view.search(&pattern),
             View::Dump(view) => view.search(&pattern),
             _ => false,
         };
@@ -1202,6 +1369,7 @@ impl App {
                     _ if c == keys.toggle_view => self.toggle_graph_linear(),
                     _ if c == keys.xrefs => self.xrefs_current(),
                     _ if c == keys.call_graph => self.call_graph_current(),
+                    _ if c == keys.decompile => self.decompile_current(),
                     '+' | '=' | '-' | 'i' | 'r' => self.call_graph_option(c),
                     _ if c == keys.call_graph_up => self.call_graph_up(),
                     _ => {}
@@ -1224,6 +1392,25 @@ impl App {
                     _ if c == keys.prev_node => view.jump_label(false),
                     _ if c == keys.right => self.content_enter(),
                     _ if c == keys.toggle_view => self.toggle_graph_linear(),
+                    _ if c == keys.xrefs => self.xrefs_current(),
+                    _ if c == keys.call_graph => self.call_graph_current(),
+                    _ if c == keys.decompile => self.decompile_current(),
+                    _ => {}
+                }
+            }
+            View::Code(view) => {
+                let page = (view.height / 2).max(1) as isize;
+
+                match c {
+                    _ if half_page_down => view.move_cursor(page),
+                    _ if half_page_up => view.move_cursor(-page),
+                    _ if ctrl => {}
+                    _ if c == keys.down => view.move_cursor(1),
+                    _ if c == keys.up => view.move_cursor(-1),
+                    _ if c == keys.start => view.move_cursor(isize::MIN / 2),
+                    _ if c == keys.end => view.move_cursor(isize::MAX / 2),
+                    _ if c == keys.right => self.code_enter(),
+                    _ if c == keys.toggle_view || c == keys.decompile => self.decompile_current(),
                     _ if c == keys.xrefs => self.xrefs_current(),
                     _ if c == keys.call_graph => self.call_graph_current(),
                     _ => {}
@@ -1295,6 +1482,7 @@ impl App {
                 let analysis = self.analyses[view.program].as_ref()?;
                 analysis.function_containing(addr).map(|f| (view.program, f.addr))
             }
+            View::Code(view) => Some((view.program, view.function)),
             _ => None,
         }
     }
@@ -1451,6 +1639,10 @@ impl App {
     }
 
     fn content_enter(&mut self) {
+        if matches!(self.view, View::Code(_)) {
+            return self.code_enter();
+        }
+
         match &self.view {
             View::Table(view) => {
                 if let Some(row) = view.selected() {
@@ -1531,14 +1723,20 @@ impl App {
 
         match &self.view {
             View::Graph(view) => match view.kind {
-                GraphKind::Cfg { .. } => "hjkl scroll  n/p node  g/G first/last  t/f branch  Enter calls  Space linear  x xrefs  C callgraph  ^o back  ? help",
+                GraphKind::Cfg { .. } => "hjkl scroll  n/p node  g/G first/last  t/f branch  Enter calls  Space linear  D decompile  x xrefs  C callgraph  ^o back  ? help",
                 GraphKind::CallGraph { .. } => "hjkl scroll  n/p node  Enter open  +/- depth  i imports  r re-root  U up  x xrefs  ^o back  ? help",
             },
-            View::Disasm(_) => "j/k move  n/p function  Enter follow  Space graph  x xrefs  / search  ^o back  ? help",
+            View::Disasm(_) => "j/k move  n/p function  Enter follow  Space graph  D decompile  x xrefs  / search  ^o back  ? help",
+            View::Code(_) => "j/k move  Enter open call  Space/D graph  x xrefs  C callgraph  / search  ^o back  ? help",
             View::Table(_) => "j/k move  Enter open  / filter  Esc clear  ^o back  ? help",
             _ => "j/k scroll  ^d/^u page  g/G top/bottom  / search  ^o back  ? help",
         }
     }
+}
+
+/// C identifier of a name, as the decompiler gives them
+fn sanitize(name: &str) -> String {
+    return name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -1552,7 +1750,7 @@ const HELP: &[(&str, &str)] = &[
     ("Global", ""),
     ("Tab", "switch between the explorer and the content"),
     ("e", "show/hide the explorer"),
-    (":", "command line (address, function name, callgraph, functions, strings, imports, sections, entry, depth <n>, up, q)"),
+    (":", "command line (address, function name, callgraph, functions, strings, imports, sections, entry, depth <n>, up, c [function], q)"),
     ("/", "search (filters tables, finds nodes/lines)"),
     ("Ctrl-o / Backspace", "go back to the previous view"),
     ("Ctrl-i / Ctrl-r", "go forward"),
@@ -1568,6 +1766,7 @@ const HELP: &[(&str, &str)] = &[
     ("Space", "switch between graph and linear disassembly"),
     ("x", "cross references to the function"),
     ("C", "call graph from the function"),
+    ("D", "decompiled C code of the function (back to the graph from the C code)"),
     ("+ / - / i / r", "call graph depth / imports / re-root at the selection"),
     ("U", "call graph: go up to a caller of the root (parent graph)"),
     ("Linear disassembly", ""),
@@ -1680,6 +1879,10 @@ fn ui(f: &mut Frame, app: &mut App) {
             }
         }
         View::Graph(view) => view.render(inner, f.buffer_mut(), &theme),
+        View::Code(view) => {
+            let lines = view.render(&theme, height);
+            f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), inner);
+        }
         View::Table(view) => {
             let lines = view.render(&theme, height, inner.width as usize);
             f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), inner);
@@ -1752,6 +1955,7 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings) -> Result<(), Bo
     let result: Result<(), Box<dyn Error>> = (|| {
         loop {
             app.poll_analysis();
+            app.poll_decompiled();
 
             terminal.draw(|f| ui(f, &mut app))?;
 
@@ -1789,6 +1993,7 @@ mod tests {
     fn wait_analysis(app: &mut App) {
         for _ in 0..500 {
             app.poll_analysis();
+            app.poll_decompiled();
 
             if app.analyses.iter().all(|a| a.is_some()) {
                 return;
@@ -1889,5 +2094,43 @@ mod tests {
         assert!(!app.should_quit);
         app.handle_key(key('q'));
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn decompiled_code_view() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/elf_x86_64_analysis");
+        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path, KeyBindings::default());
+        wait_analysis(&mut app);
+
+        let mut terminal = Terminal::new(TestBackend::new(140, 45)).unwrap();
+
+        app.run_command("c main");
+        assert!(matches!(&app.view, View::Code(view) if view.state == CodeState::Loading));
+
+        for _ in 0..3000 {
+            app.poll_decompiled();
+
+            if matches!(&app.view, View::Code(view) if view.state != CodeState::Loading) {
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        let View::Code(view) = &mut app.view else { panic!("Expected the C code") };
+        assert_eq!(view.state, CodeState::Ready);
+        assert!(view.lines[0].starts_with("int main("));
+
+        // Enter on a call opens the callee, D goes back to the graph
+        let line = view.lines.iter().position(|l| l.contains("classify(")).unwrap();
+        view.cursor = line;
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(&app.view, View::Code(view) if view.title.starts_with("classify")));
+
+        app.handle_key(key('D'));
+        assert!(matches!(&app.view, View::Graph(_)));
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
     }
 }

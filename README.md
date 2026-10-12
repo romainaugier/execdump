@@ -228,7 +228,7 @@ Viewers:
   - :heavy_check_mark: Control flow graph viewer (radare2-like node graph)
   - :heavy_check_mark: Call graph viewer
   - :heavy_check_mark: Functions, strings, imports and memory map tables
-  - :x: Decompiler Viewer
+  - :heavy_check_mark: Decompiler Viewer (C code synchronized with the addresses, decompiled in the background)
 
 The analysis runs in the background when the TUI starts, its progress is shown in the title bar.
 
@@ -238,7 +238,7 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 |---|---|
 | `Tab` | Switch between the explorer and the content |
 | `e` | Show/hide the explorer |
-| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `q` |
+| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `c [function]`, `q` |
 | `/` | Search: filters the tables, finds the next matching node or line |
 | `Ctrl-o` / `Backspace` | Go back to the previous view |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
@@ -258,6 +258,7 @@ In the graphs:
 | `Space` | Switch between the graph and the linear disassembly of the function |
 | `x` | Cross references to the function |
 | `C` | Call graph from the function |
+| `D` | Decompiled C code of the function (`Enter` opens the function called on the line, `D` or `Space` goes back to the graph at the line) |
 | `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
 | `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
