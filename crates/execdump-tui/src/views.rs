@@ -5,12 +5,12 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::analysis::insn::{Decoder, Flow, InsnText, Instruction};
-use crate::analysis::Analysis;
-use crate::dump::Dump;
-use crate::program::Program;
-use crate::tui::graph_view::insn_spans;
-use crate::tui::theme::Theme;
+use execdump_decompiler::analysis::insn::{Decoder, Flow, InsnText, Instruction};
+use execdump_decompiler::analysis::Analysis;
+use execdump_core::dump::Dump;
+use execdump_core::program::Program;
+use crate::graph_view::insn_spans;
+use crate::theme::Theme;
 
 /// Where a table row or an instruction leads to
 #[derive(Clone, Debug, PartialEq, Eq)]

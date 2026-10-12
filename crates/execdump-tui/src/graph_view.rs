@@ -7,12 +7,12 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::analysis::function::{CallTarget, EdgeKind};
-use crate::analysis::insn::{Decoder, Instruction};
-use crate::analysis::Analysis;
-use crate::graph::layout::{layout, GraphInput, Layout};
-use crate::program::Program;
-use crate::tui::theme::Theme;
+use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
+use execdump_decompiler::analysis::insn::{Decoder, Instruction};
+use execdump_decompiler::analysis::Analysis;
+use crate::layout::{layout, GraphInput, Layout};
+use execdump_core::program::Program;
+use crate::theme::Theme;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -752,10 +752,10 @@ fn box_char(bits: u8, dashed: bool) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::analyze;
-    use crate::elf::parse_elf;
-    use crate::exec::Exec;
-    use crate::program::programs_from_exec;
+    use execdump_decompiler::analysis::analyze;
+    use execdump_core::elf::parse_elf;
+    use execdump_core::exec::Exec;
+    use execdump_core::program::programs_from_exec;
 
     use std::path::PathBuf;
 
@@ -775,7 +775,7 @@ mod tests {
 
     #[test]
     fn render_cfg_and_navigate() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/elf_x86_64_analysis");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/elf_x86_64_analysis");
         let program = programs_from_exec(&Exec::ELF(parse_elf(&path).unwrap())).remove(0);
         let analysis = analyze(&program, None).unwrap();
         let decoder = Decoder::new(program.architecture()).unwrap();

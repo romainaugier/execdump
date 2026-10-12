@@ -1,30 +1,17 @@
-use crate::dump::dump_exec;
-use crate::pe::parse_pe;
-use crate::elf::parse_elf;
-use crate::macho::parse_macho;
 use crate::args::Args;
-use crate::exec::{ExecType, guess_exectype, Exec};
+use crate::config::Config;
+use crate::dump::dump_exec;
+
+use execdump_core::elf::parse_elf;
+use execdump_core::exec::{ExecType, guess_exectype, Exec};
+use execdump_core::macho::parse_macho;
+use execdump_core::pe::parse_pe;
 
 use clap::Parser;
 
-pub mod pe;
-pub mod elf;
-pub mod macho;
-mod dump;
 mod args;
-mod disasm;
-mod tui;
-mod format;
-pub mod exec;
-mod reader;
-mod demangle;
-mod x86_64;
-mod aarch64;
-mod decompiler;
-mod eh_frame;
-mod program;
-mod analysis;
-mod graph;
+mod config;
+mod dump;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -38,11 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if args.tui {
-        return tui::main(&args.file_path, exec);
+        let config = Config::load()?;
+        return execdump_tui::main(&args.file_path, exec, config.keys);
     } else {
         dump_exec(&exec, &args);
     }
-
 
     return Ok(());
 }

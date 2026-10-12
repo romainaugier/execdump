@@ -3,9 +3,9 @@ use ratatui::text::Span;
 
 use serde::{Deserialize, Serialize};
 
-use crate::aarch64::is_aarch64_register;
-use crate::analysis::function::EdgeKind;
-use crate::x86_64::is_x86_64_register;
+use execdump_core::aarch64::is_aarch64_register;
+use execdump_decompiler::analysis::function::EdgeKind;
+use execdump_core::x86_64::is_x86_64_register;
 
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -179,7 +179,7 @@ impl Theme {
     }
 }
 
-/// Key bindings configuration, loaded from ~/.execdumprc (TOML)
+/// Key bindings, the [keys] section of the configuration file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct KeyBindings {
@@ -230,20 +230,6 @@ impl Default for KeyBindings {
     }
 }
 
-impl KeyBindings {
-    pub fn load() -> Self {
-        if let Some(home) = dirs::home_dir() {
-            if let Ok(contents) = std::fs::read_to_string(home.join(".execdumprc")) {
-                if let Ok(bindings) = toml::from_str(&contents) {
-                    return bindings;
-                }
-            }
-        }
-
-        return KeyBindings::default();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,12 +247,5 @@ mod tests {
         let spans = theme.operand_spans("x0, [sp, #0x10]");
         assert!(spans.iter().any(|s| s.content == "#0x10" && s.style.fg == Some(theme.asm_immediate)));
         assert!(spans.iter().any(|s| s.content == "sp" && s.style.fg == Some(theme.asm_register)));
-    }
-
-    #[test]
-    fn partial_config() {
-        let bindings: KeyBindings = toml::from_str("quit = 'Q'").unwrap();
-        assert_eq!(bindings.quit, 'Q');
-        assert_eq!(bindings.next_node, 'n');
     }
 }

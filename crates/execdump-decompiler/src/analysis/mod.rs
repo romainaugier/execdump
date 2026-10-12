@@ -9,7 +9,7 @@ pub mod strings;
 
 use crate::analysis::function::{recover_function, CallTarget, Function, FunctionSource, RecoveryContext};
 use crate::analysis::insn::{Decoder, Flow, Instruction};
-use crate::program::{Program, SymbolKind};
+use execdump_core::program::{Program, SymbolKind};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -109,7 +109,7 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
     for function in analysis.functions.values_mut() {
         if let Some(import) = &function.thunk {
             if program.symbol_at(function.addr).map_or(true, |s| s.kind == SymbolKind::Import) {
-                function.name = crate::demangle::demangle(import).unwrap_or(import.clone());
+                function.name = execdump_core::demangle::demangle(import).unwrap_or(import.clone());
             }
         }
     }
@@ -228,7 +228,7 @@ impl Analysis {
     pub fn call_target_name(&self, target: &CallTarget) -> String {
         match target {
             CallTarget::Function(addr) => self.functions.get(addr).map_or(format!("sub_{:x}", addr), |f| f.name.clone()),
-            CallTarget::Import(name) => crate::demangle::demangle(name).unwrap_or(name.clone()),
+            CallTarget::Import(name) => execdump_core::demangle::demangle(name).unwrap_or(name.clone()),
             CallTarget::Indirect => "<indirect>".to_string(),
         }
     }
@@ -267,7 +267,7 @@ impl Analysis {
         }
 
         if let Some(import) = program.import_slots.get(&addr) {
-            return Some(format!("[{}]", crate::demangle::demangle(import).unwrap_or(import.clone())));
+            return Some(format!("[{}]", execdump_core::demangle::demangle(import).unwrap_or(import.clone())));
         }
 
         if let Some(string) = self.strings.get(&addr) {
@@ -319,16 +319,16 @@ impl Analysis {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elf::parse_elf;
-    use crate::exec::Exec;
-    use crate::macho::parse_macho;
-    use crate::pe::parse_pe;
-    use crate::program::programs_from_exec;
+    use execdump_core::elf::parse_elf;
+    use execdump_core::exec::Exec;
+    use execdump_core::macho::parse_macho;
+    use execdump_core::pe::parse_pe;
+    use execdump_core::program::programs_from_exec;
 
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data").join(name);
     }
 
     #[test]

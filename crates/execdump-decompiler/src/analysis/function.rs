@@ -3,8 +3,8 @@
  */
 
 use crate::analysis::insn::{Aarch64Tracker, Decoded, Decoder, Flow, Instruction, Operand};
-use crate::disasm::Architecture;
-use crate::program::{Program, SeedSource};
+use execdump_core::disasm::Architecture;
+use execdump_core::program::{Program, SeedSource};
 
 use capstone::arch::x86::X86Reg;
 
@@ -577,7 +577,7 @@ pub fn recover_function(ctx: &RecoveryContext, addr: u64, name: String, source: 
     let blocks = recovery.build_blocks();
 
     // Thunks: a single block ending with a jump through an import slot, or an import stub symbol
-    let thunk = if let Some(symbol) = ctx.program.symbol_at(addr).filter(|s| s.kind == crate::program::SymbolKind::Import) {
+    let thunk = if let Some(symbol) = ctx.program.symbol_at(addr).filter(|s| s.kind == execdump_core::program::SymbolKind::Import) {
         Some(symbol.name.clone())
     } else if blocks.len() == 1 && recovery.calls.len() == 1 && recovery.calls[0].tail {
         match &recovery.calls[0].target {
@@ -643,7 +643,7 @@ fn compute_noreturn(ctx: &RecoveryContext, function: &Function) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::program::{Perms, Region};
+    use execdump_core::program::{Perms, Region};
 
     fn program(arch: Architecture, code: &[u8]) -> Program {
         let mut program = Program::default();

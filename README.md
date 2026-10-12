@@ -219,7 +219,7 @@ Viewers:
 
 The analysis runs in the background when the TUI starts, its progress is shown in the title bar.
 
-Key bindings (vim-like, the main ones can be changed in `~/.execdumprc`):
+Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
 | Keys | Action |
 |---|---|
@@ -252,6 +252,7 @@ Edges colors: green for a taken conditional branch (`t`), red for a conditional 
 
 ```toml
 # ~/.execdumprc
+[keys]
 quit = 'q'
 down = 'j'
 up = 'k'

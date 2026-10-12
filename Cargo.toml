@@ -1,19 +1,37 @@
-[package]
-name = "execdump"
+[workspace]
+members = ["crates/execdump-core", "crates/execdump-decompiler", "crates/execdump-tui"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
-byteorder = "1.5.0"
+[workspace.dependencies]
+execdump-core = { path = "crates/execdump-core" }
+execdump-decompiler = { path = "crates/execdump-decompiler" }
+execdump-tui = { path = "crates/execdump-tui" }
 capstone = "0.14.0"
 chrono = "0.4.42"
 clap = { version = "4.5.54", features = ["derive"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
-itertools = "0.14.0"
 ratatui = "0.30.0"
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }
 strum = "0.27.2"
 strum_macros = "0.27.2"
 toml = "0.9.10"
+
+[package]
+name = "execdump"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+execdump-core.workspace = true
+execdump-decompiler.workspace = true
+execdump-tui.workspace = true
+clap.workspace = true
+dirs.workspace = true
+regex.workspace = true
+serde.workspace = true
+toml.workspace = true

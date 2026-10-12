@@ -2366,7 +2366,7 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> PathBuf {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data").join(name);
     }
 
     fn field<'a>(dump: &'a Dump, key: &str) -> &'a str {

@@ -5,7 +5,7 @@
 use crate::analysis::function::{CallTarget, EdgeKind, Function};
 use crate::analysis::insn::Decoder;
 use crate::analysis::Analysis;
-use crate::program::Program;
+use execdump_core::program::Program;
 
 use std::fmt::Write;
 

@@ -7,7 +7,7 @@ use capstone::arch::x86::{ArchMode as X86Mode, ArchSyntax, X86OperandType, X86Re
 use capstone::arch::ArchOperand;
 use capstone::prelude::*;
 
-use crate::disasm::Architecture;
+use execdump_core::disasm::Architecture;
 
 /// Control flow effect of an instruction
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -2,7 +2,7 @@
  * String extraction from the non executable regions
  */
 
-use crate::program::Program;
+use execdump_core::program::Program;
 
 use std::collections::BTreeMap;
 
@@ -85,7 +85,7 @@ pub fn escape(string: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::program::{Perms, Region};
+    use execdump_core::program::{Perms, Region};
 
     #[test]
     fn ascii_and_wide() {

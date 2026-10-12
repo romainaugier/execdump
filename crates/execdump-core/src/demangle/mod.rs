@@ -77,7 +77,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn corpus_files() -> Vec<PathBuf> {
-        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/demangle");
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/demangle");
 
         let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
             .unwrap()

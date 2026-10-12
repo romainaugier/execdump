@@ -6,8 +6,11 @@
  */
 
 mod graph_view;
+mod layout;
 mod theme;
 mod views;
+
+pub use theme::KeyBindings;
 
 use ratatui::{
     Frame, Terminal,
@@ -24,15 +27,15 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
-use crate::analysis::function::{CallTarget, EdgeKind};
-use crate::analysis::insn::Decoder;
-use crate::analysis::{analyze, Analysis};
-use crate::dump::Dump;
-use crate::exec::Exec;
-use crate::program::{programs_from_exec, Program};
+use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
+use execdump_decompiler::analysis::insn::Decoder;
+use execdump_decompiler::analysis::{analyze, Analysis};
+use execdump_core::dump::Dump;
+use execdump_core::exec::Exec;
+use execdump_core::program::{programs_from_exec, Program};
 
 use graph_view::{GraphKind, GraphView, NodeKind};
-use theme::{KeyBindings, Theme};
+use theme::Theme;
 use views::{insn_target, DisasmView, DumpView, HexView, TableRow, TableView, Target};
 
 use std::error::Error;
@@ -167,18 +170,18 @@ fn explorer_items(exec: &Exec, programs: &[Arc<Program>]) -> Vec<ExplorerItem> {
 
     match exec {
         Exec::PE(pe) => {
-            let mut sections: Vec<&crate::pe::Section> = pe.sections.values().collect();
+            let mut sections: Vec<&execdump_core::pe::Section> = pe.sections.values().collect();
             sections.sort_by_key(|s| s.header.virtual_address);
             items.extend(sections.iter().map(|s| ExplorerItem::Section(0, s.header.name.clone())));
         }
         Exec::ELF(elf) => {
-            let mut sections: Vec<&crate::elf::ELFSection> = elf.sections.values().filter(|s| !s.name.is_empty()).collect();
+            let mut sections: Vec<&execdump_core::elf::ELFSection> = elf.sections.values().filter(|s| !s.name.is_empty()).collect();
             sections.sort_by_key(|s| s.offset());
             items.extend(sections.iter().map(|s| ExplorerItem::Section(0, s.name.clone())));
         }
         Exec::MachO(macho) => {
             for (p, binary) in macho.binaries.iter().enumerate() {
-                let mut sections: Vec<&crate::macho::MachOSection> = binary.sections.values().collect();
+                let mut sections: Vec<&execdump_core::macho::MachOSection> = binary.sections.values().collect();
                 sections.sort_by_key(|s| s.header.addr);
                 items.extend(sections.iter().map(|s| ExplorerItem::Section(p, s.header.full_name())));
             }
@@ -299,7 +302,7 @@ struct App {
 }
 
 impl App {
-    fn new(exec: Exec, exec_path: PathBuf) -> Self {
+    fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings) -> Self {
         let programs: Vec<Arc<Program>> = programs_from_exec(&exec).into_iter().map(Arc::new).collect();
         let (sender, receiver) = channel();
         let mut progress = Vec::new();
@@ -331,7 +334,7 @@ impl App {
             exec,
             exec_path,
             theme: Theme::codedark(),
-            keys: KeyBindings::load(),
+            keys,
             explorer_items,
             explorer_state,
             explorer_visible: true,
@@ -602,7 +605,7 @@ impl App {
                 format!("{:#x}", addr),
                 program_ref.region_at(addr).map_or(String::new(), |r| r.name.clone()),
                 format!("{}", xrefs.get(&addr).copied().unwrap_or(0)),
-                crate::analysis::strings::escape(string, 200),
+                execdump_decompiler::analysis::strings::escape(string, 200),
             ],
             target: Target::Address(program, addr),
             style: None,
@@ -633,7 +636,7 @@ impl App {
 
         for (&addr, name) in slots {
             rows.push(TableRow {
-                cells: vec![format!("{:#x}", addr), "pointer".to_string(), crate::demangle::demangle(name).unwrap_or(name.clone())],
+                cells: vec![format!("{:#x}", addr), "pointer".to_string(), execdump_core::demangle::demangle(name).unwrap_or(name.clone())],
                 target: Target::Address(program, addr),
                 style: Some(Style::default().fg(self.theme.dim)),
             });
@@ -1736,7 +1739,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 }
 
-pub fn main(exec_path: &PathBuf, exec: Exec) -> Result<(), Box<dyn Error>> {
+pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -1744,7 +1747,7 @@ pub fn main(exec_path: &PathBuf, exec: Exec) -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(exec, exec_path.clone());
+    let mut app = App::new(exec, exec_path.clone(), keys);
 
     let result: Result<(), Box<dyn Error>> = (|| {
         loop {
@@ -1776,7 +1779,7 @@ pub fn main(exec_path: &PathBuf, exec: Exec) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elf::parse_elf;
+    use execdump_core::elf::parse_elf;
     use ratatui::backend::TestBackend;
 
     fn key(c: char) -> KeyEvent {
@@ -1799,8 +1802,8 @@ mod tests {
 
     #[test]
     fn navigate_views() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/elf_x86_64_analysis");
-        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/elf_x86_64_analysis");
+        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path, KeyBindings::default());
         wait_analysis(&mut app);
 
         let mut terminal = Terminal::new(TestBackend::new(140, 45)).unwrap();
