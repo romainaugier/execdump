@@ -180,7 +180,7 @@ Disassembly:
 
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC) and Rust legacy
-  - :x: Known symbols loading (kernel32, user32, glibc...)
+  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64)
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)

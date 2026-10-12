@@ -123,12 +123,11 @@ impl CType {
             CType::Function(func) => {
                 let mut params: Vec<String> = func.params.iter().map(|p| p.ty.declare(p.name.as_deref().unwrap_or(""))).collect();
 
-                if func.variadic {
-                    params.push("...".to_string());
-                }
-
-                if params.is_empty() {
-                    params.push("void".to_string());
+                // Unprototyped functions (K&R) are variadic without parameters: f()
+                match (params.is_empty(), func.variadic) {
+                    (true, false) => params.push("void".to_string()),
+                    (false, true) => params.push("...".to_string()),
+                    _ => {}
                 }
 
                 return func.ret.declarator(format!("{}({})", inner, params.join(", ")));
@@ -156,6 +155,8 @@ impl fmt::Display for CType {
             CType::Int { bits, signed: false } => write!(f, "uint{}_t", bits),
             CType::Float { bits: 32 } => write!(f, "float"),
             CType::Float { bits: 64 } => write!(f, "double"),
+            CType::Float { bits: 16 } => write!(f, "_Float16"),
+            CType::Float { bits: 128 } => write!(f, "_Float128"),
             CType::Float { .. } => write!(f, "long double"),
             CType::Const(inner) => write!(f, "const {}", inner),
             CType::Struct(name) => write!(f, "struct {}", name),
