@@ -1,165 +1,19 @@
-use crate::elf::ELF;
-use crate::exec::Exec;
-use crate::macho::MachO;
+use execdump_core::elf::ELF;
+use execdump_core::exec::Exec;
+use execdump_core::macho::MachO;
 use crate::args::{Args, DecompileOutput};
-use crate::analysis::analyze;
-use crate::analysis::dot::{callgraph_dot, cfg_dot};
-use crate::analysis::function::Function;
-use crate::analysis::insn::Decoder;
-use crate::program::programs_from_exec;
-use crate::pe::PE;
+use execdump_decompiler::analysis::analyze;
+use execdump_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
+use execdump_decompiler::analysis::function::Function;
+use execdump_decompiler::analysis::insn::Decoder;
+use execdump_decompiler::Decompiler;
+
+use crate::config::Config;
+use execdump_core::program::programs_from_exec;
+use execdump_core::pe::PE;
 
 use regex::Regex;
 
-#[derive(Clone, Debug, Default)]
-pub struct DumpField {
-    pub key: &'static str,
-    pub value: String,
-    pub comment: Option<&'static str>,
-}
-
-impl DumpField {
-    pub fn new(
-        key: &'static str,
-        value: String,
-        comment: Option<&'static str>
-    ) -> DumpField {
-        return DumpField { key, value, comment };
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum DumpRawData {
-    None(),
-    Bytes(Vec<u8>),
-    Code(Vec<String>),
-}
-
-impl Default for DumpRawData {
-    fn default() -> DumpRawData {
-        return DumpRawData::None();
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Dump {
-    label: String,
-    fields: Vec<DumpField>,
-    children: Vec<Dump>,
-    raw_data: DumpRawData,
-}
-
-impl Dump {
-    pub fn new(label: &str) -> Dump {
-        let mut dump = Dump::default();
-        dump.label = String::from(label);
-        return dump;
-    }
-
-    pub fn new_from_string(label: String) -> Dump {
-        let mut dump = Dump::default();
-        dump.label = label;
-        return dump;
-    }
-
-    pub fn push_field(
-        &mut self,
-        key: &'static str,
-        value: String,
-        comment: Option<&'static str>,
-    ) {
-        self.fields.push(DumpField::new(key, value, comment));
-    }
-
-    pub fn push_child(
-        &mut self,
-        dump: Dump
-    ) {
-        self.children.push(dump);
-    }
-
-    pub fn set_raw_data(
-        &mut self,
-        raw_data: DumpRawData
-    ) {
-        self.raw_data = raw_data;
-    }
-
-    pub fn iter_fields(&self) -> std::slice::Iter<'_, DumpField> {
-        return self.fields.iter();
-    }
-
-    pub fn iter_children(&self) -> std::slice::Iter<'_, Dump> {
-        return self.children.iter();
-    }
-
-    pub fn label(&self) -> &str {
-        return self.label.as_str();
-    }
-
-    pub fn raw_data(&self) -> &DumpRawData {
-        return &self.raw_data;
-    }
-
-    pub fn fields_align(&self) -> usize {
-        return self
-            .iter_fields()
-            .max_by(|a, b| a.key.len().cmp(&b.key.len()))
-            .map(|v| v.key.len())
-            .unwrap_or(0) + 1;
-    }
-
-    #[rustfmt::skip]
-    pub fn print(&self, indent_level: usize, indent_size: usize) {
-        let indent = indent_level * indent_size;
-
-        println!("{:>width$}{}", "", self.label, width = indent);
-
-        let fields_indent = (indent_level + 1) * indent_size;
-        let fields_align = self.fields_align();
-
-        for field in self.fields.iter() {
-            let label = field.key;
-
-            if label.len() == 0 {
-                println!(
-                    "{:>width$}{}",
-                    "",
-                    field.value,
-                    width = fields_indent);
-            } else {
-                println!(
-                    "{:>width$}{label:<align$}: {}",
-                    "",
-                    field.value,
-                    width = fields_indent,
-                    align = fields_align);
-            }
-        }
-
-        match &self.raw_data {
-            DumpRawData::Code(code) => {
-                for loc in code.iter() {
-                    println!("{:>width$}{}", "", loc, width = fields_indent);
-                }
-            },
-            _ => {},
-        }
-
-        if self.children.len() > 0 {
-            println!("");
-        }
-
-        for child in self.children.iter() {
-            child.print(indent_level + 1, indent_size);
-            println!("");
-        }
-
-        if self.children.len() == 0 {
-            println!("");
-        }
-    }
-}
 
 pub fn dump_pe(pe: &PE, args: &Args) {
     if args.pe_headers {
@@ -378,7 +232,7 @@ pub fn dump_macho(macho: &MachO, args: &Args) {
     }
 }
 
-pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     let filter = Regex::new(&args.functions_filter)?;
 
     for program in programs_from_exec(exec) {
@@ -427,6 +281,44 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
                 }
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
+                DecompileOutput::C => {
+                    let mut decompiler = Decompiler::new(&program, &analysis)?;
+
+                    if args.llm {
+                        decompiler = decompiler.with_assistant(&config.llm)?;
+                    }
+
+                    // With the LLM the callees come first, their new names show in their callers
+                    let order: Vec<u64> = if args.llm { callees_first(&analysis, &functions) } else { functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect() };
+                    let mut outputs: Vec<(u64, String)> = Vec::new();
+
+                    for addr in order {
+                        let function = if args.llm { decompiler.c_function_improved(addr) } else { decompiler.c_function(addr) };
+
+                        let text = match function {
+                            Ok(function) => format!("// {:#x}\n{}", addr, function.print().text),
+                            Err(error) => format!("// {} ({:#x}): {}\n", analysis.functions[&addr].name, addr, error),
+                        };
+
+                        outputs.push((addr, text));
+                    }
+
+                    outputs.sort_by_key(|(addr, _)| *addr);
+
+                    for (_, text) in outputs {
+                        println!("{}", text);
+                    }
+                }
+                DecompileOutput::Llvm => {
+                    let decompiler = Decompiler::new(&program, &analysis)?;
+
+                    for function in functions.iter().filter(|f| f.thunk.is_none()) {
+                        match decompiler.llvm_ir(function.addr) {
+                            Ok(ir) => println!("; {} ({:#x})\n{}", function.name, function.addr, ir),
+                            Err(error) => println!("; {} ({:#x}): {}\n", function.name, function.addr, error),
+                        }
+                    }
+                }
             }
         }
     }
@@ -434,7 +326,44 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
     return Ok(());
 }
 
-pub fn dump_exec(exec: &Exec, args: &Args) {
+/// Functions in post order of the call graph (callees before their callers)
+fn callees_first(analysis: &execdump_decompiler::analysis::Analysis, functions: &[&Function]) -> Vec<u64> {
+    let wanted: std::collections::HashSet<u64> = functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
+    let mut visited = std::collections::HashSet::new();
+    let mut order = Vec::new();
+
+    for &start in functions.iter().map(|f| &f.addr) {
+        let mut stack = vec![(start, false)];
+
+        while let Some((addr, done)) = stack.pop() {
+            if done {
+                if wanted.contains(&addr) {
+                    order.push(addr);
+                }
+
+                continue;
+            }
+
+            if !visited.insert(addr) {
+                continue;
+            }
+
+            stack.push((addr, true));
+
+            if let Some(function) = analysis.functions.get(&addr) {
+                for call in function.calls.iter() {
+                    if let execdump_decompiler::analysis::function::CallTarget::Function(callee) = call.target {
+                        stack.push((callee, false));
+                    }
+                }
+            }
+        }
+    }
+
+    return order;
+}
+
+pub fn dump_exec(exec: &Exec, args: &Args, config: &Config) {
     match exec {
         Exec::PE(pe) => dump_pe(pe, args),
         Exec::ELF(elf) => dump_elf(elf, args),
@@ -442,7 +371,7 @@ pub fn dump_exec(exec: &Exec, args: &Args) {
     }
 
     if !args.decompile.is_empty() {
-        if let Err(error) = dump_decompile(exec, args) {
+        if let Err(error) = dump_decompile(exec, args, config) {
             eprintln!("Decompilation failed: {}", error);
         }
     }

@@ -1,0 +1,12 @@
+[package]
+name = "execdump-tui"
+description = "Terminal user interface for execdump"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+execdump-core.workspace = true
+execdump-decompiler.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+serde.workspace = true

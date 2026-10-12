@@ -139,13 +139,18 @@ pub struct Args {
 
     /// Analyze the code and output the requested decompilation stages (comma separated):
     /// functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
-    /// callgraph (call graph as Graphviz dot)
+    /// callgraph (call graph as Graphviz dot), llvm (optimized LLVM IR of the functions), c (decompiled C code)
     #[arg(long, value_enum, value_delimiter = ',')]
     pub decompile: Vec<DecompileOutput>,
 
     /// Regular expression to filter the functions (by name or hexadecimal address) used by --decompile
     #[arg(long, default_value = ".*")]
     pub functions_filter: String,
+
+    /// Improves the decompiled C code with the LLM of the [llm] section of ~/.execdumprc
+    /// (names, types and a summary of each function, the callees first)
+    #[arg(long, default_value_t = false)]
+    pub llm: bool,
 
     /*
      * Formatting
@@ -166,4 +171,8 @@ pub enum DecompileOutput {
     Cfg,
     /// Call graph (Graphviz dot)
     Callgraph,
+    /// Optimized LLVM IR of the functions
+    Llvm,
+    /// Decompiled C code of the functions
+    C,
 }

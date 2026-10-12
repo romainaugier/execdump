@@ -8,6 +8,19 @@ The goal is to provide a fast, reliable and cross-platform reverse-engineering a
 
 execdump might evolve into a library later, instead of just being a standalone command-line tool.
 
+## Building
+
+The decompiler lifts the code to LLVM IR and links LLVM 18 statically: building needs the LLVM 18 development
+libraries (`llvm-config` and the static libraries), found through `LLVM_SYS_181_PREFIX` or the `PATH`.
+
+- Debian/Ubuntu: `apt install llvm-18-dev libpolly-18-dev libzstd-dev zlib1g-dev`
+- macOS: `brew install llvm@18 zstd`, then `export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)`
+- Windows: a static LLVM build such as [llvm-package-windows](https://github.com/vovkos/llvm-package-windows), then set `LLVM_SYS_181_PREFIX`
+
+```
+cargo build --release
+```
+
 ## Usage
 
 ```
@@ -180,7 +193,7 @@ Disassembly:
 
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC) and Rust legacy
-  - :x: Known symbols loading (kernel32, user32, glibc...)
+  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64)
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
@@ -194,14 +207,15 @@ Analysis:
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
-  - :x: SSA construction
-  - :x: Data-flow analysis
-  - :x: Control-flow structuring
-  - :x: Expression recovery
-  - :x: Type recovery
-  - :x: Variable recovery
-  - :x: High-level cleanup passes
-  - :x: C code generation
+  - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
+  - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
+  - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
+  - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
+  - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
+  - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
+  - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
+  - :heavy_check_mark: C code generation (`--decompile c`)
+  - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
 
 ### TUI
 
@@ -215,17 +229,17 @@ Viewers:
   - :heavy_check_mark: Control flow graph viewer (radare2-like node graph)
   - :heavy_check_mark: Call graph viewer
   - :heavy_check_mark: Functions, strings, imports and memory map tables
-  - :x: Decompiler Viewer
+  - :heavy_check_mark: Decompiler Viewer (C code synchronized with the addresses, decompiled in the background)
 
 The analysis runs in the background when the TUI starts, its progress is shown in the title bar.
 
-Key bindings (vim-like, the main ones can be changed in `~/.execdumprc`):
+Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
 | Keys | Action |
 |---|---|
 | `Tab` | Switch between the explorer and the content |
 | `e` | Show/hide the explorer |
-| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `q` |
+| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `c [function]`, `q` |
 | `/` | Search: filters the tables, finds the next matching node or line |
 | `Ctrl-o` / `Backspace` | Go back to the previous view |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
@@ -245,6 +259,7 @@ In the graphs:
 | `Space` | Switch between the graph and the linear disassembly of the function |
 | `x` | Cross references to the function |
 | `C` | Call graph from the function |
+| `D` | Decompiled C code of the function (`Enter` opens the function called on the line, `D` or `Space` goes back to the graph at the line) |
 | `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
 | `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
@@ -252,6 +267,7 @@ Edges colors: green for a taken conditional branch (`t`), red for a conditional 
 
 ```toml
 # ~/.execdumprc
+[keys]
 quit = 'q'
 down = 'j'
 up = 'k'
@@ -261,6 +277,19 @@ next_node = 'n'
 prev_node = 'p'
 follow_true = 't'
 follow_false = 'f'
+```
+
+The LLM assistance uses the `[llm]` section (any backend of the [llm](https://crates.io/crates/llm) crate):
+
+```toml
+# ~/.execdumprc
+[llm]
+backend = "anthropic"              # openai, anthropic, ollama, google, deepseek, mistral, groq, xai, openrouter
+model = "..."
+api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
+# base_url = "http://localhost:11434"
+# max_tokens = 2048
+# temperature = 0.2
 ```
 
 ![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
