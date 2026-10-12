@@ -139,7 +139,7 @@ pub struct Args {
 
     /// Analyze the code and output the requested decompilation stages (comma separated):
     /// functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
-    /// callgraph (call graph as Graphviz dot)
+    /// callgraph (call graph as Graphviz dot), llvm (optimized LLVM IR of the functions)
     #[arg(long, value_enum, value_delimiter = ',')]
     pub decompile: Vec<DecompileOutput>,
 
@@ -166,4 +166,6 @@ pub enum DecompileOutput {
     Cfg,
     /// Call graph (Graphviz dot)
     Callgraph,
+    /// Optimized LLVM IR of the functions
+    Llvm,
 }

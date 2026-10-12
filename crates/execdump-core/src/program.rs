@@ -115,10 +115,19 @@ pub struct FunctionSeed {
     pub source: SeedSource,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Format {
+    #[default]
+    Elf,
+    Pe,
+    MachO,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Program {
     /// Short description, e.g. "ELF x86_64"
     pub name: String,
+    pub format: Format,
     pub arch: Option<Architecture>,
     pub pointer_size: u8,
     pub big_endian: bool,
@@ -544,7 +553,7 @@ fn pe_exception_table(program: &mut Program, pe: &PE, image_base: u64) {
 }
 
 fn program_from_pe(pe: &PE) -> Program {
-    let mut program = Program::default();
+    let mut program = Program { format: Format::Pe, ..Default::default() };
 
     let image_base = pe.get_optional_header().image_base();
 
@@ -599,7 +608,7 @@ const INDIRECT_SYMBOL_LOCAL: u32 = 0x8000_0000;
 const INDIRECT_SYMBOL_ABS: u32 = 0x4000_0000;
 
 fn program_from_macho(binary: &MachOBinary) -> Program {
-    let mut program = Program::default();
+    let mut program = Program { format: Format::MachO, ..Default::default() };
 
     program.arch = Some(binary.architecture());
     program.pointer_size = if binary.header.is_64() { 8 } else { 4 };

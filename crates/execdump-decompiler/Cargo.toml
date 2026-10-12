@@ -7,4 +7,5 @@ edition.workspace = true
 [dependencies]
 execdump-core.workspace = true
 capstone.workspace = true
+inkwell.workspace = true
 lang-c.workspace = true

@@ -6,6 +6,7 @@ use execdump_decompiler::analysis::analyze;
 use execdump_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
 use execdump_decompiler::analysis::function::Function;
 use execdump_decompiler::analysis::insn::Decoder;
+use execdump_decompiler::Decompiler;
 use execdump_core::program::programs_from_exec;
 use execdump_core::pe::PE;
 
@@ -278,6 +279,16 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
                 }
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
+                DecompileOutput::Llvm => {
+                    let decompiler = Decompiler::new(&program, &analysis)?;
+
+                    for function in functions.iter().filter(|f| f.thunk.is_none()) {
+                        match decompiler.llvm_ir(function.addr) {
+                            Ok(ir) => println!("; {} ({:#x})\n{}", function.name, function.addr, ir),
+                            Err(error) => println!("; {} ({:#x}): {}\n", function.name, function.addr, error),
+                        }
+                    }
+                }
             }
         }
     }

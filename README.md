@@ -8,6 +8,19 @@ The goal is to provide a fast, reliable and cross-platform reverse-engineering a
 
 execdump might evolve into a library later, instead of just being a standalone command-line tool.
 
+## Building
+
+The decompiler lifts the code to LLVM IR and links LLVM 18 statically: building needs the LLVM 18 development
+libraries (`llvm-config` and the static libraries), found through `LLVM_SYS_181_PREFIX` or the `PATH`.
+
+- Debian/Ubuntu: `apt install llvm-18-dev libpolly-18-dev libzstd-dev zlib1g-dev`
+- macOS: `brew install llvm@18 zstd`, then `export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)`
+- Windows: a static LLVM build such as [llvm-package-windows](https://github.com/vovkos/llvm-package-windows), then set `LLVM_SYS_181_PREFIX`
+
+```
+cargo build --release
+```
+
 ## Usage
 
 ```
@@ -194,8 +207,9 @@ Analysis:
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
-  - :x: SSA construction
-  - :x: Data-flow analysis
+  - :heavy_check_mark: Lifting to LLVM IR (x86_64), with lazy flags and a statically tracked stack frame
+  - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
+  - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
   - :x: Control-flow structuring
   - :x: Expression recovery
   - :x: Type recovery

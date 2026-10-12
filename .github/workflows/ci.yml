@@ -47,6 +47,29 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install LLVM 18 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev libpolly-18-dev libzstd-dev zlib1g-dev libxml2-dev
+          echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
+
+      - name: Install LLVM 18 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@18 zstd
+          echo "LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+
+      # The official Windows installer has neither llvm-config nor the static libraries
+      - name: Install LLVM 18 (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSL -o llvm.7z https://github.com/vovkos/llvm-package-windows/releases/download/llvm-18.1.8/llvm-18.1.8-windows-amd64-msvc17-msvcrt.7z
+          7z x llvm.7z -o"$RUNNER_TEMP" > /dev/null
+          echo "LLVM_SYS_181_PREFIX=$(cygpath -m "$RUNNER_TEMP"/llvm-18.1.8-windows-amd64-msvc17-msvcrt)" >> "$GITHUB_ENV"
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
