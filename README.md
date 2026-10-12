@@ -210,12 +210,11 @@ Decompiler:
   - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
   - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
   - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
-  - :x: Control-flow structuring
-  - :x: Expression recovery
-  - :x: Type recovery
-  - :x: Variable recovery
-  - :x: High-level cleanup passes
-  - :x: C code generation
+  - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
+  - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
+  - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
+  - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
+  - :heavy_check_mark: C code generation (`--decompile c`)
 
 ### TUI
 

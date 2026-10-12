@@ -85,6 +85,10 @@ impl BinaryOp {
         }
     }
 
+    pub fn is_bitwise(self) -> bool {
+        return matches!(self, BinaryOp::And | BinaryOp::Or | BinaryOp::Xor | BinaryOp::Shl | BinaryOp::Shr);
+    }
+
     pub fn is_comparison(self) -> bool {
         return matches!(self, BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge | BinaryOp::Eq | BinaryOp::Ne);
     }
@@ -206,6 +210,8 @@ pub enum StmtKind {
     Goto(String),
     Label(String),
     Comment(String),
+    /// Call to a function that does not return
+    NoReturn(Expr),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -219,9 +225,9 @@ impl Stmt {
         return Stmt { kind, addr };
     }
 
-    /// Statements after which the execution does not continue
+    /// Statements after which the execution does not continue (calls to noreturn functions are NoReturn)
     pub fn is_jump(&self) -> bool {
-        return matches!(self.kind, StmtKind::Break | StmtKind::Continue | StmtKind::Return(_) | StmtKind::Goto(_));
+        return matches!(self.kind, StmtKind::Break | StmtKind::Continue | StmtKind::Return(_) | StmtKind::Goto(_) | StmtKind::NoReturn(_));
     }
 }
 
@@ -273,7 +279,7 @@ impl Printer<'_> {
 
     /// Writes an expression, parenthesized when its precedence is looser than the context allows
     fn write_expr(&self, out: &mut String, e: &Expr, context: u8) {
-        let parens = e.precedence() > context || (e.precedence() == context && context < 13 && context > 2);
+        let parens = e.precedence() > context;
 
         if parens {
             out.push('(');
@@ -313,10 +319,16 @@ impl Printer<'_> {
                 self.write_expr(out, inner, 2);
             }
             Expr::Binary(op, a, b) => {
-                self.write_expr(out, a, op.precedence());
+                // Bitwise operations inside other operations keep their parentheses for clarity
+                let context = |operand: &Expr, context: u8| match operand {
+                    Expr::Binary(inner, ..) if inner != op && inner.is_bitwise() => 0,
+                    _ => context,
+                };
+
+                self.write_expr(out, a, context(a, op.precedence()));
                 let _ = write!(out, " {} ", op.symbol());
                 // Left associative: a - (b - c) needs its parentheses
-                self.write_expr(out, b, op.precedence() - 1);
+                self.write_expr(out, b, context(b, op.precedence() - 1));
             }
             Expr::Cast(ty, inner) => {
                 let _ = write!(out, "({})", ty.declare(""));
@@ -364,7 +376,7 @@ impl Printer<'_> {
     /// Statement without its terminating semicolon (for loops print them inline)
     fn simple(&self, stmt: &Stmt) -> String {
         match &stmt.kind {
-            StmtKind::Expr(e) => self.expr(e),
+            StmtKind::Expr(e) | StmtKind::NoReturn(e) => self.expr(e),
             StmtKind::Assign(target, value) => self.assignment(target, value),
             _ => String::new(),
         }
@@ -399,7 +411,7 @@ impl Printer<'_> {
         let addr = stmt.addr;
 
         match &stmt.kind {
-            StmtKind::Expr(_) | StmtKind::Assign(..) => {
+            StmtKind::Expr(_) | StmtKind::Assign(..) | StmtKind::NoReturn(_) => {
                 let text = format!("{};", self.simple(stmt));
                 self.line(depth, &text, addr);
             }
@@ -548,7 +560,7 @@ impl CFunction {
 
 /// Marks the variables used by statements
 pub fn mark_used(stmts: &[Stmt], used: &mut [bool]) {
-    let mut expr = |e: &Expr, used: &mut [bool]| {
+    let expr = |e: &Expr, used: &mut [bool]| {
         e.visit(&mut |e| {
             if let Expr::Var(id) = e {
                 used[*id] = true;
@@ -558,7 +570,7 @@ pub fn mark_used(stmts: &[Stmt], used: &mut [bool]) {
 
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Expr(e) => expr(e, used),
+            StmtKind::Expr(e) | StmtKind::NoReturn(e) => expr(e, used),
             StmtKind::Assign(a, b) => {
                 expr(a, used);
                 expr(b, used);

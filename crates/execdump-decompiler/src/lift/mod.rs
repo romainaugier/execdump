@@ -1016,7 +1016,13 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         if let Some(slot) = program.import_slots.get(&addr) {
-            let global = self.module.add_global(self.ptr_type(), None, &format!("__imp_{}", slot));
+            let slot_name = format!("__imp_{}", slot.split('@').next().unwrap_or(slot));
+
+            if let Some(global) = self.module.get_global(&slot_name) {
+                return Ok(global);
+            }
+
+            let global = self.module.add_global(self.ptr_type(), None, &slot_name);
             global.set_linkage(Linkage::External);
             return Ok(global);
         }

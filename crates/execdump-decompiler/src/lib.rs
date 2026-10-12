@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod c;
 pub mod cxx;
 pub mod decompiler;
 pub mod lift;

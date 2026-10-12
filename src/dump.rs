@@ -279,6 +279,16 @@ pub fn dump_decompile(exec: &Exec, args: &Args) -> Result<(), Box<dyn std::error
                 }
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
+                DecompileOutput::C => {
+                    let decompiler = Decompiler::new(&program, &analysis)?;
+
+                    for function in functions.iter().filter(|f| f.thunk.is_none()) {
+                        match decompiler.c_code(function.addr) {
+                            Ok(code) => println!("// {:#x}\n{}", function.addr, code),
+                            Err(error) => println!("// {} ({:#x}): {}\n", function.name, function.addr, error),
+                        }
+                    }
+                }
                 DecompileOutput::Llvm => {
                     let decompiler = Decompiler::new(&program, &analysis)?;
 

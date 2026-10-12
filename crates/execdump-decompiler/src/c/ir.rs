@@ -6,7 +6,7 @@
 use crate::lift::ADDRESS_METADATA;
 
 use inkwell::llvm_sys::core::*;
-use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMValueRef};
+use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef};
 use inkwell::llvm_sys::target::{LLVMABISizeOfType, LLVMGetModuleDataLayout, LLVMOffsetOfElement};
 use inkwell::llvm_sys::{LLVMIntPredicate, LLVMOpcode, LLVMRealPredicate, LLVMTypeKind};
 use inkwell::module::Module;
@@ -305,8 +305,8 @@ fn float_predicate(p: LLVMRealPredicate) -> Pred {
     return Pred::Float { op, ordered };
 }
 
-struct Reader<'m> {
-    module: &'m Module<'m>,
+struct Reader {
+    module: LLVMModuleRef,
     values: Vec<Value>,
     ids: HashMap<LLVMValueRef, ValueId>,
     blocks: HashMap<LLVMBasicBlockRef, BlockId>,
@@ -327,7 +327,7 @@ unsafe fn name(value: LLVMValueRef) -> String {
     return String::from_utf8_lossy(bytes).to_string();
 }
 
-impl Reader<'_> {
+impl Reader {
     unsafe fn ty(&self, value: LLVMValueRef) -> Ty {
         let ty = unsafe { LLVMTypeOf(value) };
 
@@ -399,7 +399,7 @@ impl Reader<'_> {
     /// Byte scale of each index of a GEP (its source element type, then the nested arrays)
     unsafe fn gep_scales(&self, raw: LLVMValueRef) -> Vec<i64> {
         unsafe {
-            let layout = LLVMGetModuleDataLayout(self.module.as_mut_ptr());
+            let layout = LLVMGetModuleDataLayout(self.module);
             let mut ty = LLVMGetGEPSourceElementType(raw);
             let mut scales = vec![LLVMABISizeOfType(layout, ty) as i64];
 
@@ -450,7 +450,7 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
         let address_kind = LLVMGetMDKindIDInContext(context, kind_name.as_ptr() as *const _, kind_name.len() as u32);
 
         let params: Vec<LLVMValueRef> = (0..LLVMCountParams(raw)).map(|i| LLVMGetParam(raw, i)).collect();
-        let mut reader = Reader { module, values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), address_kind };
+        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), address_kind };
 
         let param_ids: Vec<ValueId> = params.iter().map(|&p| reader.value(p)).collect();
 

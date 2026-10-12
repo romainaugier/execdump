@@ -103,6 +103,48 @@ impl Inference<'_> {
         };
     }
 
+    /// Base of an indexed access (base + i * size): the base points to elements of the accessed size
+    fn indexed_base(&self, address: ValueId, size: i64) -> Option<ValueId> {
+        let f = self.f;
+
+        let scale_of = |v: ValueId| -> i64 {
+            match f.inst(v) {
+                Some((Op::Shl, [_, k])) => f.int(*k).map_or(1, |k| 1i64 << k),
+                Some((Op::Mul, [_, c])) => f.int(*c).map_or(1, |c| c as i64),
+                _ => 1,
+            }
+        };
+
+        return match f.inst(self.address_root(address)) {
+            Some((Op::Gep, [base, index])) if f.int(*index).is_none() => {
+                let ValueKind::Inst { scales, .. } = &f.values[self.address_root(address)].kind else {
+                    return None;
+                };
+                (scales.first().copied().unwrap_or(1) * scale_of(*index) == size).then_some(*base)
+            }
+            Some((Op::Add, [x, y])) if f.int(*x).is_none() && f.int(*y).is_none() => {
+                if scale_of(*y) == size && size > 1 {
+                    Some(*x)
+                } else if scale_of(*x) == size && size > 1 {
+                    Some(*y)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+    }
+
+    /// A memory access types its address, and the base of an indexed address
+    fn access(&mut self, address: ValueId, accessed: CType, bits: u32) {
+        let root = self.address_root(address);
+        self.set_pointer(root, accessed.clone());
+
+        if let Some(base) = self.indexed_base(address, bits as i64 / 8) {
+            self.set_pointer(base, accessed);
+        }
+    }
+
     fn round(&mut self) {
         let f = self.f;
 
@@ -114,13 +156,11 @@ impl Inference<'_> {
             match (op, operands.as_slice()) {
                 (Op::Load, [address]) => {
                     let accessed = if is_pointer(&self.types[id]) { self.types[id].clone() } else { access_type(f.values[id].ty) };
-                    let root = self.address_root(*address);
-                    self.set_pointer(root, accessed);
+                    self.access(*address, accessed, f.values[id].ty.bits());
                 }
                 (Op::Store, [value, address]) => {
                     let accessed = if is_pointer(&self.types[*value]) { self.types[*value].clone() } else { access_type(f.values[*value].ty) };
-                    let root = self.address_root(*address);
-                    self.set_pointer(root, accessed);
+                    self.access(*address, accessed, f.values[*value].ty.bits());
                 }
                 (Op::IntToPtr, [x]) | (Op::PtrToInt, [x]) | (Op::Freeze, [x]) => {
                     if let Some(to) = pointee(&self.types[id]).cloned() {
@@ -197,7 +237,10 @@ impl Inference<'_> {
                         _ => None,
                     };
 
-                    if let Some(signed) = signed {
+                    // Unsigned comparisons with constants are mostly range checks (switches, bounds)
+                    let constant = f.int(*x).is_some() || f.int(*y).is_some();
+
+                    if let Some(signed) = signed.filter(|&s| s || !constant) {
                         self.set_signed(*x, signed);
                         self.set_signed(*y, signed);
                     }
