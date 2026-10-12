@@ -485,6 +485,21 @@ impl App {
         }
     }
 
+    /// Opens a call graph and selects a function in it
+    fn open_call_graph_at(&mut self, program: usize, root: u64, depth: usize, imports: bool, select: u64) {
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        if let Some(mut view) = GraphView::call_graph(program, &analysis, &self.theme, root, depth, imports) {
+            if let Some(index) = view.nodes.iter().position(|n| n.kind == NodeKind::Function && n.addr == select) {
+                view.select(index);
+            }
+
+            self.open(View::Graph(view));
+        }
+    }
+
     fn region_disasm(&self, program: usize, region: &str) -> Option<DisasmView> {
         let decoder = self.decoders[program].as_ref()?;
         return DisasmView::region(program, &self.programs[program], self.analyses[program].as_deref(), decoder, region);
@@ -523,6 +538,7 @@ impl App {
         match target {
             Target::Function(program, addr) => self.open_function(program, addr, None),
             Target::Address(program, addr) => self.goto_address(program, addr),
+            Target::CallGraph { program, root, depth, imports, select } => self.open_call_graph_at(program, root, depth, imports, select),
         }
     }
 
@@ -897,6 +913,7 @@ impl App {
                     _ => self.error("Usage in a call graph: depth <n>".to_string()),
                 }
             }
+            "up" | "parent" => self.call_graph_up(),
             "help" | "h" => self.help = true,
             _ => match self.resolve_address(program, command) {
                 Some(addr) => self.goto_address(program, addr),
@@ -1183,6 +1200,7 @@ impl App {
                     _ if c == keys.xrefs => self.xrefs_current(),
                     _ if c == keys.call_graph => self.call_graph_current(),
                     '+' | '=' | '-' | 'i' | 'r' => self.call_graph_option(c),
+                    _ if c == keys.call_graph_up => self.call_graph_up(),
                     _ => {}
                 }
             }
@@ -1329,6 +1347,50 @@ impl App {
         }
     }
 
+    /// Re-roots the call graph at a caller of its root (popup when there are several)
+    fn call_graph_up(&mut self) {
+        let View::Graph(view) = &self.view else {
+            self.error("Not in a call graph".to_string());
+            return;
+        };
+
+        let GraphKind::CallGraph { root, depth, imports } = view.kind else {
+            self.error("Not in a call graph".to_string());
+            return;
+        };
+
+        let program = view.program;
+
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        // Same edges as the call graph: calls, tail calls and references by address
+        let mut items: Vec<(String, Target)> = Vec::new();
+
+        for (&caller_addr, caller) in analysis.functions.iter() {
+            if caller_addr == root {
+                continue;
+            }
+
+            let kind = if caller.calls.iter().any(|c| c.target == CallTarget::Function(root)) {
+                "call"
+            } else if caller.refs.iter().any(|&(_, target)| target == root) {
+                "reference"
+            } else {
+                continue;
+            };
+
+            items.push((
+                format!("{:#x}  {} ({})", caller_addr, caller.name, kind),
+                Target::CallGraph { program, root: caller_addr, depth, imports, select: root },
+            ));
+        }
+
+        let name = analysis.functions.get(&root).map_or(String::new(), |f| f.name.clone());
+        self.show_popup(format!("Callers of {}", name), items);
+    }
+
     fn toggle_graph_linear(&mut self) {
         match &self.view {
             View::Graph(view) => {
@@ -1467,7 +1529,7 @@ impl App {
         match &self.view {
             View::Graph(view) => match view.kind {
                 GraphKind::Cfg { .. } => "hjkl scroll  n/p node  g/G first/last  t/f branch  Enter calls  Space linear  x xrefs  C callgraph  ^o back  ? help",
-                GraphKind::CallGraph { .. } => "hjkl scroll  n/p node  Enter open  +/- depth  i imports  r re-root  x xrefs  ^o back  ? help",
+                GraphKind::CallGraph { .. } => "hjkl scroll  n/p node  Enter open  +/- depth  i imports  r re-root  U up  x xrefs  ^o back  ? help",
             },
             View::Disasm(_) => "j/k move  n/p function  Enter follow  Space graph  x xrefs  / search  ^o back  ? help",
             View::Table(_) => "j/k move  Enter open  / filter  Esc clear  ^o back  ? help",
@@ -1487,7 +1549,7 @@ const HELP: &[(&str, &str)] = &[
     ("Global", ""),
     ("Tab", "switch between the explorer and the content"),
     ("e", "show/hide the explorer"),
-    (":", "command line (address, function name, callgraph, functions, strings, imports, sections, entry, depth <n>, q)"),
+    (":", "command line (address, function name, callgraph, functions, strings, imports, sections, entry, depth <n>, up, q)"),
     ("/", "search (filters tables, finds nodes/lines)"),
     ("Ctrl-o / Backspace", "go back to the previous view"),
     ("Ctrl-i / Ctrl-r", "go forward"),
@@ -1504,6 +1566,7 @@ const HELP: &[(&str, &str)] = &[
     ("x", "cross references to the function"),
     ("C", "call graph from the function"),
     ("+ / - / i / r", "call graph depth / imports / re-root at the selection"),
+    ("U", "call graph: go up to a caller of the root (parent graph)"),
     ("Linear disassembly", ""),
     ("j / k", "move the cursor"),
     ("n / p", "next / previous function or block"),
@@ -1776,6 +1839,22 @@ mod tests {
         app.handle_key(key('i'));
         app.handle_key(key('+'));
         terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+        // Up to the parent graph: classify is called from main, which is selected in it
+        app.run_command("cg classify");
+        app.handle_key(key('U'));
+        if let Some(popup) = app.popup.take() {
+            app.open_target(popup.items[0].1.clone());
+        }
+        terminal.draw(|f| ui(f, &mut app)).unwrap();
+        let analysis = app.analyses[0].clone().unwrap();
+        let classify = analysis.function_by_name("classify").unwrap().addr;
+        let View::Graph(view) = &app.view else { panic!("Expected a graph") };
+        let GraphKind::CallGraph { root, .. } = view.kind else { panic!("Expected a call graph") };
+        assert!(analysis.callers[&classify].contains(&root));
+        assert_eq!(view.selected_node().addr, classify);
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
 
         app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
         app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));

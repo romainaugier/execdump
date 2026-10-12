@@ -201,6 +201,7 @@ pub struct KeyBindings {
     pub toggle_explorer: char,
     pub xrefs: char,
     pub call_graph: char,
+    pub call_graph_up: char,
 }
 
 impl Default for KeyBindings {
@@ -224,6 +225,7 @@ impl Default for KeyBindings {
             toggle_explorer: 'e',
             xrefs: 'x',
             call_graph: 'C',
+            call_graph_up: 'U',
         };
     }
 }

@@ -19,6 +19,8 @@ pub enum Target {
     Function(usize, u64),
     /// Any address (opens the function, the code or the data containing it)
     Address(usize, u64),
+    /// Call graph rooted at a function, selecting another function in it
+    CallGraph { program: usize, root: u64, depth: usize, imports: bool, select: u64 },
 }
 
 /// Keeps a cursor visible in a scrolled list

@@ -225,7 +225,7 @@ Key bindings (vim-like, the main ones can be changed in `~/.execdumprc`):
 |---|---|
 | `Tab` | Switch between the explorer and the content |
 | `e` | Show/hide the explorer |
-| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `q` |
+| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `q` |
 | `/` | Search: filters the tables, finds the next matching node or line |
 | `Ctrl-o` / `Backspace` | Go back to the previous view |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
@@ -246,6 +246,7 @@ In the graphs:
 | `x` | Cross references to the function |
 | `C` | Call graph from the function |
 | `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
+| `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
 Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
 
