@@ -36,7 +36,7 @@ use inkwell::types::IntType;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroU32;
 
@@ -508,6 +508,25 @@ pub struct Lifter<'ctx, 'a> {
     written: RefCell<BTreeMap<Reg, u32>>,
     /// Written registers at the end of the lifted blocks, merged at the start of their successors
     written_out: HashMap<u64, BTreeMap<Reg, u32>>,
+    /// Instructions of the last flag producer whose flags have not been read yet: dead when the
+    /// next producer of the same block overwrites them (keeps the IR to optimize small)
+    unread_flags: RefCell<Vec<InstructionValue<'ctx>>>,
+    /// Flag computations found dead, erased at the end of the block (the instructions of a block are
+    /// tagged with their address as they are lifted, erasing them before would break the tagging)
+    dead_flags: RefCell<Vec<InstructionValue<'ctx>>>,
+    /// Whether the current block produced flags, and read the stored ones before
+    produced_flags: Cell<bool>,
+    reads_flags: Cell<bool>,
+    /// Flags of the lifted blocks, to remove the unread computations of their last producer
+    block_flags: HashMap<u64, BlockFlags<'ctx>>,
+}
+
+struct BlockFlags<'ctx> {
+    produces: bool,
+    /// The stored flags are read before the block produces its own
+    reads_on_entry: bool,
+    /// Instructions of the last producer, unread in the block
+    tail: Vec<InstructionValue<'ctx>>,
 }
 
 /// Lifts a function into a module, with its signature or the discovery one
@@ -544,6 +563,11 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         discovery,
         written: RefCell::new(BTreeMap::new()),
         written_out: HashMap::new(),
+        unread_flags: RefCell::new(Vec::new()),
+        dead_flags: RefCell::new(Vec::new()),
+        produced_flags: Cell::new(false),
+        reads_flags: Cell::new(false),
+        block_flags: HashMap::new(),
     };
 
     lifter.lift_entry()?;
@@ -560,7 +584,12 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         lifter.builder.position_at_end(blocks[&addr]);
         lifter.tracker = tracker.clone();
         lifter.lift_block(addr, &frame.blocks[&addr], &blocks)?;
+
+        let tail = std::mem::take(&mut *lifter.unread_flags.borrow_mut());
+        lifter.block_flags.insert(addr, BlockFlags { produces: lifter.produced_flags.get(), reads_on_entry: lifter.reads_flags.get(), tail });
     }
+
+    lifter.drop_unread_tail_flags();
 
     // Blocks the reverse post order did not reach (only reachable through unresolved jumps)
     for block in blocks.values() {
@@ -655,6 +684,8 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.flags = None;
         self.branch = None;
         self.jump = None;
+        self.produced_flags.set(false);
+        self.reads_flags.set(false);
 
         let mut written = BTreeMap::new();
 
@@ -681,6 +712,12 @@ impl<'ctx> Lifter<'ctx, '_> {
             self.tag_address(current, before)?;
 
             insn.track(self.env.regs, &mut self.tracker);
+        }
+
+        for instruction in std::mem::take(&mut *self.dead_flags.borrow_mut()).into_iter().rev() {
+            if instruction.get_first_use().is_none() {
+                instruction.erase_from_basic_block();
+            }
         }
 
         self.written_out.insert(addr, self.written.borrow().clone());
@@ -1278,6 +1315,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     /// Records a flag producing operation and computes the flag bits
     pub fn set_flags(&mut self, op: FlagOp, lhs: IntValue<'ctx>, rhs: IntValue<'ctx>, result: IntValue<'ctx>) -> Result<(), String> {
+        let start = self.drop_unread_flags()?;
         let flags = self.flag_regs;
         let bits = result.get_type().get_bit_width();
         let zero = result.get_type().const_zero();
@@ -1320,12 +1358,79 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         self.flags = Some(FlagProducer { op, lhs: lhs.into(), rhs: rhs.into(), result: Some(result) });
+        self.keep_unread_flags(start)?;
+
+        return Ok(());
+    }
+
+    /// The computation of the flags of the previous producer is dead when nothing read them since
+    /// and the new producer is in the same block: it overwrites them all. Returns the last
+    /// instruction before the new producer's ones.
+    fn drop_unread_flags(&self) -> Result<Option<InstructionValue<'ctx>>, String> {
+        let block = self.builder.get_insert_block().ok_or("no current block")?;
+        let unread = std::mem::take(&mut *self.unread_flags.borrow_mut());
+
+        if unread.iter().all(|i| i.get_parent() == Some(block)) {
+            self.dead_flags.borrow_mut().extend(unread);
+        }
+
+        self.produced_flags.set(true);
+
+        return Ok(block.get_last_instruction());
+    }
+
+    /// The flags of the last producer of a block are dead when no path from it reaches a block
+    /// reading the stored flags before producing its own
+    fn drop_unread_tail_flags(&mut self) {
+        let succs = |addr: u64| self.function.blocks[&addr].succs.iter().map(|e| e.to).filter(|to| self.block_flags.contains_key(to));
+        let mut live: HashMap<u64, bool> = self.block_flags.iter().map(|(&a, f)| (a, f.reads_on_entry)).collect();
+        let mut changed = true;
+
+        while changed {
+            changed = false;
+
+            for (&addr, flags) in self.block_flags.iter() {
+                if !live[&addr] && !flags.produces && succs(addr).any(|s| live[&s]) {
+                    live.insert(addr, true);
+                    changed = true;
+                }
+            }
+        }
+
+        for (&addr, flags) in self.block_flags.iter() {
+            if succs(addr).any(|s| live[&s]) {
+                continue;
+            }
+
+            for instruction in flags.tail.iter().rev() {
+                if instruction.get_first_use().is_none() {
+                    instruction.erase_from_basic_block();
+                }
+            }
+        }
+    }
+
+    /// The instructions a producer added after start, until its flags are read
+    fn keep_unread_flags(&self, start: Option<InstructionValue<'ctx>>) -> Result<(), String> {
+        let block = self.builder.get_insert_block().ok_or("no current block")?;
+        let mut next = match start {
+            Some(instruction) => instruction.get_next_instruction(),
+            None => block.get_first_instruction(),
+        };
+
+        let mut unread = self.unread_flags.borrow_mut();
+
+        while let Some(instruction) = next {
+            unread.push(instruction);
+            next = instruction.get_next_instruction();
+        }
 
         return Ok(());
     }
 
     /// Records a floating point comparison (x86 ucomis, arm fcmp)
     pub fn set_float_flags(&mut self, lhs: FloatValue<'ctx>, rhs: FloatValue<'ctx>) -> Result<(), String> {
+        let start = self.drop_unread_flags()?;
         let flags = self.flag_regs;
         let compare = |p, name| self.builder.build_float_compare(p, lhs, rhs, name).map_err(|e| e.to_string());
 
@@ -1348,6 +1453,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         self.flags = Some(FlagProducer { op: FlagOp::Float, lhs: lhs.into(), rhs: rhs.into(), result: None });
+        self.keep_unread_flags(start)?;
 
         return Ok(());
     }
@@ -1362,6 +1468,13 @@ impl<'ctx> Lifter<'ctx, '_> {
             if let Some(value) = self.lazy_condition(&producer, cond)? {
                 return Ok(value);
             }
+        }
+
+        // The stored flags are read: the last producer's are needed (or the predecessors' ones)
+        self.unread_flags.borrow_mut().clear();
+
+        if !self.produced_flags.get() {
+            self.reads_flags.set(true);
         }
 
         let flags = self.flag_regs;

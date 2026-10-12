@@ -10,6 +10,7 @@ pub mod ast;
 mod build;
 pub mod ir;
 mod naming;
+mod reaching;
 mod simplify;
 mod structure;
 mod typing;
@@ -32,11 +33,11 @@ pub struct Context<'a> {
     pub program: &'a Program,
     pub typedb: &'a TypeDb,
     /// LLVM global name to its address
-    pub globals: HashMap<String, u64>,
+    pub globals: &'a HashMap<String, u64>,
     /// Prototypes of the functions, by C name
-    pub prototypes: HashMap<String, Prototype>,
+    pub prototypes: &'a HashMap<String, Prototype>,
     /// Functions that do not return
-    pub noreturn: HashSet<String>,
+    pub noreturn: &'a HashSet<String>,
     /// Text of the instruction at an address (kept as inline assembly)
     pub instruction: Box<dyn Fn(u64) -> String + 'a>,
 }
@@ -85,8 +86,8 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
 
     let types = typing::infer(&f, ctx, &declared);
     let ret = return_type(&f, &types, prototype);
-    let built = build::build(&f, ctx, types, &names);
-    let body = structure::structure(built.blocks);
+    let mut built = build::build(&f, ctx, types, &names);
+    let body = structure::structure(built.blocks, &mut built.vars);
 
     let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr };
     simplify::simplify(&mut function);

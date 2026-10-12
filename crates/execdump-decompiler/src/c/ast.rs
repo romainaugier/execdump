@@ -46,7 +46,7 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    fn symbol(self) -> &'static str {
+    pub fn symbol(self) -> &'static str {
         match self {
             BinaryOp::Mul => "*",
             BinaryOp::Div => "/",
