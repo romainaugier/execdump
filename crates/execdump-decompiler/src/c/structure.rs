@@ -5,12 +5,16 @@
  * come from the back edges, a branch is closed where its paths join (its post dominator once the
  * paths that return early are left out), reaching the loop header is a continue and reaching the
  * loop follow a break. The other exits of a loop are emitted where the loop leaves to them. A block
- * reached again is copied when what follows it is small, anything else is a goto. Cleanups then
- * give the loops their condition (while, do while, for) and flatten the if/else chains.
+ * several paths of a branch reach before they join follows the branch, guarded by the condition
+ * under which they reach it (reaching conditions, as in "No More Gotos"). A block reached again is
+ * copied when what follows it is small, anything else is a goto. Cleanups then give the loops
+ * their condition (while, do while, for) and flatten the if/else chains.
  */
 
-use super::ast::{BinaryOp, Case, Expr, Stmt, StmtKind, VarId};
+use super::ast::{BinaryOp, Case, Expr, Stmt, StmtKind, UnaryOp, Var, VarId};
 use super::build::{SBlock, Term};
+use super::reaching::{Atoms, Cond};
+use crate::types::CType;
 
 use std::collections::{HashMap, HashSet};
 
@@ -138,7 +142,9 @@ struct Loop {
  */
 
 struct Structurer<'a> {
-    blocks: &'a [SBlock],
+    blocks: Vec<SBlock>,
+    /// Variables of the function, the conditions tested again are kept in new ones
+    vars: &'a mut Vec<Var>,
     preds: Vec<Vec<usize>>,
     /// Where the branches of a block join (see Structurer::new)
     joins: Vec<Option<usize>>,
@@ -147,6 +153,9 @@ struct Structurer<'a> {
     /// Statements left while copying a region instead of jumping to it, None when not copying
     copy_budget: Option<usize>,
     copy_failed: bool,
+    /// Blocks where the regions being emitted stop: the guarded blocks of the enclosing branches,
+    /// with the loop they are guarded in (inside a nested loop the paths have to leave it first)
+    stops: Vec<(usize, Option<usize>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -168,12 +177,18 @@ const TOP: Context<'static> = Context { header: None, follow: None, body: None, 
 /// Statements a small region can have to be copied where it is reached again instead of jumped to
 const MAX_COPY: usize = 8;
 
+/// Size of the regions (in blocks) whose shared blocks are guarded by their reaching condition
+const MAX_GUARDED_REGION: usize = 48;
+
+/// Literals a guard can have (a longer one is less readable than a goto)
+const MAX_GUARD_LITERALS: usize = 4;
+
 pub fn label(block: usize) -> String {
     return format!("label_{}", block);
 }
 
 impl<'a> Structurer<'a> {
-    fn new(blocks: &'a [SBlock]) -> Self {
+    fn new(blocks: Vec<SBlock>, vars: &'a mut Vec<Var>) -> Self {
         let succs: Vec<Vec<usize>> = blocks.iter().map(|b| successors(&b.term)).collect();
         let order = reverse_post_order(&succs, 0);
         let idom = dominators(&succs, 0);
@@ -256,7 +271,7 @@ impl<'a> Structurer<'a> {
             };
         }
 
-        return Structurer { blocks, preds, joins, loops, emitted: vec![false; count], copy_budget: None, copy_failed: false };
+        return Structurer { blocks, vars, preds, joins, loops, emitted: vec![false; count], copy_budget: None, copy_failed: false, stops: Vec::new() };
     }
 
     /// A block that ends the function with at most a few statements
@@ -304,6 +319,395 @@ impl<'a> Structurer<'a> {
         return (!failed).then_some(stmts);
     }
 
+    /// The blocks several paths from a branch reach before they join, with the condition under which
+    /// they are reached: the paths stop there and the blocks follow the branch, guarded by it. Only
+    /// for a region of a single entry (its loops have a single exit), when the conditions are small
+    /// and can be tested again there: nothing they depend on changed, or they are kept in a
+    /// variable (the conditions with calls, or reading memory that changed). Returns the guarded
+    /// blocks and the blocks whose condition goes to a new variable (the next ones of the function).
+    fn guarded(&self, branch: usize, join: Option<usize>, context: &Context) -> (Vec<(usize, Expr)>, Vec<usize>) {
+        if self.copy_budget.is_some() {
+            return (Vec::new(), Vec::new());
+        }
+
+        let boundary = |n: usize| {
+            n == branch
+                || Some(n) == join
+                || Some(n) == context.header
+                || Some(n) == context.follow
+                || self.stops.iter().any(|&(s, _)| s == n)
+                || self.emitted[n]
+                || self.is_tail(n)
+                || context.body.is_some_and(|b| !b.contains(&n))
+                || context.exclude.is_some_and(|e| e.contains(&n))
+        };
+
+        // The region: the blocks reached from the branch before the boundaries, a loop is one
+        // block going to its follow (only when it has no other exit)
+        let next = |n: usize| -> Option<Vec<usize>> {
+            match self.loops.get(&n) {
+                Some(l) if n != branch => {
+                    let exits: HashSet<usize> = l.body.iter().flat_map(|&b| successors(&self.blocks[b].term)).filter(|t| !l.body.contains(t)).collect();
+                    (exits.len() <= 1 && exits.iter().all(|&e| Some(e) == l.follow)).then(|| exits.into_iter().collect())
+                }
+                _ => Some(successors(&self.blocks[n].term)),
+            }
+        };
+
+        // Reverse post order of the region from the branch (none when it is too large or has a cycle)
+        let mut order = Vec::new();
+        let mut state: HashMap<usize, bool> = HashMap::new();
+        let mut stack = vec![(branch, 0usize)];
+        state.insert(branch, false);
+
+        while let Some((node, i)) = stack.pop() {
+            let Some(succs) = next(node) else {
+                return (Vec::new(), Vec::new());
+            };
+
+            match succs.get(i) {
+                Some(&s) => {
+                    stack.push((node, i + 1));
+
+                    if boundary(s) {
+                        continue;
+                    }
+
+                    match state.get(&s) {
+                        Some(false) => return (Vec::new(), Vec::new()),
+                        Some(true) => {}
+                        None => {
+                            state.insert(s, false);
+                            stack.push((s, 0));
+                        }
+                    }
+                }
+                None => {
+                    state.insert(node, true);
+                    order.push(node);
+                }
+            }
+
+            if state.len() > MAX_GUARDED_REGION {
+                return (Vec::new(), Vec::new());
+            }
+        }
+
+        order.reverse();
+        let position: HashMap<usize, usize> = order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+        let edges = |n: usize| next(n).unwrap_or_default().into_iter().filter(|s| position.contains_key(s) && *s != branch);
+
+        // Shared blocks: reached from several blocks of the region
+        let mut preds: HashMap<usize, usize> = HashMap::new();
+
+        for &n in order.iter() {
+            let mut targets: Vec<usize> = edges(n).collect();
+            targets.dedup();
+
+            for t in targets {
+                *preds.entry(t).or_default() += 1;
+            }
+        }
+
+        if !preds.values().any(|&c| c > 1) {
+            return (Vec::new(), Vec::new());
+        }
+
+        // The region has a single entry: a path entering it elsewhere would test guards that are
+        // not about it (the bodies of its loops are in it)
+        let mut inside: HashSet<usize> = order.iter().copied().collect();
+
+        for &n in order.iter().filter(|&&n| n != branch) {
+            if let Some(l) = self.loops.get(&n) {
+                inside.extend(l.body.iter().copied());
+            }
+        }
+
+        if order.iter().filter(|&&n| n != branch).any(|n| self.preds[*n].iter().any(|p| !inside.contains(p))) {
+            return (Vec::new(), Vec::new());
+        }
+
+        // What each block of the region changes: the variables it assigns, and whether it writes
+        // memory (or calls); a loop block changes what its body changes
+        let effects: HashMap<usize, Effects> = order
+            .iter()
+            .map(|&n| {
+                let blocks: Vec<usize> = match self.loops.get(&n) {
+                    Some(l) if n != branch => l.body.iter().copied().collect(),
+                    _ => vec![n],
+                };
+
+                let mut effects = Effects::default();
+
+                for b in blocks {
+                    self.blocks[b].stmts.iter().for_each(|s| effects.stmt(s));
+                    effects.term(&self.blocks[b].term);
+                }
+
+                (n, effects)
+            })
+            .collect();
+
+        // The blocks already emitted the region leads to are copied there when they are small: what
+        // they change can change before the guards too
+        let mut copied = Effects::default();
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut stack: Vec<usize> = order.iter().flat_map(|&n| next(n).unwrap_or_default()).filter(|&t| self.emitted[t] && !position.contains_key(&t)).collect();
+
+        while let Some(n) = stack.pop() {
+            if Some(n) == join || self.stops.iter().any(|&(s, _)| s == n) || !seen.insert(n) {
+                continue;
+            }
+
+            if seen.len() > MAX_GUARDED_REGION {
+                copied.memory = true;
+                copied.everything = true;
+                break;
+            }
+
+            self.blocks[n].stmts.iter().for_each(|s| copied.stmt(s));
+            copied.term(&self.blocks[n].term);
+            stack.extend(successors(&self.blocks[n].term));
+        }
+
+        // Whether an expression has no call, and nothing after a block of the region changes what it
+        // reads: tested anywhere after the block it has the same value
+        let unchanged_after = |block: usize, expr: &Expr| -> bool {
+            let (vars, memory, call) = reads(expr);
+            let from = position[&block];
+            let changes = |e: &Effects| e.everything || !e.vars.is_disjoint(&vars) || (memory && e.memory);
+
+            return !call && !changes(&copied) && !order[from + 1..].iter().any(|n| changes(&effects[n]));
+        };
+
+        // The atoms are the conditions of the branches (the same unchanged condition tested by several
+        // blocks is one atom, the blocks are its owners) and the cases of the switches
+        let mut atoms = Atoms::default();
+        let mut owners: Vec<Vec<usize>> = Vec::new();
+        let mut first_atom: HashMap<usize, usize> = HashMap::new();
+
+        for &n in order.iter().filter(|n| !self.loops.contains_key(n) || **n == branch) {
+            match &self.blocks[n].term {
+                Term::Branch(c, _, _) => match (0..atoms.exprs.len()).find(|&a| atoms.switch[a].is_none() && atoms.exprs[a] == *c && unchanged_after(owners[a][0], c)) {
+                    Some(atom) => {
+                        first_atom.insert(n, atom);
+                        owners[atom].push(n);
+                    }
+                    None => {
+                        first_atom.insert(n, atoms.add(c.clone(), None));
+                        owners.push(vec![n]);
+                    }
+                },
+                Term::Switch(value, cases, _) => {
+                    first_atom.insert(n, atoms.exprs.len());
+
+                    for (values, _) in cases.iter() {
+                        let test = values.iter().map(|&v| Expr::binary(BinaryOp::Eq, value.clone(), Expr::Int(v))).reduce(|a, b| Expr::binary(BinaryOp::LogicalOr, a, b));
+                        atoms.add(test.unwrap_or(Expr::Int(0)), Some(n));
+                        owners.push(vec![n]);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // The condition of the edge from a block to one of its successors (None when too large)
+        let edge = |n: usize, to: usize| -> Option<Cond> {
+            if self.loops.contains_key(&n) && n != branch {
+                return Some(Cond::truth());
+            }
+
+            return match &self.blocks[n].term {
+                Term::Branch(_, t, f) if t != f => Some(Cond::lit(first_atom[&n], to == *t)),
+                Term::Switch(_, cases, default) => {
+                    let first = first_atom[&n];
+                    let mut cond = Cond::falsity();
+
+                    for (i, (_, target)) in cases.iter().enumerate() {
+                        if *target == to {
+                            cond = cond.or(&Cond::lit(first + i, true))?;
+                        }
+                    }
+
+                    if *default == to {
+                        let mut none = Cond::truth();
+
+                        for i in 0..cases.len() {
+                            none = none.and(&Cond::lit(first + i, false), &atoms)?;
+                        }
+
+                        cond = cond.or(&none)?;
+                    }
+
+                    Some(cond)
+                }
+                _ => Some(Cond::truth()),
+            };
+        };
+
+        // Reaching conditions, in the order of the region (None when unknown, too large)
+        let mut reaching: HashMap<usize, Option<Cond>> = HashMap::new();
+        reaching.insert(branch, Some(Cond::truth()));
+
+        for &n in order.iter() {
+            let from = reaching.get(&n).cloned().flatten();
+            let mut targets: Vec<usize> = edges(n).collect();
+            targets.dedup();
+
+            for t in targets {
+                let added = from.as_ref().and_then(|f| f.and(&edge(n, t)?, &atoms));
+                let current = reaching.get(&t).cloned().unwrap_or(Some(Cond::falsity()));
+
+                let merged = match (current, added) {
+                    (Some(c), Some(a)) => c.or(&a),
+                    _ => None,
+                };
+
+                reaching.insert(t, merged);
+            }
+        }
+
+        // An atom can be tested again when it has no call and nothing after its (first) block changes
+        // what it reads: its blocks then all test the same value
+        let testable = |atom: usize| unchanged_after(owners[atom][0], &atoms.exprs[atom]);
+
+        // A branch condition (not a case) tested by one block can be kept in a variable there
+        let cacheable = |atom: usize| atoms.switch[atom].is_none() && owners[atom].len() == 1;
+
+        // The shared blocks whose condition is small and can be tested
+        let shared: Vec<usize> = order.iter().copied().filter(|n| preds.get(n).is_some_and(|&c| c > 1)).collect();
+        let mut accepted: Vec<usize> = shared
+            .iter()
+            .copied()
+            .filter(|n| match reaching.get(n) {
+                Some(Some(cond)) => cond.atoms().iter().all(|&a| testable(a) || cacheable(a)) && cond.expr(&atoms).1 <= MAX_GUARD_LITERALS,
+                _ => false,
+            })
+            .collect();
+
+        // A guarded block reaching a shared block that is not guarded would jump back to it (it is
+        // emitted in a path of the branch before), and run the guards after it again: it is not
+        // guarded either
+        loop {
+            let rejected: Vec<usize> = shared.iter().copied().filter(|n| !accepted.contains(n)).collect();
+
+            let reaches = |from: usize| -> bool {
+                let mut seen = HashSet::from([from]);
+                let mut stack = vec![from];
+
+                while let Some(n) = stack.pop() {
+                    for t in edges(n) {
+                        if rejected.contains(&t) {
+                            return true;
+                        }
+
+                        if !accepted.contains(&t) && seen.insert(t) {
+                            stack.push(t);
+                        }
+                    }
+                }
+
+                false
+            };
+
+            let mut kept: Vec<usize> = accepted.iter().copied().filter(|&n| !reaches(n)).collect();
+
+            // After the branches of the region the paths go on to their join: the ones stopped at a
+            // guarded block must not, the join is guarded too (or the end of the region)
+            for &n in order.iter().filter(|&&n| n != branch && !self.loops.contains_key(&n)) {
+                if !matches!(self.blocks[n].term, Term::Branch(..) | Term::Switch(..)) {
+                    continue;
+                }
+
+                let join_ok = match self.merge(n, context) {
+                    None => true,
+                    Some(m) => Some(m) == join || kept.contains(&m),
+                };
+
+                if join_ok {
+                    continue;
+                }
+
+                let mut seen = HashSet::from([n]);
+                let mut stack = vec![n];
+
+                while let Some(x) = stack.pop() {
+                    for t in edges(x) {
+                        if seen.insert(t) {
+                            stack.push(t);
+                        }
+                    }
+                }
+
+                kept.retain(|k| !seen.contains(k));
+            }
+
+            if kept.len() == accepted.len() {
+                break;
+            }
+
+            accepted = kept;
+        }
+
+        // The guards, the atoms that cannot be tested again on their variable
+        let mut guarded = Vec::new();
+        let mut cached: Vec<usize> = Vec::new();
+
+        for n in accepted {
+            let Some(Some(cond)) = reaching.get(&n) else {
+                continue;
+            };
+
+            let mut renamed = Atoms { exprs: atoms.exprs.clone(), switch: atoms.switch.clone() };
+
+            for atom in cond.atoms().into_iter().filter(|&a| !testable(a)) {
+                let owner = owners[atom][0];
+
+                if !cached.contains(&owner) {
+                    cached.push(owner);
+                }
+
+                let position = cached.iter().position(|&o| o == owner).unwrap();
+                renamed.exprs[atom] = Expr::Var(self.vars.len() + position);
+            }
+
+            guarded.push((n, cond.expr(&renamed).0));
+        }
+
+        return (guarded, cached);
+    }
+
+    /// The conditions of the blocks are kept in new variables, the branches test them
+    fn cache_conditions(&mut self, blocks: Vec<usize>) {
+        for block in blocks {
+            let var = self.vars.len();
+            self.vars.push(Var { name: String::new(), ty: CType::Bool });
+
+            let b = &mut self.blocks[block];
+
+            if let Term::Branch(condition, _, _) = &mut b.term {
+                let value = std::mem::replace(condition, Expr::Var(var));
+                b.stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), value), b.addr));
+            }
+        }
+    }
+
+    /// Emits the guarded blocks of a branch after it, each stops at the next ones
+    fn emit_guarded(&mut self, guarded: Vec<(usize, Expr)>, merge: Option<usize>, context: Context, out: &mut Vec<Stmt>) {
+        for (block, guard) in guarded {
+            if let Some(position) = self.stops.iter().rposition(|&s| s == (block, context.header)) {
+                self.stops.remove(position);
+            }
+
+            let body = self.region(block, merge, context, false);
+
+            match guard {
+                Expr::Int(1) => out.extend(body),
+                guard => out.push(Stmt::new(StmtKind::If(guard, body, Vec::new()), self.blocks[block].addr)),
+            }
+        }
+    }
+
     fn region(&mut self, start: usize, stop: Option<usize>, context: Context, mut entering_loop: bool) -> Vec<Stmt> {
         let mut out = Vec::new();
         let mut current = Some(start);
@@ -324,6 +728,11 @@ impl<'a> Structurer<'a> {
                 if Some(block) == context.follow {
                     let stmt = if context.in_switch { self.goto(block, addr) } else { Stmt::new(StmtKind::Break, addr) };
                     out.push(stmt);
+                    break;
+                }
+
+                // A guarded block of an enclosing branch of the same loop: the paths stop there
+                if self.stops.contains(&(block, context.header)) {
                     break;
                 }
 
@@ -391,9 +800,21 @@ impl<'a> Structurer<'a> {
                 }
             }
 
+            // The blocks shared by the paths of a branch, guarded after it (their conditions kept first)
+            let guarded = match self.blocks[block].term {
+                Term::Branch(..) | Term::Switch(..) => {
+                    let (guarded, cached) = self.guarded(block, self.merge(block, &context), &context);
+                    self.cache_conditions(cached);
+                    guarded
+                }
+                _ => Vec::new(),
+            };
+
             out.extend(self.blocks[block].stmts.iter().cloned());
 
-            current = match &self.blocks[block].term {
+            let term = self.blocks[block].term.clone();
+
+            current = match &term {
                 Term::Return(value) => {
                     out.push(Stmt::new(StmtKind::Return(value.clone()), addr));
                     None
@@ -402,14 +823,19 @@ impl<'a> Structurer<'a> {
                 Term::Jump(target) => Some(*target),
                 Term::Branch(condition, on_true, on_false) => {
                     let merge = self.merge(block, &context);
+                    self.stops.extend(guarded.iter().map(|(b, _)| (*b, context.header)));
+
                     let then = self.region(*on_true, merge, context, false);
                     let otherwise = self.region(*on_false, merge, context, false);
 
                     out.push(Stmt::new(StmtKind::If(condition.clone(), then, otherwise), addr));
+                    self.emit_guarded(guarded, merge, context, &mut out);
                     merge
                 }
                 Term::Switch(value, cases, default) => {
                     let merge = self.merge(block, &context);
+                    self.stops.extend(guarded.iter().map(|(b, _)| (*b, context.header)));
+
                     let inner = Context { in_switch: true, ..context };
                     let mut c = Vec::new();
 
@@ -425,6 +851,7 @@ impl<'a> Structurer<'a> {
 
                     let default = if Some(*default) == merge { Vec::new() } else { self.region(*default, merge, inner, false) };
                     out.push(Stmt::new(StmtKind::Switch(value.clone(), c, default), addr));
+                    self.emit_guarded(guarded, merge, context, &mut out);
                     merge
                 }
             };
@@ -432,6 +859,70 @@ impl<'a> Structurer<'a> {
 
         return out;
     }
+}
+
+/*
+ * Effects of the statements, for the conditions tested again
+ */
+
+#[derive(Default)]
+struct Effects {
+    vars: HashSet<VarId>,
+    /// Writes memory or calls a function
+    memory: bool,
+    /// Unknown, can change anything
+    everything: bool,
+}
+
+impl Effects {
+    fn expr(&mut self, e: &Expr) {
+        e.visit(&mut |e| {
+            if matches!(e, Expr::Call(..)) {
+                self.memory = true;
+            }
+        });
+    }
+
+    fn stmt(&mut self, stmt: &Stmt) {
+        match &stmt.kind {
+            StmtKind::Assign(Expr::Var(v), value) => {
+                self.vars.insert(*v);
+                self.expr(value);
+            }
+            StmtKind::Assign(target, value) => {
+                self.memory = true;
+                self.expr(target);
+                self.expr(value);
+            }
+            StmtKind::Expr(e) | StmtKind::NoReturn(e) | StmtKind::Return(Some(e)) => self.expr(e),
+            StmtKind::Comment(_) | StmtKind::Label(_) | StmtKind::Goto(_) | StmtKind::Break | StmtKind::Continue | StmtKind::Return(None) => {}
+            // Anything else (not built before the structuring) changes everything
+            _ => self.memory = true,
+        }
+    }
+
+    fn term(&mut self, term: &Term) {
+        match term {
+            Term::Branch(c, ..) | Term::Switch(c, ..) | Term::Return(Some(c)) => self.expr(c),
+            _ => {}
+        }
+    }
+}
+
+/// What an expression reads: its variables, whether it reads memory (or globals), whether it calls
+fn reads(e: &Expr) -> (HashSet<VarId>, bool, bool) {
+    let (mut vars, mut memory, mut call) = (HashSet::new(), false, false);
+
+    e.visit(&mut |e| match e {
+        Expr::Var(v) => {
+            vars.insert(*v);
+        }
+        Expr::Call(..) => call = true,
+        Expr::Name(_) | Expr::Index(..) | Expr::Member(..) | Expr::Unary(UnaryOp::Deref, _) => memory = true,
+        _ => {}
+    });
+
+    return (vars, memory, call);
 }
 
 /// Short circuit conditions: a branch to a block that only branches again to one of the same targets
@@ -706,14 +1197,14 @@ fn remove_goto_next(stmts: &mut Vec<Stmt>) {
 }
 
 /// Structured statements of the blocks (block 0 is the entry)
-pub fn structure(mut blocks: Vec<SBlock>) -> Vec<Stmt> {
+pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
     if blocks.is_empty() {
         return Vec::new();
     }
 
     merge_conditions(&mut blocks);
 
-    let mut structurer = Structurer::new(&blocks);
+    let mut structurer = Structurer::new(blocks, vars);
     let mut stmts = structurer.region(0, None, TOP, false);
 
     // Blocks only jumped to that were never emitted with their label (left from inside the loops, or
@@ -732,7 +1223,7 @@ pub fn structure(mut blocks: Vec<SBlock>) -> Vec<Stmt> {
 
         // The small tails are repeated by region, without their label
         if structurer.is_tail(block) {
-            let b = &blocks[block];
+            let b = &structurer.blocks[block];
             stmts.push(Stmt::new(StmtKind::Label(label(block)), None));
             stmts.extend(b.stmts.iter().cloned());
 
@@ -812,7 +1303,7 @@ mod tests {
     /// returns the number of gotos
     fn gotos(blocks: Vec<SBlock>) -> usize {
         let count = blocks.len();
-        let stmts = structure(blocks);
+        let stmts = structure(blocks, &mut Vec::new());
         let (mut labels, mut gotos, mut calls) = (Vec::new(), Vec::new(), Vec::new());
         collect(&stmts, &mut labels, &mut gotos, &mut calls);
 
@@ -825,6 +1316,404 @@ mod tests {
         }
 
         return gotos.len();
+    }
+
+    /*
+     * Differential test: random control flow graphs, the structured statements executed by an
+     * interpreter must run the blocks in the same order as the graph
+     */
+
+    /// Value of the condition of a block, a function of the number of times the block ran: tested
+    /// again before the block runs again, a condition has the same value
+    fn condition_value(block: usize, runs: usize, seed: u64) -> i128 {
+        let mut x = seed ^ ((block as u64) << 32) ^ (runs as u64).wrapping_mul(0x9e3779b97f4a7c15);
+        x ^= x >> 33;
+        x = x.wrapping_mul(0xff51afd7ed558ccd);
+        x ^= x >> 33;
+        return (x % 3) as i128;
+    }
+
+    struct Machine {
+        runs: Vec<usize>,
+        trace: Vec<usize>,
+        vars: HashMap<VarId, i128>,
+        seed: u64,
+        steps: usize,
+    }
+
+    enum Flow {
+        Next,
+        Break,
+        Continue,
+        Return,
+        Goto(String),
+    }
+
+    const MAX_STEPS: usize = 400;
+
+    impl Machine {
+        fn new(count: usize, seed: u64) -> Self {
+            return Machine { runs: vec![0; count], trace: Vec::new(), vars: HashMap::new(), seed, steps: 0 };
+        }
+
+        fn eval(&mut self, e: &Expr) -> i128 {
+            return match e {
+                Expr::Int(v) => *v,
+                Expr::Var(v) => self.vars.get(v).copied().unwrap_or(0),
+                Expr::Name(name) => {
+                    let block: usize = name[1..].parse().unwrap();
+                    condition_value(block, self.runs[block], self.seed)
+                }
+                Expr::Unary(UnaryOp::LogicalNot, a) => (self.eval(a) == 0) as i128,
+                Expr::Binary(op, a, b) => {
+                    let a = self.eval(a);
+
+                    match op {
+                        BinaryOp::LogicalAnd => (a != 0 && self.eval(b) != 0) as i128,
+                        BinaryOp::LogicalOr => (a != 0 || self.eval(b) != 0) as i128,
+                        BinaryOp::Eq => (a == self.eval(b)) as i128,
+                        BinaryOp::Ne => (a != self.eval(b)) as i128,
+                        _ => panic!("operator {:?}", op),
+                    }
+                }
+                Expr::Call(callee, _) => {
+                    let Expr::Name(name) = &**callee else { panic!() };
+                    let block: usize = name[1..].parse().unwrap();
+                    self.trace.push(block);
+                    self.runs[block] += 1;
+                    self.steps += 1;
+                    0
+                }
+                other => panic!("expression {:?}", other),
+            };
+        }
+
+        /// Runs the statements (from the one with the label when given)
+        fn run(&mut self, stmts: &[Stmt], mut label: Option<&str>) -> Flow {
+            let start = match label {
+                Some(l) => match stmts.iter().position(|s| contains_label(s, l)) {
+                    Some(p) => p,
+                    None => return Flow::Goto(l.to_string()),
+                },
+                None => 0,
+            };
+
+            for stmt in stmts[start..].iter() {
+                if self.steps > MAX_STEPS {
+                    return Flow::Return;
+                }
+
+                let flow = self.stmt(stmt, label.take());
+
+                if !matches!(flow, Flow::Next) {
+                    return flow;
+                }
+            }
+
+            return Flow::Next;
+        }
+
+        fn stmt(&mut self, stmt: &Stmt, label: Option<&str>) -> Flow {
+            match &stmt.kind {
+                StmtKind::Expr(e) => {
+                    self.eval(e);
+                }
+                StmtKind::Assign(Expr::Var(v), e) => {
+                    let value = self.eval(e);
+                    self.vars.insert(*v, value);
+                }
+                StmtKind::Label(_) | StmtKind::Comment(_) => {}
+                StmtKind::Break => return Flow::Break,
+                StmtKind::Continue => return Flow::Continue,
+                StmtKind::Return(_) => return Flow::Return,
+                StmtKind::Goto(l) => return Flow::Goto(l.clone()),
+                StmtKind::If(c, a, b) => {
+                    let inside = |s: &[Stmt]| label.is_some_and(|l| s.iter().any(|x| contains_label(x, l)));
+
+                    return if inside(a) {
+                        self.run(a, label)
+                    } else if inside(b) {
+                        self.run(b, label)
+                    } else if self.eval(c) != 0 {
+                        self.run(a, None)
+                    } else {
+                        self.run(b, None)
+                    };
+                }
+                StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
+                    let do_while = matches!(stmt.kind, StmtKind::DoWhile(..));
+                    let mut label = label;
+
+                    loop {
+                        if label.is_none() && !do_while && self.eval(c) == 0 {
+                            break;
+                        }
+
+                        match self.run(body, label.take()) {
+                            Flow::Break => break,
+                            Flow::Return => return Flow::Return,
+                            Flow::Goto(l) => return Flow::Goto(l),
+                            Flow::Next | Flow::Continue => {}
+                        }
+
+                        if self.steps > MAX_STEPS {
+                            return Flow::Return;
+                        }
+
+                        if do_while && self.eval(c) == 0 {
+                            break;
+                        }
+                    }
+                }
+                StmtKind::For(init, c, step, body) => {
+                    let mut label = label;
+
+                    if label.is_none() {
+                        self.stmt(init, None);
+                    }
+
+                    loop {
+                        if label.is_none() && self.eval(c) == 0 {
+                            break;
+                        }
+
+                        match self.run(body, label.take()) {
+                            Flow::Break => break,
+                            Flow::Return => return Flow::Return,
+                            Flow::Goto(l) => return Flow::Goto(l),
+                            Flow::Next | Flow::Continue => {}
+                        }
+
+                        if self.steps > MAX_STEPS {
+                            return Flow::Return;
+                        }
+
+                        self.stmt(step, None);
+                    }
+                }
+                StmtKind::Switch(value, cases, default) => {
+                    // The bodies in order (the default last), a case falls through to the next one
+                    let mut bodies: Vec<&Vec<Stmt>> = cases.iter().map(|c| &c.body).collect();
+                    bodies.push(default);
+
+                    let start = match label.and_then(|l| bodies.iter().position(|b| b.iter().any(|s| contains_label(s, l)))) {
+                        Some(i) => i,
+                        None => {
+                            let v = self.eval(value);
+                            cases.iter().position(|c| c.values.contains(&v)).unwrap_or(cases.len())
+                        }
+                    };
+
+                    let mut label = label;
+
+                    for body in bodies[start..].iter() {
+                        match self.run(body, label.take()) {
+                            Flow::Next => {}
+                            Flow::Break => break,
+                            other => return other,
+                        }
+                    }
+                }
+                other => panic!("statement {:?}", other),
+            }
+
+            return Flow::Next;
+        }
+
+        /// Runs a function body, following its gotos
+        fn function(&mut self, stmts: &[Stmt]) {
+            let mut label: Option<String> = None;
+
+            loop {
+                match self.run(stmts, label.as_deref()) {
+                    Flow::Goto(l) => label = Some(l),
+                    _ => return,
+                }
+
+                if self.steps > MAX_STEPS {
+                    return;
+                }
+            }
+        }
+
+        /// Runs the graph itself
+        fn graph(&mut self, blocks: &[SBlock]) -> bool {
+            let mut block = 0;
+
+            loop {
+                for stmt in blocks[block].stmts.iter() {
+                    self.stmt(stmt, None);
+                }
+
+                if self.steps > MAX_STEPS {
+                    return false;
+                }
+
+                block = match &blocks[block].term {
+                    Term::Return(_) | Term::Unreachable => return true,
+                    Term::Jump(t) => *t,
+                    Term::Branch(c, t, f) => if self.eval(c) != 0 { *t } else { *f },
+                    Term::Switch(v, cases, default) => {
+                        let v = self.eval(v);
+                        cases.iter().find(|(values, _)| values.contains(&v)).map_or(*default, |(_, t)| *t)
+                    }
+                };
+            }
+        }
+    }
+
+    fn show_expr(e: &Expr) -> String {
+        return match e {
+            Expr::Int(v) => v.to_string(),
+            Expr::Var(v) => format!("v{}", v),
+            Expr::Name(n) => n.clone(),
+            Expr::Unary(UnaryOp::LogicalNot, a) => format!("!{}", show_expr(a)),
+            Expr::Binary(op, a, b) => format!("({} {} {})", show_expr(a), op.symbol(), show_expr(b)),
+            Expr::Call(c, _) => format!("{}()", show_expr(c)),
+            other => format!("{:?}", other),
+        };
+    }
+
+    fn show(stmts: &[Stmt], depth: usize) -> String {
+        let pad = "  ".repeat(depth);
+        let mut out = String::new();
+        let mut i = 0;
+
+        while i < stmts.len() {
+            let stmt = &stmts[i];
+
+            // Runs of the same call
+            if let StmtKind::Expr(e) = &stmt.kind {
+                let n = stmts[i..].iter().take_while(|s| s.kind == stmt.kind).count();
+                out += &format!("{}{} x{}\n", pad, show_expr(e), n);
+                i += n;
+                continue;
+            }
+
+            match &stmt.kind {
+                StmtKind::Assign(t, v) => out += &format!("{}{} = {}\n", pad, show_expr(t), show_expr(v)),
+                StmtKind::If(c, a, b) => {
+                    out += &format!("{}if {} {{\n{}", pad, show_expr(c), show(a, depth + 1));
+                    if !b.is_empty() {
+                        out += &format!("{}}} else {{\n{}", pad, show(b, depth + 1));
+                    }
+                    out += &format!("{}}}\n", pad);
+                }
+                StmtKind::While(c, body) => out += &format!("{}while {} {{\n{}{}}}\n", pad, show_expr(c), show(body, depth + 1), pad),
+                StmtKind::DoWhile(body, c) => out += &format!("{}do {{\n{}{}}} while {}\n", pad, show(body, depth + 1), pad, show_expr(c)),
+                StmtKind::Switch(v, cases, default) => {
+                    out += &format!("{}switch {} {{\n", pad, show_expr(v));
+                    for c in cases {
+                        out += &format!("{}case {:?}:\n{}", pad, c.values, show(&c.body, depth + 1));
+                    }
+                    out += &format!("{}default:\n{}{}}}\n", pad, show(default, depth + 1), pad);
+                }
+                other => out += &format!("{}{:?}\n", pad, other),
+            }
+
+            i += 1;
+        }
+
+        return out;
+    }
+
+    fn show_graph(blocks: &[SBlock]) -> String {
+        return blocks.iter().enumerate().map(|(i, b)| format!("{}: {} calls {:?}\n", i, b.stmts.len(), b.term)).collect();
+    }
+
+    fn contains_label(stmt: &Stmt, label: &str) -> bool {
+        return match &stmt.kind {
+            StmtKind::Label(l) => l == label,
+            StmtKind::If(_, a, b) => a.iter().chain(b.iter()).any(|s| contains_label(s, label)),
+            StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => body.iter().any(|s| contains_label(s, label)),
+            StmtKind::Switch(_, cases, default) => cases.iter().flat_map(|c| c.body.iter()).chain(default.iter()).any(|s| contains_label(s, label)),
+            _ => false,
+        };
+    }
+
+    /// A random graph: blocks of 1 to 12 calls ending with a jump, a branch, a switch or a return.
+    /// With locals, a block assigns its condition to one of 4 variables and tests it (the blocks
+    /// share the variables and the conditions)
+    fn random_graph(seed: u64, locals: bool) -> Vec<SBlock> {
+        let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut next = |n: usize| -> usize {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((state >> 33) % n as u64) as usize
+        };
+
+        let count = 3 + next(38);
+
+        return (0..count)
+            .map(|i| {
+                // Mostly forward edges, some back edges
+                let target = |next: &mut dyn FnMut(usize) -> usize| if next(5) == 0 { next(count) } else { (i + 1 + next(4)).min(count - 1) };
+                let value = if locals { Expr::Var(i % 4) } else { cond(i) };
+                let test = if locals { Expr::binary(BinaryOp::Eq, value.clone(), Expr::Int(1)) } else { cond(i) };
+
+                let term = match next(10) {
+                    _ if i == count - 1 => Term::Return(None),
+                    0 => Term::Return(None),
+                    1 | 2 => Term::Jump(target(&mut next)),
+                    3 => Term::Switch(value, vec![(vec![0], target(&mut next)), (vec![1], target(&mut next))], target(&mut next)),
+                    _ => Term::Branch(test, target(&mut next), target(&mut next)),
+                };
+
+                let mut b = block(i, 1 + next(8), term);
+
+                if locals {
+                    b.stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(i % 4), cond(i)), None));
+                }
+
+                b
+            })
+            .collect();
+    }
+
+    #[test]
+    fn random_graphs_keep_their_behavior() {
+        for seed in 0..20000u64 {
+            let blocks = random_graph(seed, seed % 2 == 1);
+            let count = blocks.len();
+            let mut locals = vec![Var { name: String::new(), ty: CType::Int { bits: 32, signed: true } }; 4];
+            let stmts = structure(blocks.clone(), &mut locals);
+
+            for run in 0..4 {
+                let mut expected = Machine::new(count, run);
+
+                if !expected.graph(&blocks) {
+                    continue;
+                }
+
+                let mut actual = Machine::new(count, run);
+                actual.function(&stmts);
+
+                if expected.trace != actual.trace {
+                    let mut first = 0;
+
+                    while expected.trace.get(first) == actual.trace.get(first) {
+                        first += 1;
+                    }
+
+                    let blocks_of = |t: &[usize]| {
+                        let mut runs: Vec<usize> = t.to_vec();
+                        runs.dedup();
+                        runs
+                    };
+
+                    let from = first.saturating_sub(40);
+                    panic!(
+                        "seed {} run {}: diverge at {}\nexpected {:?}\nactual   {:?}\n{}\n{}",
+                        seed,
+                        run,
+                        first,
+                        blocks_of(&expected.trace[from..(first + 30).min(expected.trace.len())]),
+                        blocks_of(&actual.trace[from..(first + 30).min(actual.trace.len())]),
+                        show_graph(&blocks),
+                        show(&stmts, 0)
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -854,6 +1743,71 @@ mod tests {
         ];
 
         assert_eq!(gotos(blocks), 0);
+    }
+
+    fn assign(var: VarId) -> Stmt {
+        return Stmt::new(StmtKind::Assign(Expr::Var(var), Expr::Int(1)), None);
+    }
+
+    fn var_cond(var: VarId) -> Expr {
+        return Expr::binary(BinaryOp::Eq, Expr::Var(var), Expr::Int(0));
+    }
+
+    #[test]
+    fn switch_cases_sharing_a_block() {
+        // Two cases continue in b4, the third one goes to the join; b4 is large and branches
+        let blocks = vec![
+            block(0, 1, Term::Switch(Expr::Var(0), vec![(vec![1], 1), (vec![2], 2)], 3)),
+            block(1, 1, Term::Jump(4)),
+            block(2, 1, Term::Jump(4)),
+            block(3, 1, Term::Jump(6)),
+            block(4, 10, Term::Branch(var_cond(1), 5, 6)),
+            block(5, 10, Term::Jump(6)),
+            block(6, 4, Term::Return(None)),
+        ];
+
+        assert_eq!(gotos(blocks), 0);
+    }
+
+    #[test]
+    fn or_else_chain() {
+        // if (v0 != 0 && v1 != 0 && v2 != 0) { b4 } else { b3 } with assignments between the tests
+        let mut blocks = vec![
+            block(0, 1, Term::Branch(var_cond(0), 3, 1)),
+            block(1, 1, Term::Branch(var_cond(1), 3, 2)),
+            block(2, 1, Term::Branch(var_cond(2), 3, 4)),
+            block(3, 10, Term::Jump(5)),
+            block(4, 10, Term::Jump(5)),
+            block(5, 4, Term::Return(None)),
+        ];
+
+        blocks[1].stmts.push(assign(1));
+        blocks[2].stmts.push(assign(2));
+
+        assert_eq!(gotos(blocks), 0);
+    }
+
+    #[test]
+    fn changed_conditions_are_not_tested_again() {
+        // b4 is shared by the two arms of c0, but the arms change the variable it is tested on
+        let mut blocks = vec![
+            block(0, 1, Term::Branch(var_cond(1), 1, 2)),
+            block(1, 1, Term::Jump(3)),
+            block(2, 1, Term::Branch(cond(2), 3, 5)),
+            block(3, 10, Term::Jump(4)),
+            block(4, 10, Term::Jump(5)),
+            block(5, 4, Term::Return(None)),
+        ];
+
+        blocks[1].stmts.push(assign(1));
+        blocks[2].stmts.push(assign(1));
+
+        let stmts = structure(blocks.clone(), &mut Vec::new());
+        let printed = format!("{:?}", stmts);
+
+        // b3 is not guarded by a test of v1 after the arms
+        assert!(!printed.contains("If(Binary(Eq, Var(1), Int(0)), [Label(\"label_3"), "{}", printed);
+        gotos(blocks);
     }
 
     #[test]
