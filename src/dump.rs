@@ -289,7 +289,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                     }
 
                     // With the LLM the callees come first, their new names show in their callers
-                    let order: Vec<u64> = if args.llm { callees_first(&analysis, &functions) } else { functions.iter().map(|f| f.addr).collect() };
+                    let order: Vec<u64> = if args.llm { callees_first(&analysis, &functions) } else { functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect() };
                     let mut outputs: Vec<(u64, String)> = Vec::new();
 
                     for addr in order {
