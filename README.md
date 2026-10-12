@@ -207,7 +207,7 @@ Analysis:
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
-  - :heavy_check_mark: Lifting to LLVM IR (x86_64), with lazy flags and a statically tracked stack frame
+  - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
   - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
   - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
   - :x: Control-flow structuring

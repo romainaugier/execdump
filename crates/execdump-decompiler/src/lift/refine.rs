@@ -7,7 +7,16 @@ use super::regs::Abi;
 use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_INT};
 
 use inkwell::module::Module;
-use inkwell::values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
+use inkwell::values::{AnyValue, AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
+
+use std::collections::HashMap;
+
+/// Results of the width analyses by value (None while in progress, phi cycles stop there)
+type Memo = HashMap<usize, Option<u32>>;
+
+fn key(value: BasicValueEnum) -> usize {
+    return value.as_value_ref() as usize;
+}
 
 /// Analyses stop at this depth (long chains of arithmetic keep their width anyway)
 const MAX_DEPTH: usize = 8;
@@ -16,7 +25,8 @@ const MAX_DEPTH: usize = 8;
 /// used (the ABI registers in order up to the last used one), narrowed to the bits they are
 /// used with, and the return register defined when returning
 pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi) -> Signature {
-    let used: Vec<Option<u32>> = function.get_param_iter().map(|p| demanded(p, 0)).collect();
+    let mut memo = Memo::new();
+    let used: Vec<Option<u32>> = function.get_param_iter().map(|p| demanded(p, 0, &mut memo)).collect();
     let mut keep = vec![false; discovery.params.len()];
 
     // Registers are assigned in order, a used register means the previous ones are parameters too
@@ -112,7 +122,19 @@ fn is_return_sink(instruction: InstructionValue) -> bool {
 }
 
 /// Low bits of a value its users depend on, None when nothing uses it
-fn demanded(value: BasicValueEnum, depth: usize) -> Option<u32> {
+fn demanded(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Option<u32> {
+    if let Some(&known) = memo.get(&key(value)) {
+        return known;
+    }
+
+    memo.insert(key(value), None);
+    let result = demanded_uncached(value, depth, memo);
+    memo.insert(key(value), result);
+
+    return result;
+}
+
+fn demanded_uncached(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Option<u32> {
     let width = int_width(value);
 
     if depth > MAX_DEPTH {
@@ -136,15 +158,15 @@ fn demanded(value: BasicValueEnum, depth: usize) -> Option<u32> {
             InstructionOpcode::And => {
                 let mask = int_operand(user, 0).filter(|v| v.is_const()).or(int_operand(user, 1).filter(|v| v.is_const()));
                 let mask_bits = mask.and_then(constant_bits).unwrap_or(width);
-                let result_bits = user_demanded(user, depth);
+                let result_bits = user_demanded(user, depth, memo);
                 result_bits.map(|r| r.min(mask_bits))
             }
             InstructionOpcode::Shl => {
                 let shift = int_operand(user, 1).and_then(|v| v.get_zero_extended_constant()).unwrap_or(0) as u32;
-                user_demanded(user, depth).map(|r| r.saturating_sub(shift).max(1))
+                user_demanded(user, depth, memo).map(|r| r.saturating_sub(shift).max(1))
             }
             // The low bits of these results only depend on the low bits of their operands
-            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth),
+            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, memo),
             _ => Some(width),
         };
 
@@ -156,13 +178,25 @@ fn demanded(value: BasicValueEnum, depth: usize) -> Option<u32> {
     return result;
 }
 
-fn user_demanded(user: InstructionValue, depth: usize) -> Option<u32> {
+fn user_demanded(user: InstructionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
     let value: BasicValueEnum = user.as_any_value_enum().try_into().ok()?;
-    return demanded(value, depth + 1);
+    return demanded(value, depth + 1, memo);
 }
 
 /// Bits a value can have set (zero extended i32 values have 32)
-fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize) -> Option<u32> {
+fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
+    if let Some(&known) = memo.get(&key(value)) {
+        return known;
+    }
+
+    memo.insert(key(value), None);
+    let result = known_width_uncached(value, function, depth, memo);
+    memo.insert(key(value), result);
+
+    return result;
+}
+
+fn known_width_uncached(value: BasicValueEnum, function: FunctionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
     let BasicValueEnum::IntValue(int) = value else {
         return Some(int_width(value));
     };
@@ -186,7 +220,7 @@ fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize) -> 
         return Some(width);
     }
 
-    let operand_width = |index| operand(instruction, index).and_then(|v| known_width(v, function, depth + 1));
+    let mut operand_width = |index| operand(instruction, index).and_then(|v| known_width(v, function, depth + 1, memo));
 
     return match instruction.get_opcode() {
         InstructionOpcode::ZExt => operand(instruction, 0).map(int_width),
@@ -196,7 +230,7 @@ fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize) -> 
         }
         InstructionOpcode::Phi | InstructionOpcode::Select => {
             let first = if instruction.get_opcode() == InstructionOpcode::Select { 1 } else { 0 };
-            let widths: Vec<u32> = (first..instruction.get_num_operands()).filter_map(operand_width).collect();
+            let widths: Vec<u32> = (first..instruction.get_num_operands()).filter_map(&mut operand_width).collect();
             widths.into_iter().max()
         }
         _ => Some(width),
@@ -207,6 +241,7 @@ fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize) -> 
 fn returned(module: &Module, sink: &str, function: FunctionValue) -> Option<u32> {
     let global = module.get_global(sink)?;
     let mut widest: Option<u32> = None;
+    let mut memo = Memo::new();
     let mut next = global.as_pointer_value().get_first_use();
 
     while let Some(current) = next {
@@ -218,8 +253,8 @@ fn returned(module: &Module, sink: &str, function: FunctionValue) -> Option<u32>
 
         // Vector registers: the scalar is in the low bits
         let bits = match value {
-            BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 128 => known_width(value, function, 0).map(|b| b.min(64)),
-            _ => known_width(value, function, 0),
+            BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 128 => known_width(value, function, 0, &mut memo).map(|b| b.min(64)),
+            _ => known_width(value, function, 0, &mut memo),
         };
 
         if let Some(bits) = bits {

@@ -1108,6 +1108,29 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
+    /// System call: __syscall(number, args...), the arguments are the registers written before it
+    pub fn syscall(&mut self, number: Reg, args: &[&str], ret: Reg) -> Result<(), String> {
+        let written = self.written.borrow().clone();
+        let regs: Vec<Reg> = args.iter().map(|name| self.env.regs.reg(name)).collect();
+        let count = regs.iter().rposition(|r| written.contains_key(r)).map_or(0, |i| i + 1);
+        let bits = self.env.regs.regs[ret].bits;
+
+        let mut values: Vec<BasicValueEnum> = vec![self.load_reg(self.env.regs.full(number))?.into()];
+
+        for &reg in regs[..count].iter() {
+            values.push(self.load_reg(self.env.regs.full(reg))?.into());
+        }
+
+        // One declaration per argument count
+        let name = format!("__syscall{}", count);
+        let result = self.call_intrinsic(&name, &values, Some(self.int(bits).into()))?.ok_or("syscall without a result")?;
+        self.write_reg(ret, result.into_int_value())?;
+        self.flags = None;
+        self.written.borrow_mut().clear();
+
+        return Ok(());
+    }
+
     /// Extra arguments of a variadic call, from its format string when it is a constant
     /// (printf("%d %s", ...)) or the next argument registers otherwise
     fn variadic_args(&self, sig: &Signature, fixed: &[BasicMetadataValueEnum<'ctx>]) -> Result<Vec<BasicValueEnum<'ctx>>, String> {
@@ -1289,19 +1312,24 @@ impl<'ctx> Lifter<'ctx, '_> {
         if producer.op == FlagOp::Float {
             let (lhs, rhs) = (producer.lhs.into_float_value(), producer.rhs.into_float_value());
 
-            // x86 maps the comparison to the unsigned conditions, arm to the signed ones
-            let predicate = match (cond, self.flag_regs.carry_is_borrow) {
-                (Cond::Eq, _) => FloatPredicate::UEQ,
-                (Cond::Ne, _) => FloatPredicate::ONE,
-                (Cond::Ugt, true) | (Cond::Sgt, false) => FloatPredicate::OGT,
-                (Cond::Uge, true) | (Cond::Sge, false) => FloatPredicate::OGE,
-                (Cond::Ult, true) => FloatPredicate::ULT,
-                (Cond::Ule, true) => FloatPredicate::ULE,
-                (Cond::Slt, false) | (Cond::Neg, false) => FloatPredicate::OLT,
-                (Cond::Sle, false) => FloatPredicate::OLE,
-                (Cond::Parity, true) | (Cond::Overflow, false) => FloatPredicate::UNO,
-                (Cond::NoParity, true) | (Cond::NoOverflow, false) => FloatPredicate::ORD,
-                _ => return Ok(None),
+            // x86 maps the comparison to the unsigned conditions (unordered sets ZF, PF and CF)
+            let predicate = if self.flag_regs.carry_is_borrow {
+                match cond {
+                    Cond::Eq => FloatPredicate::UEQ,
+                    Cond::Ne => FloatPredicate::ONE,
+                    Cond::Ugt => FloatPredicate::OGT,
+                    Cond::Uge => FloatPredicate::OGE,
+                    Cond::Ult => FloatPredicate::ULT,
+                    Cond::Ule => FloatPredicate::ULE,
+                    Cond::Parity => FloatPredicate::UNO,
+                    Cond::NoParity => FloatPredicate::ORD,
+                    _ => return Ok(None),
+                }
+            } else {
+                match aarch64::float_predicate(cond) {
+                    Some(predicate) => predicate,
+                    None => return Ok(None),
+                }
             };
 
             return Ok(Some(llvm!(b.build_float_compare(predicate, lhs, rhs, ""))));

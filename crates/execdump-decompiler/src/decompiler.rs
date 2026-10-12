@@ -443,4 +443,15 @@ mod tests {
         assert!(ir.contains("icmp"), "{}", ir);
         assert!(!ir.contains("alloca"), "{}", ir);
     }
+
+    #[test]
+    fn aarch64_syscalls() {
+        let program = fixture("elf_aarch64_static");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+
+        let ir = decompiler.llvm_ir(program.entry.unwrap()).unwrap();
+        assert!(ir.contains("@__syscall3(i64 64, i64 1, i64 ptrtoint (ptr @msg to i64), i64 13)"), "{}", ir);
+        assert!(ir.contains("@__syscall1(i64 93, i64 0)"), "{}", ir);
+    }
 }

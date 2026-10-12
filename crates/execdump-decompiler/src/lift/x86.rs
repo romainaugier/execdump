@@ -617,6 +617,14 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
         }
         ("ret" | "retn", _) => {}
 
+        ("syscall", _) => {
+            let rax = l.env.regs.reg("rax");
+            l.syscall(rax, &["rdi", "rsi", "rdx", "r10", "r8", "r9"], rax)?;
+        }
+        ("int", [Op::Imm(0x80, _)]) if !wide => {
+            let eax = l.env.regs.reg("eax");
+            l.syscall(eax, &["ebx", "ecx", "edx", "esi", "edi", "ebp"], eax)?;
+        }
         ("bswap", [dst]) => {
             let bits = dst.bits();
             let name = format!("llvm.bswap.i{}", bits);
