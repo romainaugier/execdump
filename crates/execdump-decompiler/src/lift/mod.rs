@@ -33,7 +33,7 @@ use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
 use inkwell::types::IntType;
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, IntValue, PointerValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
 use std::cell::RefCell;
@@ -43,6 +43,9 @@ use std::num::NonZeroU32;
 /// Name of the globals the discovery functions store their return registers to
 pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
+
+/// Metadata kind of the address of the machine instruction an LLVM instruction comes from
+pub const ADDRESS_METADATA: &str = "execdump.addr";
 
 /*
  * Signatures
@@ -606,10 +609,15 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Insn::Aarch64(i) => i.addr,
             };
 
+            let current = self.builder.get_insert_block().ok_or("no current block")?;
+            let before = current.get_last_instruction();
+
             match insn {
                 Insn::X86(i) => x86::lift(self, i)?,
                 Insn::Aarch64(i) => aarch64::lift(self, i)?,
             }
+
+            self.tag_address(current, before)?;
 
             insn.track(self.env.regs, &mut self.tracker);
         }
@@ -688,6 +696,23 @@ impl<'ctx> Lifter<'ctx, '_> {
                     llvm!(self.builder.build_unreachable());
                 }
             },
+        }
+
+        return Ok(());
+    }
+
+    /// Tags the instructions added to a block with the address of the machine instruction
+    fn tag_address(&self, block: LlvmBlock<'ctx>, before: Option<InstructionValue<'ctx>>) -> Result<(), String> {
+        let kind = self.cx.get_kind_id(ADDRESS_METADATA);
+        let node = self.cx.metadata_node(&[self.constant(64, self.addr).into()]);
+        let mut next = match before {
+            Some(instruction) => instruction.get_next_instruction(),
+            None => block.get_first_instruction(),
+        };
+
+        while let Some(instruction) = next {
+            instruction.set_metadata(node, kind).map_err(|e| e.to_string())?;
+            next = instruction.get_next_instruction();
         }
 
         return Ok(());
