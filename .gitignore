@@ -2,3 +2,6 @@
 
 # Executables in examples
 build
+
+# Where llvm is downloaded/built
+third_party
