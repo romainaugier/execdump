@@ -3,6 +3,9 @@
  * The output follows llvm-undname
  */
 
+use super::symbol;
+use super::symbol::{Builtin, CallConv, FunctionType, Member, Name, NamePart, Structor, SymbolKind, TemplateArg};
+
 const QUAL_CONST: u8 = 0x1;
 const QUAL_VOLATILE: u8 = 0x2;
 const QUAL_RESTRICT: u8 = 0x4;
@@ -2014,4 +2017,148 @@ pub fn demangle(symbol: &str) -> Option<String> {
     output_symbol(&mut out, &parsed);
 
     return Some(out);
+}
+
+/*
+ * Typed symbol, built from the parsed symbol
+ */
+
+fn template_args(params: &Option<Vec<TemplateParam>>) -> Vec<TemplateArg> {
+    let Some(params) = params else {
+        return Vec::new();
+    };
+
+    return params
+        .iter()
+        .map(|param| match param {
+            TemplateParam::Type(ty) => TemplateArg::Type(to_type(ty)),
+            _ => {
+                let mut out = String::new();
+                output_template_params(&mut out, &Some(vec![param.clone()]));
+                TemplateArg::Value(out[1..out.len() - 1].to_string())
+            }
+        })
+        .collect();
+}
+
+fn to_name(name: &QualifiedName) -> Name {
+    let parts = name
+        .components
+        .iter()
+        .map(|component| {
+            let ident = match &component.ident {
+                Ident::Named(name) => name.clone(),
+                Ident::Intrinsic(name) => name.to_string(),
+                Ident::Structor { class, is_dtor } => {
+                    let mut class_name = String::new();
+
+                    if let Some(class) = class {
+                        output_ident(&mut class_name, &IdentNode::new(class.ident.clone()));
+                    }
+
+                    format!("{}{}", if *is_dtor { "~" } else { "" }, class_name)
+                }
+                _ => {
+                    let mut out = String::new();
+                    output_ident(&mut out, &IdentNode::new(component.ident.clone()));
+                    out
+                }
+            };
+
+            NamePart { ident, template_args: template_args(&component.template_params) }
+        })
+        .collect();
+
+    return Name { parts };
+}
+
+fn to_type(ty: &Type) -> symbol::Type {
+    let unqualified = match &ty.kind {
+        TypeKind::Primitive(name) => Builtin::from_name(name).map_or_else(|| symbol::Type::Other(name.to_string()), symbol::Type::Builtin),
+        TypeKind::Tag(_, name) => symbol::Type::Named(to_name(name)),
+        TypeKind::Pointer { class_parent: Some(class), pointee, .. } => symbol::Type::MemberPointer {
+            class: Box::new(symbol::Type::Named(to_name(class))),
+            member: Box::new(to_type(pointee)),
+        },
+        TypeKind::Pointer { affinity: Affinity::Pointer, pointee, .. } => symbol::Type::Pointer(Box::new(to_type(pointee))),
+        TypeKind::Pointer { pointee, .. } => symbol::Type::Reference(Box::new(to_type(pointee))),
+        TypeKind::Array { dimensions, element } => dimensions
+            .iter()
+            .rev()
+            .fold(to_type(element), |inner, &size| symbol::Type::Array(Box::new(inner), Some(size))),
+        TypeKind::Function(signature) => symbol::Type::Function(Box::new(function_type(signature))),
+        TypeKind::Custom(ident) => {
+            let mut out = String::new();
+            output_ident(&mut out, ident);
+            symbol::Type::Other(out)
+        }
+    };
+
+    // Pointer qualifiers apply to the pointer itself, not to the pointee
+    let is_pointer = matches!(ty.kind, TypeKind::Pointer { .. });
+
+    return if ty.quals & QUAL_CONST != 0 && !is_pointer { symbol::Type::Const(Box::new(unqualified)) } else { unqualified };
+}
+
+fn function_type(signature: &FunctionSignature) -> FunctionType {
+    let call_conv = match signature.call_conv {
+        "" => None,
+        "__cdecl" => Some(CallConv::Cdecl),
+        "__stdcall" => Some(CallConv::Stdcall),
+        "__fastcall" => Some(CallConv::Fastcall),
+        "__thiscall" => Some(CallConv::Thiscall),
+        "__vectorcall" => Some(CallConv::Vectorcall),
+        _ => Some(CallConv::Other),
+    };
+
+    return FunctionType {
+        ret: signature.ret.as_ref().map(to_type),
+        params: signature.params.iter().flatten().map(to_type).collect(),
+        variadic: signature.is_variadic,
+        call_conv,
+    };
+}
+
+fn to_symbol(parsed: &Symbol) -> symbol::Symbol {
+    match parsed {
+        Symbol::Function { name, signature } => {
+            let class = signature.function_class;
+
+            let member = if class & FC_GLOBAL != 0 {
+                Member::None
+            } else if class & FC_STATIC != 0 {
+                Member::Static
+            } else if class & FC_VIRTUAL != 0 {
+                Member::Virtual
+            } else {
+                Member::Instance
+            };
+
+            let structor = match name.components.last().map(|c| &c.ident) {
+                Some(Ident::Structor { is_dtor: true, .. }) => Some(Structor::Dtor),
+                Some(Ident::Structor { is_dtor: false, .. }) => Some(Structor::Ctor),
+                _ => None,
+            };
+
+            symbol::Symbol {
+                name: to_name(name),
+                kind: SymbolKind::Function { ty: function_type(signature), member, const_this: signature.quals & QUAL_CONST != 0, structor },
+            }
+        }
+        Symbol::Variable { name, ty, .. } => symbol::Symbol { name: to_name(name), kind: SymbolKind::Variable(ty.as_ref().map(to_type)) },
+        Symbol::SpecialTable { name, .. } => {
+            let mut name = to_name(name);
+            let table = name.parts.pop().map_or(String::new(), |p| p.ident);
+            symbol::Symbol { name, kind: SymbolKind::Special(table) }
+        }
+        Symbol::StringLiteral { text, .. } => symbol::Symbol { name: Name::ident(text), kind: SymbolKind::Special("string literal".to_string()) },
+        Symbol::Raw(raw) => symbol::Symbol { name: Name::ident(raw), kind: SymbolKind::Name },
+    }
+}
+
+pub fn demangle_symbol(symbol: &str) -> Option<symbol::Symbol> {
+    let mut demangler = Demangler::new(symbol.as_bytes());
+    let parsed = demangler.parse()?;
+
+    return Some(to_symbol(&parsed));
 }

@@ -1,6 +1,9 @@
 mod itanium;
 mod msvc;
 mod rust;
+pub mod symbol;
+
+use symbol::Symbol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManglingScheme {
@@ -69,6 +72,18 @@ pub fn demangle(symbol: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Invalid mangled symbol: {}", symbol));
 }
 
+/// Typed description of a mangled symbol (import prefixes and ELF symbol versions are ignored)
+pub fn demangle_symbol(symbol: &str) -> Option<Symbol> {
+    let (_, unprefixed) = strip_import_prefix(symbol);
+    let (name, _) = split_symbol_version(unprefixed);
+
+    match detect_mangling_scheme(symbol) {
+        ManglingScheme::Itanium => itanium::demangle_symbol(name),
+        ManglingScheme::Msvc => msvc::demangle_symbol(name),
+        ManglingScheme::RustLegacy => rust::demangle_symbol(name),
+        ManglingScheme::Unknown => None,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -244,5 +259,116 @@ mod tests {
         for symbol in ["", "main", "_Z", "_Zv", "_Z1", "_Z3fo", "_ZN3fooEX", "?", "?@", "?f@@YAX", "??_C@_0", "_ZN4core3fmt17h0123E"] {
             assert!(demangle(symbol).is_err(), "{:?} should not demangle", symbol);
         }
+    }
+
+    fn function(symbol: &str) -> (Vec<String>, symbol::FunctionType, symbol::Member, bool, Option<symbol::Structor>) {
+        let demangled = demangle_symbol(symbol).unwrap();
+        let path = demangled.name.parts.iter().map(|p| p.ident.clone()).collect();
+
+        match demangled.kind {
+            symbol::SymbolKind::Function { ty, member, const_this, structor } => (path, ty, member, const_this, structor),
+            kind => panic!("{}: expected a function, got {:?}", symbol, kind),
+        }
+    }
+
+    #[test]
+    fn typed_itanium() {
+        use symbol::{Builtin, Member, Structor, TemplateArg, Type};
+
+        let int = || Type::Builtin(Builtin::Int);
+
+        let (path, ty, member, _, _) = function("_Z3addii");
+        assert_eq!(path, ["add"]);
+        assert_eq!(ty.params, [int(), int()]);
+        assert_eq!(ty.ret, None);
+        assert_eq!(member, Member::None);
+
+        let (path, ty, member, _, _) = function("_ZNSt6vectorIiSaIiEE9push_backERKi");
+        assert_eq!(path, ["std", "vector", "push_back"]);
+        assert_eq!(ty.params, [Type::Reference(Box::new(Type::Const(Box::new(int()))))]);
+        assert_eq!(member, Member::Unknown);
+
+        let demangled = demangle_symbol("_ZNSt6vectorIiSaIiEE9push_backERKi").unwrap();
+        assert_eq!(demangled.name.parts[1].template_args.len(), 2);
+        assert_eq!(demangled.name.parts[1].template_args[0], TemplateArg::Type(int()));
+
+        let (_, _, member, const_this, _) = function("_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4sizeEv@@GLIBCXX_3.4.21");
+        assert_eq!((member, const_this), (Member::Instance, true));
+
+        let (path, _, member, _, structor) = function("_ZN3FooC2Ev");
+        assert_eq!(path, ["Foo", "Foo"]);
+        assert_eq!((member, structor), (Member::Instance, Some(Structor::Ctor)));
+
+        let (path, _, _, _, structor) = function("_ZN3FooD1Ev");
+        assert_eq!(path, ["Foo", "~Foo"]);
+        assert_eq!(structor, Some(Structor::Dtor));
+
+        let (_, ty, _, _, _) = function("_Z1fIJidEEvDpT_");
+        assert_eq!(ty.ret, Some(Type::Builtin(Builtin::Void)));
+
+        let (_, ty, _, _, _) = function("_Z6printfPKcz");
+        assert!(ty.variadic);
+        assert_eq!(ty.params, [Type::Pointer(Box::new(Type::Const(Box::new(Type::Builtin(Builtin::Char)))))]);
+
+        let (_, ty, _, _, _) = function("_Z1fPFivEPA3_i");
+        assert!(matches!(&ty.params[0], Type::Pointer(f) if matches!(**f, Type::Function(_))));
+        assert_eq!(ty.params[1], Type::Pointer(Box::new(Type::Array(Box::new(int()), Some(3)))));
+
+        let vtable = demangle_symbol("_ZTV3Foo").unwrap();
+        assert_eq!(vtable.name.parts[0].ident, "Foo");
+        assert_eq!(vtable.kind, symbol::SymbolKind::Special("vtable for".to_string()));
+
+        let data = demangle_symbol("_ZSt4cout@GLIBCXX_3.4").unwrap();
+        assert_eq!(data.kind, symbol::SymbolKind::Variable(None));
+    }
+
+    #[test]
+    fn typed_msvc() {
+        use symbol::{Builtin, CallConv, Member, Structor, Type};
+
+        let (path, ty, member, _, _) = function("?bar@Foo@@QEAAXH@Z");
+        assert_eq!(path, ["Foo", "bar"]);
+        assert_eq!(ty.params, [Type::Builtin(Builtin::Int)]);
+        assert_eq!(ty.ret, Some(Type::Builtin(Builtin::Void)));
+        assert_eq!(member, Member::Instance);
+
+        let (_, ty, member, _, _) = function("?f@@YGXXZ");
+        assert_eq!((member, ty.call_conv), (Member::None, Some(CallConv::Stdcall)));
+        assert!(ty.params.is_empty());
+
+        let (path, ty, member, _, _) = function("??_GFoo@@UEAAPEAXI@Z");
+        assert_eq!(path[0], "Foo");
+        assert_eq!(member, Member::Virtual);
+        assert_eq!(ty.ret, Some(Type::Pointer(Box::new(Type::Builtin(Builtin::Void)))));
+
+        let (path, _, _, _, structor) = function("??0Foo@@QEAA@XZ");
+        assert_eq!(path, ["Foo", "Foo"]);
+        assert_eq!(structor, Some(Structor::Ctor));
+
+        let vftable = demangle_symbol("??_7Foo@@6B@").unwrap();
+        assert_eq!(vftable.name.parts[0].ident, "Foo");
+        assert!(matches!(vftable.kind, symbol::SymbolKind::Special(_)));
+    }
+
+    #[test]
+    fn typed_rust() {
+        let demangled = demangle_symbol("_ZN4core3ptr85drop_in_place$LT$std..rt..lang_start$LT$$LP$$RP$$GT$..$u7b$$u7b$closure$u7d$$u7d$$GT$17h0123456789abcdefE").unwrap();
+        let path: Vec<&str> = demangled.name.parts.iter().map(|p| p.ident.as_str()).collect();
+        assert_eq!(path, ["core", "ptr", "drop_in_place<std::rt::lang_start<()>::{{closure}}>"]);
+    }
+
+    #[test]
+    fn typed_corpus() {
+        let mut missing = Vec::new();
+
+        for path in corpus_files() {
+            for (mangled, _) in corpus(&path) {
+                if demangle(&mangled).is_ok() && demangle_symbol(&mangled).is_none() {
+                    missing.push(mangled);
+                }
+            }
+        }
+
+        assert!(missing.is_empty(), "{} symbols without a typed description:\n{}", missing.len(), missing.join("\n"));
     }
 }

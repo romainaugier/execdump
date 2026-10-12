@@ -1,3 +1,5 @@
+use super::symbol::{Name, NamePart, Symbol, SymbolKind};
+
 /*
  * Rust legacy mangling (Itanium-like with a trailing hash), output follows rustc-demangle's alternate format
  * https://doc.rust-lang.org/rustc/symbol-mangling/index.html
@@ -102,4 +104,31 @@ pub fn demangle(symbol: &str) -> Option<String> {
     let decoded: Option<Vec<String>> = path.iter().map(|c| decode_component(c)).collect();
 
     return Some(decoded?.join("::"));
+}
+
+/// Name only, the legacy mangling does not encode types
+pub fn demangle_symbol(symbol: &str) -> Option<Symbol> {
+    let demangled = demangle(symbol)?;
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    // Split on the top level "::", generic arguments can contain paths
+    for (i, c) in demangled.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ':' if depth == 0 && demangled[i..].starts_with("::") && i >= start => {
+                parts.push(&demangled[start..i]);
+                start = i + 2;
+            }
+            _ => {}
+        }
+    }
+
+    parts.push(&demangled[start..]);
+
+    let parts = parts.into_iter().map(|p| NamePart { ident: p.to_string(), template_args: Vec::new() }).collect();
+
+    return Some(Symbol { name: Name { parts }, kind: SymbolKind::Name });
 }

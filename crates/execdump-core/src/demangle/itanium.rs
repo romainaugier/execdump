@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::symbol::{Builtin, FunctionType, Member, Name, NamePart, Structor, Symbol, SymbolKind, TemplateArg, Type};
+
 /*
  * Itanium C++ ABI demangler (GCC, Clang on Linux, macOS, BSDs, MinGW...)
  * https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
@@ -2499,6 +2501,16 @@ impl Printer {
         }
     }
 
+    /// Unqualified name of a possibly nested and templated name
+    fn last_component(n: &N) -> N {
+        match &**n {
+            Node::Nested(_, inner) | Node::Template(inner, _) | Node::AbiTag(inner, _) => Self::last_component(inner),
+            Node::ModuleEntity(_, inner) | Node::MemberLikeFriend(_, inner) => Self::last_component(inner),
+            Node::ForwardRef(target) => target.borrow().as_ref().map_or(n.clone(), Self::last_component),
+            _ => n.clone(),
+        }
+    }
+
     fn base_name(n: &N) -> String {
         match &**n {
             Node::Name(s) => s.clone(),
@@ -3394,4 +3406,178 @@ pub fn demangle(symbol: &str) -> Option<String> {
     }
 
     return Some(printer.out);
+}
+
+/*
+ * Typed symbol, built from the parsed nodes
+ */
+
+fn printed(n: &N) -> String {
+    let mut printer = Printer::new();
+    printer.print(n);
+    return printer.out;
+}
+
+/// Follows forward references (template parameters referenced before being parsed)
+fn resolved(n: &N) -> N {
+    match &**n {
+        Node::ForwardRef(target) => target.borrow().as_ref().map_or(n.clone(), resolved),
+        _ => n.clone(),
+    }
+}
+
+fn is_expression(n: &N) -> bool {
+    return matches!(
+        &*resolved(n),
+        Node::Binary(..) | Node::Prefix(..) | Node::Postfix(..) | Node::Subscript(..) | Node::Member(..) | Node::Call(..)
+            | Node::Conversion(..) | Node::Conditional(..) | Node::Cast(..) | Node::Enclosing(..) | Node::SizeofPack(..)
+            | Node::Delete(..) | Node::Throw(..) | Node::IntegerLiteral(..) | Node::Bool(..) | Node::EnumLiteral(..)
+            | Node::StringLiteral(..) | Node::FunctionParam(..) | Node::InitList(..) | Node::New { .. } | Node::Fold { .. }
+            | Node::Braced(..) | Node::BracedRange(..) | Node::Subobject(..) | Node::PtrMemConversion(..) | Node::LambdaExpr(..)
+    );
+}
+
+fn template_args(n: &N) -> Vec<TemplateArg> {
+    let mut args = Vec::new();
+
+    let nodes: Vec<N> = match &*resolved(n) {
+        Node::TemplateArgs(nodes) => nodes.clone(),
+        _ => vec![n.clone()],
+    };
+
+    for arg in nodes.iter().map(resolved) {
+        match &*arg {
+            Node::ArgPack(pack) => args.extend(pack.iter().flat_map(|a| template_args(a))),
+            _ if is_expression(&arg) => args.push(TemplateArg::Value(printed(&arg))),
+            _ => args.push(TemplateArg::Type(to_type(&arg))),
+        }
+    }
+
+    return args;
+}
+
+fn to_name(n: &N) -> Name {
+    let n = resolved(n);
+
+    match &*n {
+        Node::Name(s) => Name::ident(s),
+        Node::Nested(scope, inner) => {
+            let mut name = to_name(scope);
+            name.parts.extend(to_name(inner).parts);
+            name
+        }
+        Node::Template(inner, args) => {
+            let mut name = to_name(inner);
+
+            if let Some(last) = name.parts.last_mut() {
+                last.template_args = template_args(args);
+            }
+
+            name
+        }
+        Node::AbiTag(inner, _) | Node::GlobalQualified(inner) | Node::ModuleEntity(_, inner) | Node::MemberLikeFriend(_, inner) => to_name(inner),
+        Node::StdSubstitution(kind, expanded) => Name {
+            parts: vec![
+                NamePart { ident: "std".to_string(), template_args: Vec::new() },
+                NamePart { ident: kind.base_name(*expanded).to_string(), template_args: Vec::new() },
+            ],
+        },
+        Node::CtorDtor(scope, is_dtor) => Name::ident(&format!("{}{}", if *is_dtor { "~" } else { "" }, Printer::base_name(scope))),
+        Node::Local(encoding, entity) => {
+            let mut name = match &*resolved(encoding) {
+                Node::Encoding { name, .. } => to_name(name),
+                _ => to_name(encoding),
+            };
+
+            name.parts.extend(to_name(entity).parts);
+            name
+        }
+        _ => Name::ident(&printed(&n)),
+    }
+}
+
+fn to_type(n: &N) -> Type {
+    let n = resolved(n);
+
+    match &*n {
+        Node::Name(s) => Builtin::from_name(s).map_or_else(|| Type::Named(Name::ident(s)), Type::Builtin),
+        Node::Nested(..) | Node::Template(..) | Node::AbiTag(..) | Node::StdSubstitution(..) | Node::GlobalQualified(..) | Node::Local(..) => {
+            Type::Named(to_name(&n))
+        }
+        Node::Elaborated(_, inner) | Node::VendorQualified(inner, _, _) => to_type(inner),
+        Node::Pointer(pointee) => Type::Pointer(Box::new(to_type(pointee))),
+        Node::Reference(pointee, _) => Type::Reference(Box::new(to_type(pointee))),
+        Node::Qualified(inner, quals) if quals & QUAL_CONST != 0 => Type::Const(Box::new(to_type(inner))),
+        Node::Qualified(inner, _) => to_type(inner),
+        Node::FunctionType { ret, params, .. } => Type::Function(Box::new(function_type(Some(ret), params))),
+        Node::Array(element, size) => {
+            let size = size.as_ref().and_then(|s| printed(s).parse::<u64>().ok());
+            Type::Array(Box::new(to_type(element)), size)
+        }
+        Node::MemberPointer(class, member) => Type::MemberPointer { class: Box::new(to_type(class)), member: Box::new(to_type(member)) },
+        _ => Type::Other(printed(&n)),
+    }
+}
+
+fn function_type(ret: Option<&N>, params: &[N]) -> FunctionType {
+    let variadic = params.last().is_some_and(|p| matches!(&*resolved(p), Node::Name(s) if s == "..."));
+    let params = params[..params.len() - variadic as usize].iter().map(to_type).collect();
+
+    return FunctionType { ret: ret.map(to_type), params, variadic, call_conv: None };
+}
+
+/// Name of the entity a special symbol refers to (vtable for Foo -> Foo)
+fn special_target(n: &N) -> Name {
+    match &*resolved(n) {
+        Node::Encoding { name, .. } => to_name(name),
+        Node::Special(_, inner) | Node::DotSuffix(inner, _) => special_target(inner),
+        _ => to_name(n),
+    }
+}
+
+fn to_symbol(n: &N) -> Symbol {
+    let n = resolved(n);
+
+    match &*n {
+        Node::Encoding { ret, name, params, quals, ref_qual, .. } => {
+            let structor = match &*resolved(&Printer::last_component(name)) {
+                Node::CtorDtor(_, true) => Some(Structor::Dtor),
+                Node::CtorDtor(_, false) => Some(Structor::Ctor),
+                _ => None,
+            };
+
+            let name = to_name(name);
+
+            let member = if structor.is_some() || *quals != 0 || *ref_qual != RefQual::None {
+                Member::Instance
+            } else if name.parts.len() > 1 {
+                Member::Unknown
+            } else {
+                Member::None
+            };
+
+            let ty = function_type(ret.as_ref(), params);
+
+            Symbol { name, kind: SymbolKind::Function { ty, member, const_this: quals & QUAL_CONST != 0, structor } }
+        }
+        Node::DotSuffix(inner, suffix) => {
+            let mut symbol = to_symbol(inner);
+
+            if let Some(last) = symbol.name.parts.last_mut() {
+                last.ident.push_str(suffix);
+            }
+
+            symbol
+        }
+        Node::Special(prefix, inner) => Symbol { name: special_target(inner), kind: SymbolKind::Special(prefix.trim().to_string()) },
+        Node::CtorVtable(first, _) => Symbol { name: to_name(first), kind: SymbolKind::Special("construction vtable for".to_string()) },
+        _ => Symbol { name: to_name(&n), kind: SymbolKind::Variable(None) },
+    }
+}
+
+pub fn demangle_symbol(symbol: &str) -> Option<Symbol> {
+    let mut parser = Parser::new(symbol.as_bytes());
+    let root = parser.parse()?;
+
+    return Some(to_symbol(&root));
 }
