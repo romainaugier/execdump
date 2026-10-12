@@ -333,7 +333,12 @@ impl<'a> Decompiler<'a> {
             return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
         }
 
-        let discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
+        let mut discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
+
+        // A result nobody reads is a leftover in the return register
+        if discovered.ret.is_some() && !self.result_read_by_callers(addr) {
+            discovered.ret = None;
+        }
 
         // Itanium encodes the parameters but not the return type
         if let Some(prototype) = demangled {
@@ -342,6 +347,30 @@ impl<'a> Decompiler<'a> {
         }
 
         return Signature { name, noreturn, ..discovered };
+    }
+
+    /// Whether one of the direct callers reads the return register (true when there is none)
+    fn result_read_by_callers(&self, addr: u64) -> bool {
+        let Some(callers) = self.analysis.callers.get(&addr) else {
+            return true;
+        };
+
+        let signature = |target: &CallTarget| self.call_signature(target);
+        let global_name = |addr: u64| self.global_name(addr);
+        let env = self.env(&signature, &global_name);
+        let mut sites = 0;
+
+        for caller in callers.iter().filter_map(|c| self.analysis.functions.get(c)) {
+            for call in caller.calls.iter().filter(|c| c.target == CallTarget::Function(addr)) {
+                sites += 1;
+
+                if call.tail || lift::result_used(&env, caller, call.addr, self.abi.int_ret) {
+                    return true;
+                }
+            }
+        }
+
+        return sites == 0;
     }
 
     /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used

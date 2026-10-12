@@ -860,3 +860,35 @@ pub fn float_predicate(cond: Cond) -> Option<FloatPredicate> {
         _ => return None,
     });
 }
+
+/// Whether the instruction reads (Some(true)) or overwrites (Some(false)) a register, None otherwise
+pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
+    let mnemonic = insn.mnemonic.as_str();
+    let uses = |op: &Op| match op {
+        Op::Reg { r, .. } => r.reg == reg,
+        Op::Mem { base, index, .. } => base.reg == reg || index.is_some_and(|(i, _, _)| i.reg == reg),
+        _ => false,
+    };
+
+    // x0 is returned by ret and passed by the calls
+    if reg == 0 && matches!(mnemonic, "ret" | "bl" | "blr" | "b") {
+        return Some(true);
+    }
+
+    let reads_all = is_store(mnemonic) || matches!(mnemonic, "cmp" | "cmn" | "tst" | "cbz" | "cbnz" | "tbz" | "tbnz" | "br" | "ccmp" | "ccmn" | "fcmp" | "fcmpe") || mnemonic.starts_with("b.");
+
+    if reads_all {
+        return if insn.ops.iter().any(uses) { Some(true) } else { None };
+    }
+
+    let destinations = if is_pair(mnemonic) { 2 } else { 1 };
+
+    if insn.ops.iter().skip(destinations).any(uses) {
+        return Some(true);
+    }
+
+    let writes = insn.ops.iter().take(destinations).any(|op| matches!(op, Op::Reg { r, .. } if r.reg == reg && r.bits >= 32));
+    let partial = matches!(mnemonic, "movk" | "bfi" | "bfxil");
+
+    return if writes && !partial { Some(false) } else if writes { Some(true) } else { None };
+}

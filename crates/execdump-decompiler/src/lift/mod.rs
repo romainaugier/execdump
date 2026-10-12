@@ -198,6 +198,14 @@ impl Insn {
         }
     }
 
+    /// Whether the instruction reads (Some(true)) or overwrites (Some(false)) a register
+    pub fn register_access(&self, reg: Reg) -> Option<bool> {
+        return match self {
+            Insn::X86(insn) => x86::register_access(insn, reg),
+            Insn::Aarch64(insn) => aarch64::register_access(insn, reg),
+        };
+    }
+
     fn memory(&self) -> Vec<MemAccess> {
         return match self {
             Insn::X86(insn) => x86::memory(insn),
@@ -285,6 +293,59 @@ pub fn analyze_frame(env: &Env, function: &Function) -> Result<Frame, String> {
     }
 
     return Ok(frame);
+}
+
+/// Whether a caller reads the result register after a call (or returns it), following
+/// the single successors of the block for a few blocks
+pub fn result_used(env: &Env, caller: &Function, call: u64, reg: Reg) -> bool {
+    let Ok(cs) = capstone(env.program.architecture()) else {
+        return true;
+    };
+
+    let Some(mut block) = caller.block_containing(call) else {
+        return true;
+    };
+
+    let mut start = call;
+
+    for _ in 0..4 {
+        for insn in block.insns.iter().filter(|i| i.addr > start) {
+            let Some(bytes) = env.program.read(insn.addr, insn.size as usize) else {
+                return true;
+            };
+
+            let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, &cs, bytes, insn.addr) else {
+                return true;
+            };
+
+            match decoded.register_access(reg) {
+                Some(read) => return read,
+                None => {}
+            }
+
+            if matches!(insn.flow, Flow::Ret | Flow::IndirectJump) {
+                return true;
+            }
+        }
+
+        // Calls to functions that do not return, or blocks that end the function
+        if block.succs.is_empty() {
+            return !matches!(block.last().flow, Flow::Call(_));
+        }
+
+        match block.succs.as_slice() {
+            [edge] => match caller.blocks.get(&edge.to) {
+                Some(next) => {
+                    block = next;
+                    start = 0;
+                }
+                None => return true,
+            },
+            _ => return true,
+        }
+    }
+
+    return true;
 }
 
 pub fn reverse_post_order(function: &Function) -> Vec<u64> {

@@ -891,3 +891,49 @@ pub fn lift_sse<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<bool, Str
 
     return Ok(true);
 }
+
+/// Whether the instruction reads (Some(true)) or overwrites (Some(false)) a register, None otherwise
+pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
+    let mnemonic = insn.mnemonic.as_str();
+    let uses = |op: &Op| match op {
+        Op::Reg(r) => r.reg == reg,
+        Op::Mem(m) => m.base.is_some_and(|b| b.reg == reg) || m.index.is_some_and(|i| i.reg == reg),
+        Op::Imm(..) => false,
+    };
+
+    // Implicit uses of the accumulator (rax is the first register of both files)
+    let accumulator = reg == 0;
+
+    if accumulator && matches!(mnemonic, "ret" | "retn" | "cdq" | "cqo" | "cwde" | "cdqe" | "cbw" | "stosb" | "stosw" | "stosd" | "stosq" | "cmpxchg") {
+        return Some(true);
+    }
+
+    if accumulator && matches!(mnemonic, "mul" | "div" | "idiv") || (mnemonic == "imul" && insn.ops.len() == 1 && accumulator) {
+        return Some(true);
+    }
+
+    if insn.ops.iter().skip(1).any(uses) || insn.ops.iter().any(|op| matches!(op, Op::Mem(_)) && uses(op)) {
+        return Some(true);
+    }
+
+    let Some(Op::Reg(dst)) = insn.ops.first() else {
+        return if accumulator && mnemonic == "call" { Some(false) } else { None };
+    };
+
+    if dst.reg != reg {
+        return if accumulator && mnemonic == "call" { Some(false) } else { None };
+    }
+
+    let write_only = matches!(mnemonic, "mov" | "movabs" | "lea" | "movzx" | "movsx" | "movsxd" | "pop") || mnemonic.starts_with("set") || mnemonic.starts_with("cvt");
+
+    // xor eax, eax clears the register without reading it
+    let zeroing = matches!(mnemonic, "xor" | "sub") && insn.ops.get(1) == insn.ops.first();
+
+    return if write_only && dst.bits >= 32 || zeroing {
+        Some(false)
+    } else if writes_first_operand(mnemonic) || matches!(mnemonic, "cmp" | "test" | "push") {
+        Some(true)
+    } else {
+        None
+    };
+}
