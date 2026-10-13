@@ -28,7 +28,8 @@ cargo run --release -p execdump-project --example profile -- /usr/bin/python3 [w
 ```
 
 Every function of some binaries decompiled with overflow checks, the panics grouped by where they happen
-(`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads):
+(`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads and
+`SWEEP_STACK` their stack size, a small one finds the deepest recursions):
 
 ```
 CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true \
@@ -36,7 +37,10 @@ CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTION
 ```
 
 A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other
-functions are not affected. A crash of execdump itself gives the terminal back before printing the error.
+functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal
+errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler
+run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big
+functions, and are much slower, `--release` is the way to explore large binaries.
 
 ## Usage
 

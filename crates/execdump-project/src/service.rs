@@ -132,8 +132,7 @@ impl Service {
             let (shared, cache, sender) = (shared.clone(), cache.clone(), sender.clone());
             let (program, analysis) = (program.clone(), analysis.clone());
 
-            std::thread::Builder::new()
-                .name(format!("decompiler-{}", index))
+            crash::thread(&format!("decompiler-{}", index))
                 .spawn(move || worker(index, &program, &analysis, &shared, &cache, &sender))
                 .expect("cannot start a decompilation thread");
         }

@@ -50,8 +50,23 @@ fn export(exec: &Exec, args: &Args, dir: &std::path::Path) -> Result<(), Box<dyn
     return Ok(());
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     crash::install();
+
+    // The work runs on a thread with a large stack (the decompiler recurses on big functions)
+    let main = crash::thread("main").spawn(|| run().map_err(|e| e.to_string())).expect("cannot start the main thread");
+
+    match main.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            eprintln!("Error: {}", error);
+            std::process::exit(1);
+        }
+        Err(_) => std::process::exit(101),
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let exectype = guess_exectype(&args.file_path)?;

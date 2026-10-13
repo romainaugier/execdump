@@ -575,6 +575,7 @@ version = "0.1.0"
 dependencies = [
  "capstone",
  "chrono",
+ "libc",
  "strum",
  "strum_macros",
 ]

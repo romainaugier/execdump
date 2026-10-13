@@ -6,7 +6,8 @@
  *     cargo run --release --target-dir target/checked -p execdump-project --example sweep -- <binaries...>
  *
  * SWEEP_TRACE=1 prints each function before it is decompiled (the last ones printed hang or crash),
- * SWEEP_WORKERS sets the number of threads.
+ * SWEEP_WORKERS sets the number of threads, SWEEP_STACK their stack size in bytes (a small one finds the
+ * deepest recursions).
  */
 
 use execdump_core::crash;
@@ -119,7 +120,9 @@ fn sweep(path: &PathBuf, workers: usize) -> Result<Report, String> {
 
         std::thread::scope(|scope| {
             for _ in 0..workers {
-                scope.spawn(|| {
+                let stack = std::env::var("SWEEP_STACK").ok().and_then(|s| s.parse().ok()).unwrap_or(crash::STACK_SIZE);
+
+                std::thread::Builder::new().stack_size(stack).spawn_scoped(scope, || {
                     let mut decompiler = Decompiler::new(&program, &analysis);
 
                     loop {
@@ -150,7 +153,7 @@ fn sweep(path: &PathBuf, workers: usize) -> Result<Report, String> {
                             }
                         }
                     }
-                });
+                }).expect("cannot start a sweep thread");
             }
         });
     }
