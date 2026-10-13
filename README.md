@@ -310,6 +310,8 @@ Viewers:
   - :heavy_check_mark: Functions, strings, imports, modules and memory map tables
   - :heavy_check_mark: C code of the modules (every function of a module, synchronized with the addresses, editable)
   - :heavy_check_mark: Review of the LLM proposals
+  - :heavy_check_mark: Explorer as a tree: one node per program of the binary (its analysis, modules, headers, sections and tables)
+    and per loaded library, as wide as its content
   - :heavy_check_mark: Shared libraries: listed in the explorer, loaded on demand (analysis, decompilation and project of their own, in
     `libs/<library>` of the project), an imported function opens in the library that exports it (loaded first when
     needed, from the graphs, the call graphs and the C code with `gd`), the libraries loaded are restored with the session
@@ -330,7 +332,9 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 |---|---|
 | `Tab` | Switch between the explorer and the content |
 | `e` | Show/hide the explorer |
-| `Enter` / `t` / `s` / `v` | Explorer: open in the current tab / a new tab / a split below / a split on the right |
+| `Enter` / `t` / `s` / `v` | Explorer: open in the current tab / a new tab / a split below / a split on the right (`Enter` on a node folds or unfolds it) |
+| `h` | Explorer: fold the node, or go to the node of the item |
+| `<` / `>` / `=` | Explorer: narrower / wider / back to the width of its content |
 | `:` | Command line (see the commands below) |
 | `/` | Search: filters the tables, finds the next matching node or line |
 | `Ctrl-o` / `Backspace` | Go back to the previous view of the tab |

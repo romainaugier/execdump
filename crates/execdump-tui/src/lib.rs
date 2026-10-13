@@ -77,7 +77,8 @@ const VERTICAL_STEP: i32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ExplorerItem {
-    Group(String),
+    /// Node of the tree (key of its collapsed state, title)
+    Group(String, String),
     EntryPoint(usize),
     CallGraph(usize),
     Functions(usize),
@@ -114,10 +115,11 @@ enum ExplorerItem {
 
 impl ExplorerItem {
     fn display_name(&self, app: &App) -> String {
-        let suffix = |program: &usize| -> String { app.program_suffix(*program) };
+        // The tree tells which program an item belongs to
+        let suffix = |_: &usize| String::new();
 
         match self {
-            ExplorerItem::Group(name) => format!("{}/", name),
+            ExplorerItem::Group(_, title) => title.clone(),
             ExplorerItem::EntryPoint(p) => format!("  Entry point{}", suffix(p)),
             ExplorerItem::CallGraph(p) => format!("  Call graph{}", suffix(p)),
             ExplorerItem::Functions(p) => {
@@ -163,119 +165,134 @@ impl ExplorerItem {
     }
 }
 
-fn explorer_items(app: &App) -> Vec<ExplorerItem> {
-    let (exec, projects) = (&app.exec, &app.projects);
-    let mut items = vec![ExplorerItem::Group("Analysis".to_string())];
+/// Explorer items in tree order, with their depth (the children of collapsed nodes are left out)
+struct Tree<'a> {
+    items: Vec<ExplorerItem>,
+    depths: Vec<u8>,
+    collapsed: &'a std::collections::HashSet<String>,
+}
 
+impl Tree<'_> {
+    fn item(&mut self, depth: u8, item: ExplorerItem) {
+        self.items.push(item);
+        self.depths.push(depth);
+    }
+
+    /// Adds a node, true when its children are shown
+    fn group(&mut self, depth: u8, key: String, title: String) -> bool {
+        let expanded = !self.collapsed.contains(&key);
+        self.item(depth, ExplorerItem::Group(key, title));
+        return expanded;
+    }
+}
+
+/// What the explorer shows of a program: its analysis and its modules
+fn program_tree(tree: &mut Tree, app: &App, p: usize, depth: u8, key: &str) {
+    if tree.group(depth, format!("{}/analysis", key), "Analysis".to_string()) {
+        if p < app.main_programs {
+            tree.item(depth + 1, ExplorerItem::EntryPoint(p));
+        }
+
+        for item in [ExplorerItem::CallGraph(p), ExplorerItem::Functions(p), ExplorerItem::Strings(p), ExplorerItem::Imports(p), ExplorerItem::MemoryMap(p), ExplorerItem::Proposals(p)] {
+            tree.item(depth + 1, item);
+        }
+    }
+
+    if let Some(project) = app.projects[p].as_ref() {
+        if tree.group(depth, format!("{}/modules", key), format!("Modules ({})", project.modules.len())) {
+            for module in project.modules.names() {
+                tree.item(depth + 1, ExplorerItem::Module(p, module.clone()));
+            }
+        }
+    }
+}
+
+fn explorer_items(app: &App) -> (Vec<ExplorerItem>, Vec<u8>) {
+    let exec = &app.exec;
+    let mut tree = Tree { items: Vec::new(), depths: Vec::new(), collapsed: &app.explorer_collapsed };
+    let file = app.exec_path.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
+
+    // One node per program of the binary, its headers, sections and tables in the first one (Mach-O: each)
     for p in 0..app.main_programs {
-        items.push(ExplorerItem::EntryPoint(p));
-        items.push(ExplorerItem::CallGraph(p));
-        items.push(ExplorerItem::Functions(p));
-        items.push(ExplorerItem::Strings(p));
-        items.push(ExplorerItem::Imports(p));
-        items.push(ExplorerItem::MemoryMap(p));
-        items.push(ExplorerItem::Proposals(p));
-    }
+        let key = format!("p{}", p);
 
-    if !app.libraries.is_empty() {
-        items.push(ExplorerItem::Group("Libraries".to_string()));
-
-        for (library, entry) in app.libraries.iter().enumerate() {
-            items.push(ExplorerItem::Library(library));
-
-            if let Some(p) = entry.program.filter(|&p| projects[p].is_some()) {
-                items.push(ExplorerItem::CallGraph(p));
-                items.push(ExplorerItem::Functions(p));
-                items.push(ExplorerItem::Strings(p));
-                items.push(ExplorerItem::Imports(p));
-                items.push(ExplorerItem::Proposals(p));
-            }
-        }
-    }
-
-    for (p, project) in projects.iter().enumerate() {
-        let Some(project) = project else {
+        if !tree.group(0, key.clone(), format!("{} ({})", file, app.programs[p].name)) {
             continue;
-        };
-
-        let suffix = app.program_suffix(p);
-        items.push(ExplorerItem::Group(format!("Modules{}", suffix)));
-        items.extend(project.modules.names().map(|m| ExplorerItem::Module(p, m.clone())));
-    }
-
-    items.push(ExplorerItem::Group("Headers".to_string()));
-
-    match exec {
-        Exec::PE(_) => {
-            items.push(ExplorerItem::PEDosHeader);
-            items.push(ExplorerItem::PENtHeader);
-            items.push(ExplorerItem::PEOptionalHeader);
         }
-        Exec::ELF(_) => {
-            items.push(ExplorerItem::ELFHeader);
-            items.push(ExplorerItem::ELFProgramHeaders);
-        }
-        Exec::MachO(macho) => {
-            if macho.fat_header.is_some() {
-                items.push(ExplorerItem::MachOFatHeader);
-            }
 
-            for p in 0..macho.binaries.len() {
-                items.push(ExplorerItem::MachOHeader(p));
-                items.push(ExplorerItem::MachOLoadCommands(p));
+        program_tree(&mut tree, app, p, 1, &key);
+
+        let macho = matches!(exec, Exec::MachO(_));
+
+        if p > 0 && !macho {
+            continue;
+        }
+
+        if tree.group(1, format!("{}/headers", key), "Headers".to_string()) {
+            match exec {
+                Exec::PE(_) => [ExplorerItem::PEDosHeader, ExplorerItem::PENtHeader, ExplorerItem::PEOptionalHeader].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::ELF(_) => [ExplorerItem::ELFHeader, ExplorerItem::ELFProgramHeaders].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::MachO(macho) => {
+                    if p == 0 && macho.fat_header.is_some() {
+                        tree.item(2, ExplorerItem::MachOFatHeader);
+                    }
+
+                    tree.item(2, ExplorerItem::MachOHeader(p));
+                    tree.item(2, ExplorerItem::MachOLoadCommands(p));
+                }
             }
         }
-    }
 
-    items.push(ExplorerItem::Group("Sections".to_string()));
+        if tree.group(1, format!("{}/sections", key), "Sections".to_string()) {
+            let sections: Vec<String> = match exec {
+                Exec::PE(pe) => {
+                    let mut sections: Vec<&execdump_core::pe::Section> = pe.sections.values().collect();
+                    sections.sort_by_key(|s| s.header.virtual_address);
+                    sections.iter().map(|s| s.header.name.clone()).collect()
+                }
+                Exec::ELF(elf) => {
+                    let mut sections: Vec<&execdump_core::elf::ELFSection> = elf.sections.values().filter(|s| !s.name.is_empty()).collect();
+                    sections.sort_by_key(|s| s.offset());
+                    sections.iter().map(|s| s.name.clone()).collect()
+                }
+                Exec::MachO(macho) => {
+                    let mut sections: Vec<&execdump_core::macho::MachOSection> = macho.binaries[p].sections.values().collect();
+                    sections.sort_by_key(|s| s.header.addr);
+                    sections.iter().map(|s| s.header.full_name()).collect()
+                }
+            };
 
-    match exec {
-        Exec::PE(pe) => {
-            let mut sections: Vec<&execdump_core::pe::Section> = pe.sections.values().collect();
-            sections.sort_by_key(|s| s.header.virtual_address);
-            items.extend(sections.iter().map(|s| ExplorerItem::Section(0, s.header.name.clone())));
+            sections.into_iter().for_each(|name| tree.item(2, ExplorerItem::Section(p, name)));
         }
-        Exec::ELF(elf) => {
-            let mut sections: Vec<&execdump_core::elf::ELFSection> = elf.sections.values().filter(|s| !s.name.is_empty()).collect();
-            sections.sort_by_key(|s| s.offset());
-            items.extend(sections.iter().map(|s| ExplorerItem::Section(0, s.name.clone())));
-        }
-        Exec::MachO(macho) => {
-            for (p, binary) in macho.binaries.iter().enumerate() {
-                let mut sections: Vec<&execdump_core::macho::MachOSection> = binary.sections.values().collect();
-                sections.sort_by_key(|s| s.header.addr);
-                items.extend(sections.iter().map(|s| ExplorerItem::Section(p, s.header.full_name())));
-            }
-        }
-    }
 
-    match exec {
-        Exec::PE(_) => {
-            items.push(ExplorerItem::Group("Data Directories".to_string()));
-            items.push(ExplorerItem::PEImportTable);
-            items.push(ExplorerItem::PEExportTable);
-            items.push(ExplorerItem::PEExceptionTable);
-            items.push(ExplorerItem::PEDebugDirectory);
-        }
-        Exec::ELF(_) => {
-            items.push(ExplorerItem::Group("Tables".to_string()));
-            items.push(ExplorerItem::ELFSymbols);
-            items.push(ExplorerItem::ELFDynamic);
-            items.push(ExplorerItem::ELFRelocations);
-            items.push(ExplorerItem::ELFImports);
-            items.push(ExplorerItem::ELFNotes);
-        }
-        Exec::MachO(macho) => {
-            items.push(ExplorerItem::Group("Tables".to_string()));
+        let title = if matches!(exec, Exec::PE(_)) { "Data Directories" } else { "Tables" };
 
-            for p in 0..macho.binaries.len() {
-                items.push(ExplorerItem::MachOSymbols(p));
-                items.push(ExplorerItem::MachOImports(p));
+        if tree.group(1, format!("{}/tables", key), title.to_string()) {
+            match exec {
+                Exec::PE(_) => [ExplorerItem::PEImportTable, ExplorerItem::PEExportTable, ExplorerItem::PEExceptionTable, ExplorerItem::PEDebugDirectory].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::ELF(_) => [ExplorerItem::ELFSymbols, ExplorerItem::ELFDynamic, ExplorerItem::ELFRelocations, ExplorerItem::ELFImports, ExplorerItem::ELFNotes].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::MachO(_) => [ExplorerItem::MachOSymbols(p), ExplorerItem::MachOImports(p)].into_iter().for_each(|i| tree.item(2, i)),
             }
         }
     }
 
-    return items;
+    // The libraries: loaded ones are nodes like the programs of the binary
+    if !app.libraries.is_empty() && tree.group(0, "libs".to_string(), format!("Libraries ({})", app.libraries.len())) {
+        for (library, entry) in app.libraries.iter().enumerate() {
+            match entry.program.filter(|&p| app.projects[p].is_some()) {
+                Some(p) => {
+                    let key = format!("lib{}", library);
+
+                    if tree.group(1, key.clone(), format!("{} ({})", entry.file_name(), app.library_status(library))) {
+                        program_tree(&mut tree, app, p, 2, &key);
+                    }
+                }
+                None => tree.item(1, ExplorerItem::Library(library)),
+            }
+        }
+    }
+
+    return (tree.items, tree.depths);
 }
 
 /*
@@ -443,6 +460,13 @@ struct App {
     pending_export: Option<(usize, PathBuf)>,
 
     explorer_items: Vec<ExplorerItem>,
+    /// Depth of each item in the tree
+    explorer_depths: Vec<u8>,
+    /// Keys of the collapsed nodes
+    explorer_collapsed: std::collections::HashSet<String>,
+    /// Width that fits the items, and the one given with < and > (instead)
+    explorer_fit: u16,
+    explorer_width: Option<u16>,
     explorer_state: ListState,
     explorer_visible: bool,
     explorer_version: u64,
@@ -575,7 +599,7 @@ impl App {
         let projects: Vec<Option<Project>> = programs.iter().map(|_| None).collect();
         let libraries: Vec<Library> = needed_libraries(&exec, &exec_path).into_iter().map(Library::new).collect();
         let mut explorer_state = ListState::default();
-        explorer_state.select(Some(1));
+        explorer_state.select(Some(2));
 
         return App {
             sender,
@@ -600,6 +624,10 @@ impl App {
             theme: Theme::codedark(),
             keys,
             explorer_items: Vec::new(),
+            explorer_depths: Vec::new(),
+            explorer_collapsed: (0..count).flat_map(|p| ["headers", "sections", "tables"].map(|g| format!("p{}/{}", p, g))).collect(),
+            explorer_fit: 24,
+            explorer_width: None,
             explorer_state,
             explorer_visible: true,
             explorer_version: u64::MAX,
@@ -718,12 +746,7 @@ impl App {
 
         if *explorer_version != versions {
             *explorer_version = versions;
-            let selected = self.explorer_state.selected().and_then(|i| self.explorer_items.get(i)).cloned();
-            self.explorer_items = explorer_items(self);
-
-            if let Some(index) = selected.and_then(|s| self.explorer_items.iter().position(|i| *i == s)) {
-                self.explorer_state.select(Some(index));
-            }
+            self.rebuild_explorer();
         }
 
         if let Some((program, dir)) = self.pending_export.clone() {
@@ -732,6 +755,30 @@ impl App {
                 self.export(program, dir);
             }
         }
+    }
+
+    /// Items of the explorer again (the selection stays on its item), and the width that fits them
+    fn rebuild_explorer(&mut self) {
+        let selected = self.explorer_state.selected().and_then(|i| self.explorer_items.get(i)).cloned();
+        let (items, depths) = explorer_items(self);
+        self.explorer_items = items;
+        self.explorer_depths = depths;
+
+        let width = self.explorer_items.iter().zip(self.explorer_depths.iter()).map(|(item, &depth)| item.display_name(self).trim().chars().count() + 2 * depth as usize + 2).max().unwrap_or(0);
+        self.explorer_fit = width as u16 + 4;
+
+        if let Some(index) = selected.and_then(|s| self.explorer_items.iter().position(|i| *i == s)) {
+            self.explorer_state.select(Some(index));
+        }
+    }
+
+    /// Collapses or expands a node of the explorer
+    fn toggle_explorer_group(&mut self, key: &str) {
+        if !self.explorer_collapsed.remove(key) {
+            self.explorer_collapsed.insert(key.to_string());
+        }
+
+        self.rebuild_explorer();
     }
 
     fn analysis(&mut self, program: usize) -> Option<Arc<Analysis>> {
@@ -1251,7 +1298,8 @@ impl App {
         };
 
         let view = match &item {
-            ExplorerItem::Group(_) => {
+            ExplorerItem::Group(key, _) => {
+                self.toggle_explorer_group(key);
                 self.open_mode = OpenMode::Replace;
                 return;
             }
@@ -2406,6 +2454,22 @@ impl App {
             KeyCode::Char(c) if c == self.keys.end => select(&mut self.explorer_state, count),
             KeyCode::Enter => self.activate_explorer_item(),
             KeyCode::Char(c) if c == self.keys.right => self.activate_explorer_item(),
+            KeyCode::Char(c) if c == self.keys.left => {
+                // An open node closes, an item goes to its node
+                match self.explorer_items.get(selected).cloned() {
+                    Some(ExplorerItem::Group(key, _)) if !self.explorer_collapsed.contains(&key) => self.toggle_explorer_group(&key),
+                    _ => {
+                        let depth = self.explorer_depths.get(selected).copied().unwrap_or(0);
+
+                        if let Some(parent) = (0..selected).rev().find(|&i| self.explorer_depths[i] < depth) {
+                            select(&mut self.explorer_state, parent);
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('<') => self.explorer_width = Some(self.explorer_width.unwrap_or(self.explorer_fit).saturating_sub(4).max(12)),
+            KeyCode::Char('>') => self.explorer_width = Some(self.explorer_width.unwrap_or(self.explorer_fit) + 4),
+            KeyCode::Char('=') => self.explorer_width = None,
             KeyCode::Char('t') => {
                 self.open_mode = OpenMode::Tab;
                 self.activate_explorer_item();
@@ -3108,7 +3172,7 @@ impl App {
 
     fn hints(&self) -> &'static str {
         if self.focus == Focus::Explorer {
-            return "j/k move  Enter open  t tab  s/v split  Tab content  e hide  : command  ? help  q quit";
+            return "j/k move  Enter open/fold  h parent  t tab  s/v split  </>/= width  Tab content  e hide  : command  ? help  q quit";
         }
 
         match self.view() {
@@ -3195,7 +3259,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     let content_area = if app.explorer_visible {
         let main_chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(32.min(chunks[1].width / 3)), Constraint::Min(0)])
+            .constraints([Constraint::Length(app.explorer_width.unwrap_or(app.explorer_fit).clamp(12, (chunks[1].width * 2 / 3).max(12))), Constraint::Min(0)])
             .split(chunks[1]);
 
         // Only the visible items are built (programs can have thousands of modules)
@@ -3208,9 +3272,16 @@ fn ui(f: &mut Frame, app: &mut App) {
             app.explorer_offset = selected + 1 - visible;
         }
 
-        let items: Vec<ListItem> = app.explorer_items.iter().skip(app.explorer_offset).take(visible).map(|item| {
-            let style = if matches!(item, ExplorerItem::Group(_)) { theme.title_style() } else { Style::default().fg(theme.fg) };
-            ListItem::new(item.display_name(app)).style(style)
+        let items: Vec<ListItem> = app.explorer_items.iter().zip(app.explorer_depths.iter()).skip(app.explorer_offset).take(visible).map(|(item, &depth)| {
+            let indent = "  ".repeat(depth as usize);
+
+            let (marker, style) = match item {
+                ExplorerItem::Group(key, _) if app.explorer_collapsed.contains(key) => ("▸ ", theme.title_style()),
+                ExplorerItem::Group(..) => ("▾ ", theme.title_style()),
+                _ => ("  ", Style::default().fg(theme.fg)),
+            };
+
+            ListItem::new(format!("{}{}{}", indent, marker, item.display_name(app).trim())).style(style)
         }).collect();
 
         let active = app.focus == Focus::Explorer;
@@ -3224,7 +3295,7 @@ fn ui(f: &mut Frame, app: &mut App) {
                     .style(theme.base()),
             )
             .highlight_style(if active { Style::default().fg(theme.highlight_fg).bg(theme.highlight_bg) } else { Style::default().fg(theme.fg).bg(theme.cursor_bg) })
-            .highlight_symbol("> ");
+            .highlight_symbol("");
 
         let mut state = ListState::default();
         state.select(Some(selected - app.explorer_offset));
@@ -3637,6 +3708,15 @@ mod tests {
         assert_eq!(graph.program, program);
         assert!(graph.title.starts_with("getenv"), "{}", graph.title);
         assert!(app.libraries.len() > 2);
+
+        // The library is a node of the explorer tree, under the libraries, with its analysis and modules
+        app.poll_projects();
+        let key = format!("lib{}", libc);
+        let node = app.explorer_items.iter().position(|i| matches!(i, ExplorerItem::Group(k, _) if *k == key)).unwrap();
+        assert_eq!(app.explorer_depths[node], 1);
+        assert!(app.explorer_items.contains(&ExplorerItem::Functions(program)));
+        app.toggle_explorer_group(&key);
+        assert!(!app.explorer_items.contains(&ExplorerItem::Functions(program)));
 
         // The library is loaded again with the session
         app.run_command("w");
