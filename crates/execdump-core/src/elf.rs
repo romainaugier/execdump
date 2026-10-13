@@ -2183,7 +2183,7 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
         return Err("File does not exist".into());
     }
 
-    let file_bytes = std::fs::read(file_path).expect("Unable to open and read file");
+    let file_bytes = std::fs::read(file_path)?;
 
     if file_bytes.len() < 6 || file_bytes[0..4] != ELF_MAGIC_ARRAY {
         return Err("File magic number does not match ELF magic number".into());

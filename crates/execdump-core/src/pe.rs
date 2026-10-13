@@ -2285,7 +2285,12 @@ impl PE {
             .get_exception_table_idd()
             .virtual_address;
 
-        if exception_va > 0 {
+        let machine: MachineType = self.get_nt_header().coff_header.machine.into();
+
+        // The entries of the other architectures are not parsed, they do not prevent the rest from being read
+        let supported = matches!(machine, MachineType::AMD64 | MachineType::I386 | MachineType::ARM64 | MachineType::ARM64EC | MachineType::ARM64X);
+
+        if exception_va > 0 && supported {
             let exception_fo = self.convert_rva_to_file_offset(exception_va);
 
             if let Some(efo) = exception_fo {
@@ -2347,7 +2352,7 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
         return Err("File does not exist".into());
     }
 
-    let file_bytes = std::fs::read(file_path).expect("Unable to open file");
+    let file_bytes = std::fs::read(file_path)?;
     let mut reader = Reader::LittleEndian(LEReader::new(&file_bytes));
 
     let mut pe: PE = PE::new();

@@ -1205,18 +1205,21 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     /// Calls a helper (intrinsic like) function, declared with the types of its arguments
     pub fn call_intrinsic(&self, name: &str, args: &[BasicValueEnum<'ctx>], ret: Option<BasicTypeEnum<'ctx>>) -> Result<Option<BasicValueEnum<'ctx>>, String> {
-        let function = self.module.get_function(name).unwrap_or_else(|| {
-            let params: Vec<BasicMetadataTypeEnum> = args.iter().map(|a| a.get_type().into()).collect();
-            let fn_type = match ret {
-                Some(ret) => ret.fn_type(&params, false),
-                None => self.cx.void_type().fn_type(&params, false),
-            };
+        let params: Vec<BasicMetadataTypeEnum> = args.iter().map(|a| a.get_type().into()).collect();
+        let fn_type = match ret {
+            Some(ret) => ret.fn_type(&params, false),
+            None => self.cx.void_type().fn_type(&params, false),
+        };
 
-            self.module.add_function(name, fn_type, Some(Linkage::External))
-        });
-
+        let function = self.module.get_function(name).unwrap_or_else(|| self.module.add_function(name, fn_type, Some(Linkage::External)));
         let args: Vec<BasicMetadataValueEnum> = args.iter().map(|&a| a.into()).collect();
-        let call = llvm!(self.builder.build_call(function, &args, ""));
+
+        // A helper used with other widths keeps the type it was declared with first
+        let call = if function.get_type() == fn_type {
+            llvm!(self.builder.build_call(function, &args, ""))
+        } else {
+            llvm!(self.builder.build_indirect_call(fn_type, function.as_global_value().as_pointer_value(), &args, ""))
+        };
 
         return Ok(call.try_as_basic_value().basic());
     }
@@ -1260,7 +1263,14 @@ impl<'ctx> Lifter<'ctx, '_> {
             }
             _ => {
                 let function = self.declare(&sig);
-                llvm!(self.builder.build_call(function, &args, ""))
+                let fn_type = function_type(self.cx, &sig, false);
+
+                // Overloads (C++) share their C name, the first one declared it with its own type
+                if function.get_type() == fn_type {
+                    llvm!(self.builder.build_call(function, &args, ""))
+                } else {
+                    llvm!(self.builder.build_indirect_call(fn_type, function.as_global_value().as_pointer_value(), &args, ""))
+                }
             }
         };
 

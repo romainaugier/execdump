@@ -44,7 +44,12 @@ struct Builder<'a> {
     vars: Vec<Var>,
     /// Inlined expressions that read memory (loads and calls, directly or through their operands)
     reads_memory: Vec<bool>,
+    /// Constant expressions computed once at the start of the function, operands first
+    constants: Vec<ValueId>,
 }
+
+/// Size of an inlined constant expression above which it gets a variable when it is used more than once
+const SHARED_CONSTANT_SIZE: usize = 24;
 
 fn has_side_effects(f: &Func, id: ValueId) -> bool {
     return matches!(f.op(id), Some(Op::Store | Op::Call));
@@ -122,6 +127,58 @@ impl<'a> Builder<'a> {
                 self.var_of[id] = Some(var);
             }
         }
+    }
+
+    /// Constant expressions are DAGs that LLVM folds from straight code (x = x + x...): inlined
+    /// everywhere they are used, their text would grow exponentially
+    fn share_constants(&mut self) {
+        let f = self.f;
+        let mut parents = vec![0usize; f.values.len()];
+
+        for value in f.values.iter() {
+            if let ValueKind::Inst { operands, .. } = &value.kind {
+                for &operand in operands.iter() {
+                    parents[operand] += 1;
+                }
+            }
+        }
+
+        let mut sizes: Vec<Option<usize>> = vec![None; f.values.len()];
+
+        for id in 0..f.values.len() {
+            self.constant_size(id, &parents, &mut sizes);
+        }
+    }
+
+    /// Expanded size of a constant expression, the shared big ones become variables (operands first)
+    fn constant_size(&mut self, id: ValueId, parents: &[usize], sizes: &mut Vec<Option<usize>>) -> usize {
+        if let Some(size) = sizes[id] {
+            return size;
+        }
+
+        let f = self.f;
+        let ValueKind::Inst { block: None, operands, .. } = &f.values[id].kind else {
+            sizes[id] = Some(1);
+            return 1;
+        };
+
+        // A placeholder against cycles (there are none in constants)
+        sizes[id] = Some(1);
+        let mut size = 1usize;
+
+        for &operand in operands.iter() {
+            size = size.saturating_add(self.constant_size(operand, parents, sizes));
+        }
+
+        if size > SHARED_CONSTANT_SIZE && parents[id] > 1 && self.var_of[id].is_none() {
+            let var = self.new_var(String::new(), self.types[id].clone());
+            self.var_of[id] = Some(var);
+            self.constants.push(id);
+            size = 1;
+        }
+
+        sizes[id] = Some(size);
+        return size;
     }
 
     /// A value assigned to a phi on the back edge shares the phi variable when the phi is not
@@ -767,6 +824,15 @@ impl<'a> Builder<'a> {
         let f = self.f;
         let mut stmts = Vec::new();
 
+        if block == 0 {
+            let addr = f.blocks[0].insts.iter().find_map(|&i| f.addr(i));
+
+            for &id in self.constants.iter() {
+                let var = self.var_of[id].expect("shared constants have a variable");
+                stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), self.inst(id)), addr));
+            }
+        }
+
         for &id in f.blocks[block].insts.iter() {
             let Some((op, operands)) = f.inst(id) else {
                 continue;
@@ -893,9 +959,10 @@ impl<'a> Builder<'a> {
                 let e = |i: usize| self.evaluate(operands[i], known, value);
 
                 let result = match op {
-                    Op::Add => e(0)? + e(1)?,
-                    Op::Sub => e(0)? - e(1)?,
-                    Op::Mul => e(0)? * e(1)?,
+                    // The arithmetic wraps as the machine's does, on 128 bits then masked to the width of the value
+                    Op::Add => e(0)?.wrapping_add(e(1)?),
+                    Op::Sub => e(0)?.wrapping_sub(e(1)?),
+                    Op::Mul => e(0)?.wrapping_mul(e(1)?),
                     Op::Shl => e(0)? << (e(1)? as u32 & 127),
                     Op::LShr => mask(e(0)?, bits) >> (e(1)? as u32 & 127),
                     Op::AShr => e(0)? >> (e(1)? as u32 & 127),
@@ -906,14 +973,14 @@ impl<'a> Builder<'a> {
                     Op::SExt => {
                         let from = f.values[operands[0]].ty.bits();
                         let v = mask(e(0)?, from);
-                        if from < 128 && v >> (from - 1) & 1 == 1 { v - (1i128 << from) } else { v }
+                        if from > 0 && from < 128 && v >> (from - 1) & 1 == 1 { v - (1i128 << from) } else { v }
                     }
                     Op::Trunc | Op::IntToPtr | Op::PtrToInt | Op::Freeze | Op::BitCast => e(0)?,
                     Op::Gep => {
                         let mut address = e(0)?;
 
                         for (i, scale) in scales.iter().enumerate() {
-                            address += e(i + 1)? * *scale as i128;
+                            address = address.wrapping_add(e(i + 1)?.wrapping_mul(*scale as i128));
                         }
 
                         address
@@ -1042,12 +1109,14 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         vars: Vec::new(),
         reads_memory: vec![false; f.values.len()],
         types,
+        constants: Vec::new(),
     };
 
     // Parameters are the first variables
     let params: Vec<VarId> = f.params.iter().enumerate().map(|(i, &p)| builder.new_var(param_names[i].clone(), builder.types[p].clone())).collect();
 
     builder.decide();
+    builder.share_constants();
     builder.coalesce();
 
     let mut blocks: Vec<SBlock> = Vec::new();

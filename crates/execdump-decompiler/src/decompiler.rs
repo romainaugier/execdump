@@ -200,6 +200,11 @@ impl<'a> Decompiler<'a> {
         let cx = Context::create();
         let module = self.lift_function(&cx, addr)?;
 
+        // LLVM prints the constant expressions as trees
+        if printed_constants_size(&module) > MAX_PRINTED_CONSTANTS {
+            return Err("the constant expressions of the function are too large to be printed".to_string());
+        }
+
         // The instruction addresses are debug locations for the C backend
         let text = module.print_to_string().to_string();
         let text: Vec<String> = text
@@ -559,7 +564,7 @@ impl<'a> Decompiler<'a> {
 
     /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used
     fn discover(&self, addr: u64, name: &str) -> Result<Signature, String> {
-        let function = &self.analysis.functions[&addr];
+        let function = self.analysis.functions.get(&addr).ok_or_else(|| format!("no function at {:#x}", addr))?;
 
         let cx = anonymous_context();
         let module = self.module(&cx, name)?;
@@ -687,6 +692,52 @@ impl<'a> Decompiler<'a> {
 }
 
 /// Line of LLVM IR without its debug attachments (", !dbg !12" on instructions, " !dbg !4" on definitions)
+const MAX_PRINTED_CONSTANTS: u64 = 1 << 20;
+
+/// Number of constant expressions LLVM prints for the operands of the instructions of a module
+fn printed_constants_size(module: &Module) -> u64 {
+    use inkwell::llvm_sys::core::{LLVMGetNumOperands, LLVMGetOperand, LLVMIsAConstantExpr};
+    use inkwell::llvm_sys::prelude::LLVMValueRef;
+    use inkwell::values::AsValueRef;
+
+    fn size(value: LLVMValueRef, sizes: &mut HashMap<LLVMValueRef, u64>) -> u64 {
+        if let Some(&size) = sizes.get(&value) {
+            return size;
+        }
+
+        // Constant expressions are DAGs, their size is counted once per node
+        let total = unsafe {
+            if LLVMIsAConstantExpr(value).is_null() {
+                1
+            } else {
+                (0..LLVMGetNumOperands(value) as u32).fold(1u64, |total, i| total.saturating_add(size(LLVMGetOperand(value, i), sizes)))
+            }
+        };
+
+        sizes.insert(value, total);
+        return total;
+    }
+
+    let mut sizes = HashMap::new();
+    let mut total = 0u64;
+
+    for function in module.get_functions() {
+        for block in function.get_basic_blocks() {
+            for instruction in block.get_instructions() {
+                for i in 0..instruction.get_num_operands() {
+                    let raw = unsafe { LLVMGetOperand(instruction.as_value_ref(), i) };
+
+                    if !raw.is_null() {
+                        total = total.saturating_add(size(raw, &mut sizes));
+                    }
+                }
+            }
+        }
+    }
+
+    return total;
+}
+
 fn without_debug_locations(line: &str) -> String {
     let mut out = line.to_string();
 
@@ -852,6 +903,26 @@ mod tests {
 
         let count_chars = code("count_chars");
         assert!(count_chars.starts_with("int count_chars(char *a1)"), "{}", count_chars);
+    }
+
+    #[test]
+    fn printed_constants() {
+        let cx = Context::create();
+        let module = cx.create_module("constants");
+        let i64_type = cx.i64_type();
+        let global = module.add_global(i64_type, None, "g");
+        let function = module.add_function("f", i64_type.fn_type(&[], false), None);
+        let builder = cx.create_builder();
+        builder.position_at_end(cx.append_basic_block(function, "entry"));
+
+        let mut value = global.as_pointer_value().const_to_int(i64_type);
+
+        for _ in 0..60 {
+            value = value.const_add(value);
+        }
+
+        builder.build_return(Some(&value)).unwrap();
+        assert!(printed_constants_size(&module) > MAX_PRINTED_CONSTANTS);
     }
 
     #[test]

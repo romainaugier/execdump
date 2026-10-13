@@ -410,6 +410,12 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
             l.write(bp, saved)?;
         }
 
+        // xor eax, eax and sub eax, eax clear the register without reading it
+        ("xor" | "sub", [dst, src]) if dst == src && matches!(dst, Op::Reg(_)) => {
+            let zero = l.int(dst.bits()).const_zero();
+            set(l, dst, zero, wide)?;
+            l.set_flags(if mnemonic == "xor" { FlagOp::Logic } else { FlagOp::Sub }, zero, zero, zero)?;
+        }
         ("add" | "sub" | "adc" | "sbb" | "cmp", [dst, src]) => {
             let bits = dst.bits();
             let lhs = get(l, dst, bits)?;
