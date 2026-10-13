@@ -806,6 +806,24 @@ impl Project {
             }
         }
 
+        // Modules are paths of the export: a project from elsewhere must not write outside of it
+        let mut invalid = 0;
+
+        for notes in work.functions.values_mut() {
+            if notes.module.as_deref().is_some_and(|m| !valid_module(m)) {
+                notes.module = None;
+                invalid += 1;
+            }
+        }
+
+        let count = work.modules.len();
+        work.modules.retain(|m| valid_module(m));
+        invalid += count - work.modules.len();
+
+        if invalid > 0 {
+            self.messages.push((format!("{} invalid module paths of the project were ignored", invalid), true));
+        }
+
         // Pending proposals of the LLM
         for branch in store.branches(PROPOSALS) {
             let Some(id) = branch.strip_prefix(PROPOSALS).and_then(|i| i.parse::<u64>().ok()) else {
@@ -824,7 +842,8 @@ impl Project {
                     continue;
                 };
 
-                let proposed = FunctionNotes::from_toml(&String::from_utf8_lossy(&content)).unwrap_or_default();
+                let mut proposed = FunctionNotes::from_toml(&String::from_utf8_lossy(&content)).unwrap_or_default();
+                proposed.module = proposed.module.filter(|m| valid_module(m));
 
                 if work.functions.get(&addr) != Some(&proposed) {
                     functions.insert(addr, proposed);
@@ -1239,6 +1258,29 @@ pub(crate) mod tests {
         assert!(text(&mut project, main).starts_with("int main("));
         assert_eq!(project.module_of(main), Some("analysis.c"));
         assert!(!project.is_dirty());
+    }
+
+    #[test]
+    fn modules_outside_the_export_are_ignored() {
+        let location = temporary("project-modules");
+        let classify = open(&location).resolve("classify").unwrap();
+
+        let store = Store::open_or_init(&location.join(REPOSITORY)).unwrap();
+        let notes = FunctionNotes { module: Some("../../outside.c".to_string()), ..FunctionNotes::default() };
+        let changes = vec![
+            (format!("fn/{:x}.toml", classify), Some(notes.to_toml().into_bytes())),
+            ("modules.toml".to_string(), Some(b"modules = [\"/abs.c\", \"lib/ok.c\"]\n".to_vec())),
+        ];
+        store.commit(MAIN, &changes, "outside", &[]).unwrap();
+        drop(store);
+
+        let project = open(&location);
+        assert_eq!(project.module_of(classify), Some("analysis.c"));
+        assert!(project.modules.names().all(|m| valid_module(m)));
+        assert!(project.modules.names().any(|m| m == "lib/ok.c"));
+        assert!(project.messages.iter().any(|(m, _)| m.contains("invalid module paths")));
+
+        let _ = std::fs::remove_dir_all(&location);
     }
 
     #[test]

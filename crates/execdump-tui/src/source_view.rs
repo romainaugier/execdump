@@ -559,9 +559,12 @@ impl SourceView {
             };
 
             for (line, text) in rendered.text.lines().enumerate().skip(start) {
-                if text.to_lowercase().contains(&pattern) {
+                // Lowercasing may change the length of the characters: the column is counted in the lowercased text
+                let lower = text.to_lowercase();
+
+                if let Some(byte) = lower.find(&pattern) {
                     self.cursor = Pos { block, line };
-                    self.col = text.to_lowercase().find(&pattern).map_or(0, |b| text[..b].chars().count());
+                    self.col = lower[..byte].chars().count();
                     self.center();
                     return true;
                 }
@@ -632,7 +635,11 @@ impl SourceView {
             return Ok(false);
         };
 
-        let line = self.cursor.line.min(insert.lines.len().saturating_sub(1));
+        if insert.lines.is_empty() {
+            insert.lines.push(String::new());
+        }
+
+        let line = self.cursor.line.min(insert.lines.len() - 1);
         let chars: Vec<char> = insert.lines.get(line).map_or(Vec::new(), |l| l.chars().collect());
         let col = self.col.min(chars.len());
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -784,8 +791,12 @@ impl SourceView {
     /// Resolves the conflict under the cursor: keeps the edited side, the decompiled one, or both
     pub fn resolve(&mut self, project: &mut Project, keep_edited: bool, keep_decompiled: bool) -> Result<(), String> {
         let lines = self.block_lines(project, self.cursor.block);
-        let line = self.cursor.line.min(lines.len().saturating_sub(1));
 
+        if lines.is_empty() {
+            return Err("no conflict under the cursor".to_string());
+        }
+
+        let line = self.cursor.line.min(lines.len() - 1);
         let start = (0..=line).rev().find(|&i| lines[i].starts_with("<<<<<<<")).ok_or("no conflict under the cursor")?;
         let middle = (start..lines.len()).find(|&i| lines[i].starts_with("=======")).ok_or("unterminated conflict")?;
         let end = (middle..lines.len()).find(|&i| lines[i].starts_with(">>>>>>>")).ok_or("unterminated conflict")?;

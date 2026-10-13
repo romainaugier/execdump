@@ -259,7 +259,8 @@ The C code of the whole program is a project: every function is decompiled in th
   (one decompiler per core but one, sharing the signatures they discover), progress in the title bar
 - :heavy_check_mark: Decompilation cache on disk (`~/.cache/execdump/<id of the binary>/`): reopening a binary does not
   decompile it again, a function is decompiled again only when its annotations, or the names and prototypes of what it
-  calls, change (or when execdump is rebuilt)
+  calls, change (or when execdump is rebuilt). Another execdump opening the same binary at the same time keeps its cache
+  in memory.
 - :heavy_check_mark: Modules found automatically: ELF FILE symbols (object files of the local functions), functions between
   two functions of the same object file (linkers lay object files out contiguously), C++ namespaces and classes, then a
   default module named after the binary. Functions are moved between modules by the user (or the LLM).

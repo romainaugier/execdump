@@ -255,7 +255,8 @@ pub fn rebase_text(base: &str, ours: &str, theirs: &str) -> (String, bool) {
 
     // libgit2 can report a conflict without marking it: the whole function is the conflict then
     if conflict && !has_conflicts(&merged) {
-        return (format!("{}\n{}{}\n{}{}\n", CONFLICT_START, ours, CONFLICT_MIDDLE, theirs, CONFLICT_END), true);
+        let line = |text: &str| if text.is_empty() || text.ends_with('\n') { text.to_string() } else { format!("{}\n", text) };
+        return (format!("{}\n{}{}\n{}{}\n", CONFLICT_START, line(ours), CONFLICT_MIDDLE, line(theirs), CONFLICT_END), true);
     }
 
     return (merged, conflict);

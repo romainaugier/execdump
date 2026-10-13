@@ -21,6 +21,7 @@ const NO_ADDRESS: u64 = u64::MAX;
 const RECENT: usize = 4096;
 /// The log is compacted when opened if most of it is dead records
 const COMPACT_MIN_SIZE: u64 = 64 << 20;
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// What the decompiler produced for a function, besides its text
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -149,6 +150,19 @@ impl Cache {
 
     fn open_file(path: &Path) -> io::Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+
+        // Another execdump appending to the same log would interleave its records with ours. The workers
+        // of a project closed in this process may still be finishing a function.
+        let deadline = std::time::Instant::now() + LOCK_WAIT;
+
+        while file.try_lock().is_err() {
+            if std::time::Instant::now() > deadline {
+                return Err(io::Error::new(io::ErrorKind::WouldBlock, "the cache is used by another execdump"));
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
         let size = file.metadata()?.len();
         let mut index: HashMap<u64, Entry> = HashMap::new();
         let mut offset = 0;
@@ -385,6 +399,7 @@ mod tests {
         assert_eq!(f.meta.globals, vec![("g_4000".to_string(), 0x4000)]);
 
         cache.put(0x3000, 3, rendered("x\n"));
+        assert!(Cache::open(&dir).is_err());
         drop(cache);
         assert_eq!(Cache::open(&dir).unwrap().fingerprint(0x3000), Some(3));
 
