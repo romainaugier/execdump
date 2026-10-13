@@ -582,7 +582,7 @@ impl Project {
     }
 
     /// Name the decompiler gave to a variable shown with a name
-    fn original_var(&mut self, function: u64, shown: &str) -> Result<String, String> {
+    pub fn original_var(&mut self, function: u64, shown: &str) -> Result<String, String> {
         let (rendered, _) = self.shown(function).ok_or("the function is not decompiled yet")?;
 
         return rendered.meta.vars.iter().find(|(_, s)| s == shown).map(|(o, _)| o.clone()).ok_or_else(|| format!("{} is not a variable of {}", shown, self.function_name(function)));

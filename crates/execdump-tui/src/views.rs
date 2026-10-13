@@ -21,6 +21,8 @@ pub enum Target {
     Address(usize, u64),
     /// Call graph rooted at a function, selecting another function in it
     CallGraph { program: usize, root: u64, depth: usize, imports: bool, select: u64 },
+    /// C code of a module
+    Module(usize, String),
 }
 
 /// Keeps a cursor visible in a scrolled list

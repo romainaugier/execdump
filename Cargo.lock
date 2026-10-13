@@ -611,8 +611,10 @@ dependencies = [
  "crossterm",
  "execdump-core",
  "execdump-decompiler",
+ "execdump-project",
  "ratatui",
  "serde",
+ "toml 0.9.10+spec-1.1.0",
 ]
 
 [[package]]

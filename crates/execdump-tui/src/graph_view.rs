@@ -11,7 +11,9 @@ use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::{Decoder, Instruction};
 use execdump_decompiler::analysis::Analysis;
 use crate::layout::{layout, GraphInput, Layout};
+use crate::source_view::highlight;
 use execdump_core::program::Program;
+use execdump_project::{Priority, Project};
 use crate::theme::Theme;
 
 use std::collections::{HashMap, VecDeque};
@@ -20,6 +22,8 @@ use std::collections::{HashMap, VecDeque};
 const MAX_LINE_WIDTH: usize = 96;
 /// Maximum number of nodes in a call graph
 const MAX_CALL_GRAPH_NODES: usize = 400;
+/// Maximum number of lines of code shown in a node
+const MAX_NODE_LINES: usize = 40;
 
 const UP: u8 = 1;
 const DOWN: u8 = 2;
@@ -33,6 +37,14 @@ pub enum NodeKind {
     Import,
 }
 
+/// What the nodes show: the summary of a function, the disassembly or the C code
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Detail {
+    Summary,
+    Disasm,
+    Source,
+}
+
 #[derive(Clone, Debug)]
 pub struct GraphNode {
     pub title: String,
@@ -41,6 +53,18 @@ pub struct GraphNode {
     pub text: String,
     pub addr: u64,
     pub kind: NodeKind,
+    pub detail: Detail,
+    /// Lines the node was built with (disassembly of a block, summary of a function)
+    original: Vec<Line<'static>>,
+    /// Waiting for the C code of its function
+    pending: bool,
+}
+
+impl GraphNode {
+    fn new(title: String, lines: Vec<Line<'static>>, text: String, addr: u64, kind: NodeKind) -> Self {
+        let detail = if kind == NodeKind::Block { Detail::Disasm } else { Detail::Summary };
+        return GraphNode { title, original: lines.clone(), lines, text, addr, kind, detail, pending: false };
+    }
 }
 
 impl GraphNode {
@@ -86,6 +110,7 @@ pub struct GraphView {
     pub scroll_y: i32,
     viewport: (i32, i32),
     pending_focus: bool,
+    theme: Theme,
 }
 
 fn truncate_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Span<'static>> {
@@ -134,7 +159,7 @@ pub fn insn_spans(theme: &Theme, program: &Program, analysis: &Analysis, decoder
 }
 
 impl GraphView {
-    fn new(program: usize, kind: GraphKind, title: String, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>, root: usize) -> Self {
+    fn new(program: usize, kind: GraphKind, title: String, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>, root: usize, theme: &Theme) -> Self {
         let input = GraphInput {
             sizes: nodes.iter().map(|n| n.size()).collect(),
             edges: edges.iter().map(|e| (e.from, e.to)).collect(),
@@ -155,6 +180,7 @@ impl GraphView {
             scroll_y: 0,
             viewport: (0, 0),
             pending_focus: true,
+            theme: theme.clone(),
         };
     }
 
@@ -181,7 +207,7 @@ impl GraphView {
 
             let title = if block.start == function.addr { format!("{} ({:#x})", function.name, block.start) } else { format!("{:#x}", block.start) };
 
-            nodes.push(GraphNode { title, lines, text, addr: block.start, kind: NodeKind::Block });
+            nodes.push(GraphNode::new(title, lines, text, block.start, NodeKind::Block));
         }
 
         let mut edges = Vec::new();
@@ -197,7 +223,7 @@ impl GraphView {
         let root = index.get(&function.addr).copied().unwrap_or(0);
         let title = format!("{} @ {:#x}  ({} blocks, {} instructions)", function.name, function.addr, function.blocks.len(), function.num_insns());
 
-        return Some(Self::new(program_index, GraphKind::Cfg { function: addr }, title, nodes, edges, root));
+        return Some(Self::new(program_index, GraphKind::Cfg { function: addr }, title, nodes, edges, root, theme));
     }
 
     /// Call graph starting from a function, up to a depth
@@ -227,7 +253,7 @@ impl GraphView {
 
             let title: String = function.name.chars().take(MAX_LINE_WIDTH).collect();
 
-            GraphNode { text: function.name.clone(), title, lines, addr, kind: NodeKind::Function }
+            GraphNode::new(title, lines, function.name.clone(), addr, NodeKind::Function)
         };
 
         functions.insert(root, 0);
@@ -296,13 +322,13 @@ impl GraphView {
                                 let index = nodes.len();
                                 let display = analysis.call_target_name(&target);
                                 import_nodes.insert(name.clone(), index);
-                                nodes.push(GraphNode {
-                                    title: display.chars().take(MAX_LINE_WIDTH).collect(),
-                                    lines: vec![Line::from(Span::styled("import", Style::default().fg(theme.dim)))],
-                                    text: display,
-                                    addr: 0,
-                                    kind: NodeKind::Import,
-                                });
+                                nodes.push(GraphNode::new(
+                                    display.chars().take(MAX_LINE_WIDTH).collect(),
+                                    vec![Line::from(Span::styled("import", Style::default().fg(theme.dim)))],
+                                    display,
+                                    0,
+                                    NodeKind::Import,
+                                ));
                                 index
                             }
                         }
@@ -323,7 +349,126 @@ impl GraphView {
             if truncated { " [truncated]" } else { "" },
         );
 
-        return Some(Self::new(program_index, GraphKind::CallGraph { root, depth, imports }, title, nodes, edges, 0));
+        return Some(Self::new(program_index, GraphKind::CallGraph { root, depth, imports }, title, nodes, edges, 0, theme));
+    }
+
+    /*
+     * Content of the nodes
+     */
+
+    /// Detail after the one of the selected node: disassembly and C code for the blocks, summary,
+    /// disassembly and C code for the functions
+    pub fn next_detail(&self, _all: bool) -> Detail {
+        let node = self.selected_node();
+
+        return match (node.kind, node.detail) {
+            (NodeKind::Block, Detail::Source) => Detail::Disasm,
+            (NodeKind::Block, _) => Detail::Source,
+            (_, Detail::Summary) => Detail::Disasm,
+            (_, Detail::Disasm) => Detail::Source,
+            (_, Detail::Source) => Detail::Summary,
+        };
+    }
+
+    /// Changes what the selected node (or every node) shows, the graph is laid out again
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_detail(&mut self, detail: Detail, all: bool, program: &Program, analysis: &Analysis, decoder: &Decoder, project: &mut Project, theme: &Theme) {
+        let indices: Vec<usize> = if all { (0..self.nodes.len()).collect() } else { vec![self.selected] };
+
+        for index in indices {
+            if self.nodes[index].kind == NodeKind::Import {
+                continue;
+            }
+
+            self.nodes[index].detail = detail;
+            self.fill(index, Some((program, analysis, decoder)), project, theme);
+        }
+
+        self.relayout();
+    }
+
+    /// The C code of some functions changed: the nodes showing it follow
+    pub fn changed(&mut self, project: &mut Project, addrs: &[u64]) {
+        let function = |node: &GraphNode, kind: GraphKind| match kind {
+            GraphKind::Cfg { function } => function,
+            GraphKind::CallGraph { .. } => node.addr,
+        };
+
+        let theme = self.theme.clone();
+        let indices: Vec<usize> = (0..self.nodes.len()).filter(|&i| self.nodes[i].detail == Detail::Source && addrs.contains(&function(&self.nodes[i], self.kind))).collect();
+
+        if indices.is_empty() {
+            return;
+        }
+
+        for index in indices {
+            self.fill(index, None, project, &theme);
+        }
+
+        self.relayout();
+    }
+
+    /// The functions whose C code is shown are decompiled first
+    pub fn prioritize(&self, project: &Project) {
+        let pending: Vec<u64> = self.nodes.iter().filter(|n| n.pending).map(|n| match self.kind {
+            GraphKind::Cfg { function } => function,
+            GraphKind::CallGraph { .. } => n.addr,
+        }).collect();
+
+        if !pending.is_empty() {
+            project.prioritize(&pending, Priority::Visible);
+        }
+    }
+
+    fn fill(&mut self, index: usize, code: Option<(&Program, &Analysis, &Decoder)>, project: &mut Project, theme: &Theme) {
+        let kind = self.kind;
+        let node = &mut self.nodes[index];
+        node.pending = false;
+
+        let lines = match node.detail {
+            Detail::Summary => node.original.clone(),
+            Detail::Disasm if node.kind == NodeKind::Block => node.original.clone(),
+            Detail::Disasm => match code {
+                Some((program, analysis, decoder)) => function_disasm(theme, program, analysis, decoder, node.addr),
+                None => node.lines.clone(),
+            },
+            Detail::Source => {
+                let function = match kind {
+                    GraphKind::Cfg { function } => function,
+                    GraphKind::CallGraph { .. } => node.addr,
+                };
+
+                match project.shown(function) {
+                    Some((rendered, _)) => {
+                        let range = match kind {
+                            GraphKind::Cfg { .. } => project.analysis.functions.get(&function).and_then(|f| f.blocks.get(&node.addr)).map(|b| (b.start, b.end)),
+                            GraphKind::CallGraph { .. } => None,
+                        };
+
+                        source_lines(theme, &rendered.text, &rendered.lines, range, function)
+                    }
+                    None => {
+                        node.pending = true;
+                        vec![Line::from(Span::styled("decompiling...", Style::default().fg(theme.dim)))]
+                    }
+                }
+            }
+        };
+
+        node.lines = if lines.is_empty() { vec![Line::from(Span::styled("(no C code for this block)", Style::default().fg(theme.dim)))] } else { lines };
+    }
+
+    /// Lays the graph out again with the new node sizes, keeping the selection in view
+    fn relayout(&mut self) {
+        let input = GraphInput {
+            sizes: self.nodes.iter().map(|n| n.size()).collect(),
+            edges: self.edges.iter().map(|e| (e.from, e.to)).collect(),
+            roots: vec![self.layout.order.first().copied().unwrap_or(0)],
+        };
+
+        self.layout = layout(&input);
+        self.clamp_scroll();
+        self.ensure_visible();
     }
 
     pub fn selected_node(&self) -> &GraphNode {
@@ -723,6 +868,54 @@ impl GraphView {
 
         return written;
     }
+}
+
+/// Linear disassembly of a function, block by block, capped
+fn function_disasm(theme: &Theme, program: &Program, analysis: &Analysis, decoder: &Decoder, addr: u64) -> Vec<Line<'static>> {
+    let Some(function) = analysis.functions.get(&addr) else {
+        return Vec::new();
+    };
+
+    let addr_width = format!("{:x}", function.end()).len();
+    let insns: Vec<&Instruction> = function.blocks.values().flat_map(|b| b.insns.iter()).collect();
+    let mut lines: Vec<Line<'static>> = insns.iter().take(MAX_NODE_LINES).map(|insn| Line::from(insn_spans(theme, program, analysis, decoder, insn, addr_width).0)).collect();
+
+    if insns.len() > MAX_NODE_LINES {
+        lines.push(Line::from(Span::styled(format!("... {} more instructions", insns.len() - MAX_NODE_LINES), Style::default().fg(theme.dim))));
+    }
+
+    return lines;
+}
+
+/// C code of a function (or of the block of an address range: the lines of its statements), capped
+fn source_lines(theme: &Theme, text: &str, addrs: &[Option<u64>], range: Option<(u64, u64)>, function: u64) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut current = function;
+    let mut total = 0;
+
+    for (index, line) in text.lines().enumerate() {
+        // Lines without an address belong with the statement above them
+        if let Some(addr) = addrs.get(index).copied().flatten() {
+            current = addr;
+        }
+
+        if range.is_some_and(|(start, end)| current < start || current >= end) {
+            continue;
+        }
+
+        total += 1;
+
+        if lines.len() < MAX_NODE_LINES {
+            let line: String = line.chars().take(MAX_LINE_WIDTH).collect();
+            lines.push(Line::from(highlight(theme, &line)));
+        }
+    }
+
+    if total > MAX_NODE_LINES {
+        lines.push(Line::from(Span::styled(format!("... {} more lines", total - MAX_NODE_LINES), Style::default().fg(theme.dim))));
+    }
+
+    return lines;
 }
 
 fn cell_index(x: i32, y: i32, w: i32, h: i32) -> Option<usize> {

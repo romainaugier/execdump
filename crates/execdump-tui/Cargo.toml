@@ -7,6 +7,8 @@ edition.workspace = true
 [dependencies]
 execdump-core.workspace = true
 execdump-decompiler.workspace = true
+execdump-project.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 serde.workspace = true
+toml.workspace = true

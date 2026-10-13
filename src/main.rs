@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load()?;
 
     if args.tui {
-        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm);
+        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm, None);
     } else {
         dump_exec(&exec, &args, &config);
     }

@@ -204,6 +204,8 @@ pub struct KeyBindings {
     pub call_graph_up: char,
     pub decompile: char,
     pub improve: char,
+    /// Graphs: C code, disassembly or summary in the selected node (uppercase: in every node)
+    pub detail: char,
 }
 
 impl Default for KeyBindings {
@@ -230,6 +232,7 @@ impl Default for KeyBindings {
             call_graph_up: 'U',
             decompile: 'D',
             improve: 'L',
+            detail: 'v',
         };
     }
 }
