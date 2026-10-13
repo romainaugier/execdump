@@ -251,6 +251,9 @@ Decompiler:
   - :heavy_check_mark: Address of the statements: each machine instruction is the debug location of the LLVM instructions
     lifted from it, which the passes keep, so nearly every line of C has the address it comes from (the gutter of the C
     views, and the synchronization of the C code with the disassembly and the graph)
+  - :heavy_check_mark: Strings and constants: addresses of strings are string literals (the ones passed to functions even when they end
+    another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
+    floating point numbers, strings, functions)
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
 

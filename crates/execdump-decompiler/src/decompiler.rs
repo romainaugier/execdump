@@ -248,6 +248,7 @@ impl<'a> Decompiler<'a> {
             noreturn: &noreturn,
             instruction: Box::new(|a| self.instruction_text(a)),
             ret: self.single_return(addr),
+            function: Box::new(|a| self.analysis.functions.contains_key(&a).then(|| self.function_name(a))),
         };
 
         let mut function = c::decompile(&module, function, &ctx, prototype.as_ref(), addr);

@@ -266,13 +266,62 @@ impl<'a> Builder<'a> {
         return match &f.values[id].kind {
             ValueKind::Param(index) => Expr::Var(*index),
             ValueKind::Int(0) if is_pointer(self.ty(id)) => Expr::Name("NULL".to_string()),
-            ValueKind::Int(value) => Expr::Int(*value),
+            // Addresses of strings in constants (non position independent code)
+            ValueKind::Int(value) => u64::try_from(*value).ok().and_then(|a| self.ctx.string_at(a, is_pointer(self.ty(id)))).map_or(Expr::Int(*value), Expr::Str),
             ValueKind::Float(value) => Expr::Float(*value),
             ValueKind::Undef => Expr::Int(0),
             ValueKind::Function(name) => Expr::Name(name.clone()),
             ValueKind::Global(name) => self.global(name),
             ValueKind::Inst { .. } => self.inst(id),
         };
+    }
+
+    /// Value of a load from a constant address in read-only memory: a number, a string or a function
+    fn constant_load(&self, address: ValueId, id: ValueId) -> Option<Expr> {
+        let f = self.f;
+        let (base, offset, terms) = self.decompose(address);
+
+        if !terms.is_empty() {
+            return None;
+        }
+
+        let start = match &f.values[base].kind {
+            ValueKind::Global(name) => *self.ctx.globals.get(name)?,
+            ValueKind::Int(value) => u64::try_from(*value).ok()?,
+            _ => return None,
+        };
+
+        let addr = start.checked_add_signed(i64::try_from(offset).ok()?)?;
+        let region = self.ctx.program.region_at(addr)?;
+
+        if region.perms.write || region.perms.exec || region.data.is_empty() {
+            return None;
+        }
+
+        let ty = self.types[id].clone();
+        let size = self.ctx.size_of(&ty).filter(|s| matches!(s, 1 | 2 | 4 | 8))? as usize;
+        let bytes = self.ctx.program.read(addr, size)?;
+        let mut raw = [0u8; 8];
+        raw[..size].copy_from_slice(bytes);
+        let value = u64::from_le_bytes(raw);
+        let pointer_size = self.ctx.program.pointer_size.max(4) as usize;
+
+        return Some(match ty.unqualified() {
+            CType::Float { bits: 32 } => Expr::Float(f32::from_bits(value as u32) as f64),
+            CType::Float { bits: 64 } => Expr::Float(f64::from_bits(value)),
+            CType::Pointer(_) if value == 0 => Expr::Name("NULL".to_string()),
+            _ if size == pointer_size && value != 0 => {
+                if let Some(text) = self.ctx.string_at(value, is_pointer(&ty)) {
+                    Expr::Str(text)
+                } else if let Some(name) = (self.ctx.function)(value) {
+                    Expr::Name(name)
+                } else {
+                    Expr::Int(value as i128)
+                }
+            }
+            CType::Int { signed: true, .. } => Expr::Int(((value << (64 - 8 * size)) as i64 >> (64 - 8 * size)) as i128),
+            _ => Expr::Int(value as i128),
+        });
     }
 
     /// Strings are literals, other globals are addressed
@@ -391,7 +440,7 @@ impl<'a> Builder<'a> {
             (Op::Select, [c, a, b]) if boolean && f.int(*a) == Some(-1) => Expr::binary(BinaryOp::LogicalOr, self.expr(*c), self.expr(*b)),
             (Op::Select, [c, a, b]) if boolean && f.int(*b) == Some(0) => Expr::binary(BinaryOp::LogicalAnd, self.expr(*c), self.expr(*a)),
             (Op::Select, [c, a, b]) => Expr::Ternary(Box::new(self.expr(*c)), Box::new(self.expr(*a)), Box::new(self.expr(*b))),
-            (Op::Load, [address]) => self.deref(*address, &self.types[id].clone()),
+            (Op::Load, [address]) => self.constant_load(*address, id).unwrap_or_else(|| self.deref(*address, &self.types[id].clone())),
             (Op::Gep, [base, indices @ ..]) => {
                 let mut offset: Option<Expr> = None;
 
@@ -809,7 +858,23 @@ impl<'a> Builder<'a> {
             return call("syscall", args.iter().map(|&a| self.expr(a)).collect());
         }
 
-        return call(callee, args.iter().map(|&a| self.expr(a)).collect());
+        return call(callee, args.iter().map(|&a| self.argument(a)).collect());
+    }
+
+    /// An argument of the size of a pointer that points to a string is one (the strings that end another
+    /// one are merged by linkers, a pointer to one does not follow a NUL)
+    fn argument(&self, id: ValueId) -> Expr {
+        let pointer_bits = self.ctx.program.pointer_size.max(4) as u32 * 8;
+
+        if let (ValueKind::Int(value), None) = (&self.f.values[id].kind, self.var_of[id]) {
+            if self.f.values[id].ty.bits() == pointer_bits {
+                if let Some(text) = u64::try_from(*value).ok().and_then(|a| self.ctx.string_at(a, true)) {
+                    return Expr::Str(text);
+                }
+            }
+        }
+
+        return self.expr(id);
     }
 
     /*

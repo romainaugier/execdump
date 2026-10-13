@@ -42,6 +42,8 @@ pub struct Context<'a> {
     pub instruction: Box<dyn Fn(u64) -> String + 'a>,
     /// The return instruction, when there is only one (the returns merged by LLVM have no address)
     pub ret: Option<u64>,
+    /// Name of the function starting at an address
+    pub function: Box<dyn Fn(u64) -> Option<String> + 'a>,
 }
 
 impl Context<'_> {
@@ -62,6 +64,23 @@ impl Context<'_> {
         let addr = *self.globals.get(name)?;
 
         if self.program.region_at(addr).is_some_and(|r| r.perms.write) {
+            return None;
+        }
+
+        return text_at(self.program, addr);
+    }
+
+    /// String at an address of read-only data. Numbers are rarely mistaken for one: when the value is not
+    /// known to be a pointer, the string has to start after a NUL or at the start of its section (linkers
+    /// merge the strings that end another one, a pointer can point in the middle of one).
+    pub fn string_at(&self, addr: u64, pointer: bool) -> Option<String> {
+        if addr < 0x1000 {
+            return None;
+        }
+
+        let region = self.program.region_at(addr).filter(|r| !r.perms.write && !r.perms.exec && !r.data.is_empty())?;
+
+        if !pointer && addr != region.vaddr && self.program.read(addr - 1, 1) != Some(&[0][..]) {
             return None;
         }
 
@@ -123,4 +142,36 @@ fn return_type(f: &ir::Func, types: &[CType], prototype: Option<&Prototype>) -> 
     }
 
     return declared.or(returned.first().map(|t| (*t).clone())).unwrap_or(CType::Void);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::typedb::Platform;
+    use crate::types::DataModel;
+    use execdump_core::disasm::Architecture;
+    use execdump_core::program::{Perms, Region};
+
+    #[test]
+    fn strings_in_read_only_data() {
+        let mut program = Program::default();
+        program.arch = Some(Architecture::X86_64);
+        program.pointer_size = 8;
+
+        let read_only = Perms { read: true, write: false, exec: false };
+        program.regions.push(Region { name: ".rodata".to_string(), vaddr: 0x2000, size: 8, data: b"xx\0pi\0\x01\0".to_vec(), perms: read_only });
+        program.regions.push(Region { name: ".data".to_string(), vaddr: 0x3000, size: 4, data: b"ab\0\0".to_vec(), perms: Perms { write: true, ..read_only } });
+
+        let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
+        let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None) };
+
+        assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
+        assert_eq!(ctx.string_at(0x2003, false).as_deref(), Some("pi"));
+        // The end of another string is one only for pointers
+        assert_eq!(ctx.string_at(0x2001, false), None);
+        assert_eq!(ctx.string_at(0x2001, true).as_deref(), Some("x"));
+        assert_eq!(ctx.string_at(0x2006, true), None);
+        assert_eq!(ctx.string_at(0x3000, true), None);
+    }
 }
