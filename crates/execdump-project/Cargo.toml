@@ -1,0 +1,13 @@
+[package]
+name = "execdump-project"
+description = "Projects: background decompilation, annotations, modules, history (git) and export of the C code"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+execdump-core.workspace = true
+execdump-decompiler.workspace = true
+dirs.workspace = true
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+serde.workspace = true
+toml.workspace = true
