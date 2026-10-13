@@ -110,7 +110,17 @@ pub struct Assistant {
 }
 
 impl Assistant {
+    /// Assistant improving the names and types of a function
     pub fn new(config: &LlmConfig) -> Result<Self, String> {
+        return Assistant::for_task(config, SYSTEM, "suggestions", schema());
+    }
+
+    /// Assistant organizing functions into source files
+    pub fn modules(config: &LlmConfig) -> Result<Self, String> {
+        return Assistant::for_task(config, MODULES_SYSTEM, "files", modules_schema());
+    }
+
+    fn for_task(config: &LlmConfig, system: &str, name: &str, schema: serde_json::Value) -> Result<Self, String> {
         if !config.is_enabled() {
             return Err("the [llm] section of the configuration needs a backend and a model".to_string());
         }
@@ -124,8 +134,8 @@ impl Assistant {
             .max_tokens(config.max_tokens)
             .temperature(config.temperature)
             .timeout_seconds(config.timeout)
-            .system(SYSTEM)
-            .schema(StructuredOutputFormat { name: "suggestions".to_string(), description: None, schema: Some(schema()), strict: Some(true) });
+            .system(system)
+            .schema(StructuredOutputFormat { name: name.to_string(), description: None, schema: Some(schema), strict: Some(true) });
 
         if let Some(key) = api_key {
             builder = builder.api_key(key);
@@ -141,14 +151,68 @@ impl Assistant {
         return Ok(Assistant { provider, runtime });
     }
 
+    fn ask(&self, prompt: String) -> Result<String, String> {
+        let messages = vec![ChatMessage::user().content(prompt).build()];
+        let response = self.runtime.block_on(self.provider.chat(&messages)).map_err(|e| e.to_string())?;
+
+        return response.text().ok_or_else(|| "empty answer".to_string());
+    }
+
     /// Asks the model for suggestions on a function (its printed C code)
     pub fn suggest(&self, code: &str) -> Result<Suggestions, String> {
-        let messages = vec![ChatMessage::user().content(format!("Decompiled function:\n\n```c\n{}```", code)).build()];
-        let response = self.runtime.block_on(self.provider.chat(&messages)).map_err(|e| e.to_string())?;
-        let text = response.text().ok_or("empty answer")?;
-
-        return parse(&text);
+        return parse(&self.ask(format!("Decompiled function:\n\n```c\n{}```", code))?);
     }
+
+    /// Asks the model to place functions in source files, the listing gives one function per line
+    /// (name, current file, called functions)
+    pub fn suggest_modules(&self, listing: &str) -> Result<ModuleSuggestions, String> {
+        let text = self.ask(format!("Functions (name | current file | calls):\n\n{}", listing))?;
+        let start = text.find('{').ok_or("no JSON object in the answer")?;
+        let end = text.rfind('}').ok_or("no JSON object in the answer")?;
+
+        return serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string());
+    }
+}
+
+const MODULES_SYSTEM: &str = "You are a reverse engineer organizing the functions of a decompiled binary into C source files. \
+You get a list of functions with their current file and the functions they call. Group the functions that belong together \
+(same feature, same data structures, functions calling each other) into source files with descriptive relative paths such as \
+net/socket.c. Keep the files of the functions that are already well placed, and only use the function names you were given. \
+Answer with a JSON object only.";
+
+fn modules_schema() -> serde_json::Value {
+    return serde_json::json!({
+        "type": "object",
+        "properties": {
+            "files": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Relative path of the C source file" },
+                        "functions": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "required": ["path", "functions"],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["files"],
+        "additionalProperties": false
+    });
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct FileSuggestion {
+    pub path: String,
+    pub functions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ModuleSuggestions {
+    pub files: Vec<FileSuggestion>,
 }
 
 /// Suggestions from the answer of the model (the first JSON object of the text)
@@ -165,7 +229,7 @@ const KEYWORDS: &[&str] = &[
     "unsigned", "void", "volatile", "while", "bool", "NULL",
 ];
 
-fn valid_identifier(name: &str) -> bool {
+pub fn valid_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     let first = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
 

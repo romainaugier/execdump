@@ -56,6 +56,9 @@ pub struct Decompiler<'a> {
     /// LLM improvement pass and the names it gave to the functions
     assistant: Option<Assistant>,
     renames: RefCell<Renames>,
+    /// Names and prototypes given by the user, by address (functions and globals share the names)
+    user_names: RefCell<HashMap<u64, String>>,
+    user_prototypes: RefCell<HashMap<u64, Prototype>>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -92,6 +95,8 @@ impl<'a> Decompiler<'a> {
             machine: target_machine(program)?,
             assistant: None,
             renames: RefCell::new(Renames::new()),
+            user_names: RefCell::new(HashMap::new()),
+            user_prototypes: RefCell::new(HashMap::new()),
         });
     }
 
@@ -229,11 +234,78 @@ impl<'a> Decompiler<'a> {
     }
 
     /*
+     * User annotations
+     */
+
+    /// Names a function or a global, None restores the name from the symbols. The functions decompiled
+    /// afterwards use the new name, in their body as well as in their callers.
+    pub fn rename(&self, addr: u64, name: Option<String>) {
+        match name {
+            Some(name) => self.user_names.borrow_mut().insert(addr, name),
+            None => self.user_names.borrow_mut().remove(&addr),
+        };
+
+        self.globals.borrow_mut().retain(|_, a| *a != addr);
+
+        let Some(mut sig) = self.signatures.borrow_mut().remove(&addr) else {
+            return;
+        };
+
+        let new = self.function_name(addr);
+        let old = std::mem::replace(&mut sig.name, new.clone());
+
+        let prototype = self.prototypes.borrow_mut().remove(&old);
+
+        if let Some(mut prototype) = prototype {
+            prototype.name = new.clone();
+            self.prototypes.borrow_mut().insert(new.clone(), prototype);
+        }
+
+        let noreturn = self.noreturn.borrow_mut().remove(&old);
+
+        if noreturn {
+            self.noreturn.borrow_mut().insert(new);
+        }
+
+        self.signatures.borrow_mut().insert(addr, sig);
+    }
+
+    /// Gives a function a prototype (parameters and result), None goes back to the recovered one.
+    /// Its callers pass the arguments of the new prototype once they are decompiled again.
+    pub fn set_prototype(&self, addr: u64, prototype: Option<Prototype>) {
+        let sig = self.signatures.borrow_mut().remove(&addr);
+
+        if let Some(sig) = sig {
+            self.prototypes.borrow_mut().remove(&sig.name);
+        }
+
+        match prototype {
+            Some(prototype) => self.user_prototypes.borrow_mut().insert(addr, prototype),
+            None => self.user_prototypes.borrow_mut().remove(&addr),
+        };
+    }
+
+    /// C prototype of a function or import, by C name (known once a function using it was decompiled)
+    pub fn prototype(&self, name: &str) -> Option<Prototype> {
+        return self.prototypes.borrow().get(name).cloned();
+    }
+
+    /// Address of a global, by C name (known once a function using it was decompiled)
+    pub fn global_address(&self, name: &str) -> Option<u64> {
+        return self.globals.borrow().get(name).copied();
+    }
+
+    /*
      * Names
      */
 
-    /// C name of a function: the C identifier of its demangled name, its symbol or sub_ADDRESS
+    /// C name of a function: the name given by the user, the C identifier of its demangled name, its
+    /// symbol or sub_ADDRESS
     pub fn function_name(&self, addr: u64) -> String {
+        if let Some(name) = self.user_names.borrow().get(&addr) {
+            return name.clone();
+        }
+
         let function = self.analysis.functions.get(&addr);
 
         if let Some(import) = function.and_then(|f| f.thunk.as_ref()) {
@@ -265,6 +337,10 @@ impl<'a> Decompiler<'a> {
     }
 
     fn name_global(&self, addr: u64) -> String {
+        if let Some(name) = self.user_names.borrow().get(&addr) {
+            return name.clone();
+        }
+
         if let Some(symbol) = self.program.symbol_at(addr) {
             if let Some(demangled) = demangle_symbol(&symbol.name) {
                 return cxx::identifier(&demangled.name);
@@ -339,6 +415,10 @@ impl<'a> Decompiler<'a> {
 
         if let Some(import) = function.and_then(|f| f.thunk.as_ref()) {
             return Signature { noreturn, ..self.import_signature(import) };
+        }
+
+        if let Some(prototype) = self.user_prototypes.borrow().get(&addr).cloned() {
+            return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
         }
 
         let symbol = self.program.symbol_at(addr).map(|s| s.name.clone()).unwrap_or_default();
@@ -644,5 +724,28 @@ mod tests {
 
         let count_chars = code("count_chars");
         assert!(count_chars.starts_with("int count_chars(char *a1)"), "{}", count_chars);
+    }
+
+    #[test]
+    fn user_names_and_prototypes() {
+        let program = fixture("elf_x86_64_analysis");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let (main, classify, count_chars) = (function(&analysis, "main"), function(&analysis, "classify"), function(&analysis, "count_chars"));
+
+        // Renamed after its signature was computed: the cached signature follows
+        assert!(decompiler.c_code(main).unwrap().contains("classify("));
+        decompiler.rename(classify, Some("classify_value".to_string()));
+        assert!(decompiler.c_code(classify).unwrap().starts_with("int classify_value(int a1)"));
+        assert!(decompiler.c_code(main).unwrap().contains("classify_value("));
+        assert!(decompiler.prototype("classify_value").is_some());
+
+        let prototype = crate::notes::parse_prototype("int count(const char *text)", &decompiler.typedb).unwrap();
+        decompiler.set_prototype(count_chars, Some(prototype));
+        let code = decompiler.c_code(count_chars).unwrap();
+        assert!(code.starts_with("int count_chars(const char *text)"), "{}", code);
+
+        decompiler.rename(classify, None);
+        assert!(decompiler.c_code(main).unwrap().contains("classify("));
     }
 }

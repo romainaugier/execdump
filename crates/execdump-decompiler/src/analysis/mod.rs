@@ -260,6 +260,44 @@ impl Analysis {
         return res;
     }
 
+    /// Functions in post order of the call graph (callees before their callers), thunks left out
+    pub fn callees_first(&self, starts: impl IntoIterator<Item = u64>) -> Vec<u64> {
+        let starts: Vec<u64> = starts.into_iter().collect();
+        let wanted: HashSet<u64> = starts.iter().copied().filter(|a| self.functions.get(a).is_some_and(|f| f.thunk.is_none())).collect();
+        let mut visited = HashSet::new();
+        let mut order = Vec::with_capacity(wanted.len());
+
+        for start in starts {
+            let mut stack = vec![(start, false)];
+
+            while let Some((addr, done)) = stack.pop() {
+                if done {
+                    if wanted.contains(&addr) {
+                        order.push(addr);
+                    }
+
+                    continue;
+                }
+
+                if !visited.insert(addr) {
+                    continue;
+                }
+
+                stack.push((addr, true));
+
+                if let Some(function) = self.functions.get(&addr) {
+                    for call in function.calls.iter() {
+                        if let CallTarget::Function(callee) = call.target {
+                            stack.push((callee, false));
+                        }
+                    }
+                }
+            }
+        }
+
+        return order;
+    }
+
     /// Short description of what lives at an address (function, import, string, symbol)
     pub fn describe(&self, program: &Program, addr: u64) -> Option<String> {
         if let Some(function) = self.functions.get(&addr) {

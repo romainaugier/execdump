@@ -138,6 +138,10 @@ pub struct Program {
     /// Pointer slots filled by the loader (GOT, IAT, Mach-O symbol pointers), slot address -> imported name
     pub import_slots: HashMap<u64, String>,
     pub seeds: Vec<FunctionSeed>,
+    /// Source file of the local symbols, from the ELF FILE symbols preceding them (address -> file name)
+    pub source_files: BTreeMap<u64, String>,
+    /// Source files named by the symbol tables, in their order
+    pub source_names: Vec<String>,
 }
 
 impl Program {
@@ -334,7 +338,26 @@ fn program_from_elf(elf: &ELF) -> Program {
 
     if !relocatable {
         for table in elf.symbol_tables.iter() {
+            // Local symbols follow the FILE symbol of their object file
+            let mut file: Option<&str> = None;
+
             for symbol in table.symbols.iter() {
+                if symbol.symbol_type() == Some(ELFSymbolType::File) {
+                    file = Some(symbol.name.as_str()).filter(|n| !n.is_empty());
+
+                    if let Some(name) = file.filter(|n| !program.source_names.iter().any(|s| s == n)) {
+                        program.source_names.push(name.to_string());
+                    }
+
+                    continue;
+                }
+
+                if symbol.binding() == Some(SymbolBinding::Local) && symbol.st_value != 0 && symbol.st_shndx != SHN_UNDEF {
+                    if let Some(file) = file {
+                        program.source_files.entry(symbol.st_value).or_insert_with(|| file.to_string());
+                    }
+                }
+
                 if symbol.st_shndx == SHN_UNDEF || symbol.st_value == 0 || symbol.name.is_empty() || symbol.name.starts_with('$') {
                     continue;
                 }
@@ -737,6 +760,9 @@ mod tests {
         assert!(program.is_executable(program.entry.unwrap()));
         assert!(program.import_slots.values().any(|n| n == "lib_add"));
         assert!(program.seeds.iter().any(|s| s.source == SeedSource::Entry));
+
+        let analysis = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_analysis")).unwrap())).remove(0);
+        assert_eq!(analysis.source_names, ["analysis.c"]);
     }
 
     #[test]

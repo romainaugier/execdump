@@ -289,7 +289,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                     }
 
                     // With the LLM the callees come first, their new names show in their callers
-                    let order: Vec<u64> = if args.llm { callees_first(&analysis, &functions) } else { functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect() };
+                    let order: Vec<u64> = if args.llm { analysis.callees_first(functions.iter().map(|f| f.addr)) } else { functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect() };
                     let mut outputs: Vec<(u64, String)> = Vec::new();
 
                     for addr in order {
@@ -324,43 +324,6 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
     }
 
     return Ok(());
-}
-
-/// Functions in post order of the call graph (callees before their callers)
-fn callees_first(analysis: &execdump_decompiler::analysis::Analysis, functions: &[&Function]) -> Vec<u64> {
-    let wanted: std::collections::HashSet<u64> = functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
-    let mut visited = std::collections::HashSet::new();
-    let mut order = Vec::new();
-
-    for &start in functions.iter().map(|f| &f.addr) {
-        let mut stack = vec![(start, false)];
-
-        while let Some((addr, done)) = stack.pop() {
-            if done {
-                if wanted.contains(&addr) {
-                    order.push(addr);
-                }
-
-                continue;
-            }
-
-            if !visited.insert(addr) {
-                continue;
-            }
-
-            stack.push((addr, true));
-
-            if let Some(function) = analysis.functions.get(&addr) {
-                for call in function.calls.iter() {
-                    if let execdump_decompiler::analysis::function::CallTarget::Function(callee) = call.target {
-                        stack.push((callee, false));
-                    }
-                }
-            }
-        }
-    }
-
-    return order;
 }
 
 pub fn dump_exec(exec: &Exec, args: &Args, config: &Config) {
