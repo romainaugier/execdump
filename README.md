@@ -94,9 +94,18 @@ Options:
       --decompile <DECOMPILE>
           Analyze the code and output the requested decompilation stages (comma separated):
           functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
-          callgraph (call graph as Graphviz dot) [possible values: functions, cfg, callgraph]
+          callgraph (call graph as Graphviz dot), llvm (optimized LLVM IR), c (decompiled C code)
+          [possible values: functions, cfg, callgraph, llvm, c]
       --functions-filter <FUNCTIONS_FILTER>
           Regular expression to filter the functions (by name or hexadecimal address) used by --decompile [default: .*]
+      --llm
+          Improves the decompiled C code with the LLM of the [llm] section of ~/.execdumprc
+
+      --project <PROJECT>
+          Project directory (annotations, modules, edited code and their history), next to the binary by default (<FILE_PATH>.edproj)
+      --export <EXPORT>
+          Decompiles every function with the annotations of the project and writes the C code as a source tree
+          (one file per module in src/, their headers in include/)
 
       --padding-size <PADDING_SIZE>
           Padding size to apply when dumping information for better readability [default: 4]
@@ -215,7 +224,44 @@ Decompiler:
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
   - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
   - :heavy_check_mark: C code generation (`--decompile c`)
-  - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
+  - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
+  - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
+
+### Projects
+
+The C code of the whole program is a project: every function is decompiled in the background, organized in modules
+(source files), annotated and edited, and the work is saved in a git repository next to the binary.
+
+- :heavy_check_mark: Background decompilation of every function, callees first, the functions on screen before the others
+  (one decompiler per core but one), progress in the title bar
+- :heavy_check_mark: Decompilation cache on disk (`~/.cache/execdump/<id of the binary>/`): reopening a binary does not
+  decompile it again, a function is decompiled again only when its annotations, or the names and prototypes of what it
+  calls, change (or when execdump is rebuilt)
+- :heavy_check_mark: Modules found automatically: ELF FILE symbols (object files of the local functions), functions between
+  two functions of the same object file (linkers lay object files out contiguously), C++ namespaces and classes, then a
+  default module named after the binary. Functions are moved between modules by the user (or the LLM).
+- :heavy_check_mark: Annotations: names of the functions and globals (callers and callees follow), prototypes, names and
+  types of the variables, summaries
+- :heavy_check_mark: Edited code: the edits are kept with the decompiled text they were made on, and rebased when the
+  decompiler renders the function differently: renames are applied to the edited text, other changes are merged by
+  libgit2 (conflicts are marked as in git and resolved in the code)
+- :heavy_check_mark: LLM proposals (names, types and summary of a function, organization of the functions in modules),
+  reviewed as diffs before being accepted
+- :heavy_check_mark: Export of the modules as a source tree: `src/<module>` and `include/<module>.h` (prototypes of the
+  functions), `include/execdump.h` (`undefined` types), `include/execdump_imports.h` and `include/execdump_globals.h`.
+  The tree is meant to be read and built upon, it does not always compile as it is.
+
+The project directory (`<binary>.edproj` by default, `--project` or `:w <dir>` to choose another one) holds a bare git
+repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
+
+| Branch | Content |
+|---|---|
+| `main` | The work of the user: `fn/<address>.toml` (annotations and module of a function), `fn/<address>.c` (edited code), `data/<address>.toml` (names of the globals), `modules.toml` (modules created by the user) |
+| `generated` | The decompiled code the edited functions were edited on (`git diff generated main -- fn/401a20.c` shows the edits) |
+| `llm/<n>` | A proposal of the LLM waiting for a review (merged into main when accepted and saved) |
+
+Only the annotated and edited functions are in the repository, its size follows the work, not the size of the binary.
+Fat binaries keep each program under `p<index>/`.
 
 ### TUI
 
@@ -226,12 +272,19 @@ Viewers:
   - :heavy_check_mark: Mach-O Sections
   - :heavy_check_mark: Hex Viewer
   - :heavy_check_mark: Disasm Viewer (linear, with function labels and annotations)
-  - :heavy_check_mark: Control flow graph viewer (radare2-like node graph)
-  - :heavy_check_mark: Call graph viewer
-  - :heavy_check_mark: Functions, strings, imports and memory map tables
-  - :heavy_check_mark: Decompiler Viewer (C code synchronized with the addresses, decompiled in the background)
+  - :heavy_check_mark: Control flow graph viewer (radare2-like node graph), with the disassembly or the C code in the nodes
+  - :heavy_check_mark: Call graph viewer, with the summary, the disassembly or the C code of the functions in the nodes
+  - :heavy_check_mark: Functions, strings, imports, modules and memory map tables
+  - :heavy_check_mark: C code of the modules (every function of a module, synchronized with the addresses, editable)
+  - :heavy_check_mark: Review of the LLM proposals
 
-The analysis runs in the background when the TUI starts, its progress is shown in the title bar.
+The analysis runs in the background when the TUI starts, then the decompilation of every function. Their progress is
+shown in the title bar (`[+]` when there are unsaved changes).
+
+The content area is split as in vim: each split is a group of tabs, each tab shows a view and has its own jumplist.
+Anything can be opened in any split (graphs, C code, disassembly, tables...). Two splits can be linked (`Ctrl-w b`): the
+cursor of one moves the other, for instance the C code of a module next to the control flow graph of the function under
+the cursor.
 
 Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
@@ -239,12 +292,27 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 |---|---|
 | `Tab` | Switch between the explorer and the content |
 | `e` | Show/hide the explorer |
-| `:` | Command line: an address (`:0x401000`), a function name (`:main`), `callgraph [function]`, `functions`, `strings`, `imports`, `sections`, `entry`, `depth <n>`, `up`, `c [function]`, `q` |
+| `Enter` / `t` / `s` / `v` | Explorer: open in the current tab / a new tab / a split below / a split on the right |
+| `:` | Command line (see the commands below) |
 | `/` | Search: filters the tables, finds the next matching node or line |
-| `Ctrl-o` / `Backspace` | Go back to the previous view |
+| `Ctrl-o` / `Backspace` | Go back to the previous view of the tab |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
 | `?` | Help |
-| `q` | Quit |
+| `q` | Quit (refused when there are unsaved changes: `:w` saves them, `:qa!` quits without saving) |
+
+Splits and tabs:
+
+| Keys | Action |
+|---|---|
+| `Ctrl-w s` / `Ctrl-w v` | Split below / on the right (the new split shows the same view) |
+| `Ctrl-w h` `j` `k` `l` (or the arrows) | Go to the split on the left / below / above / on the right (on the left of the leftmost split: the explorer) |
+| `Ctrl-w w` / `Ctrl-w W` / `Ctrl-w p` | Next / previous / last visited split |
+| `Ctrl-w H` `J` `K` `L` | Move the tab to the split in that direction (a new split when there is none) |
+| `Ctrl-w q` / `Ctrl-w o` | Close the split / close the other splits |
+| `Ctrl-w =` / `Ctrl-w <` `>` `-` `+` | Equal sizes / resize (a count before `Ctrl-w` multiplies the step) |
+| `Ctrl-w t` | Same view in a new tab |
+| `Ctrl-w b` | Link (or unlink) the split with the previous one |
+| `gt` / `gT` / `{n}gt` | Next / previous / nth tab of the split |
 
 In the graphs:
 
@@ -252,18 +320,73 @@ In the graphs:
 |---|---|
 | `h` `j` `k` `l` | Scroll by one cell (`H` `J` `K` `L` scroll faster, `Ctrl-d` / `Ctrl-u` by half a page) |
 | `n` / `p` | Next / previous node (top to bottom, left to right) |
-| `g` / `G` | First / last node |
+| `gg` / `G` | First / last node |
 | `t` / `f` | Follow the true / false branch of the selected block |
 | `c` | Center on the selected node |
+| `v` / `V` | Change what the selected node / every node shows: disassembly or C code (blocks), summary, disassembly or C code (functions of a call graph) |
 | `Enter` | Go to a function called from the selected block / open the selected function of the call graph |
 | `Space` | Switch between the graph and the linear disassembly of the function |
 | `x` | Cross references to the function |
 | `C` | Call graph from the function |
-| `D` | Decompiled C code of the function (`Enter` opens the function called on the line, `D` or `Space` goes back to the graph at the line) |
+| `D` | C code of the module of the function, on the line of the selected block |
 | `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
 | `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
 Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
+
+In the C code (a module, every function of it one after the other; functions not decompiled yet show a placeholder
+until their code arrives). The gutter shows the address of each line, `~` marks the edited functions, `!` the conflict
+markers and `·` the functions being decompiled again:
+
+| Keys | Action |
+|---|---|
+| `h` `j` `k` `l`, `w` / `b`, `0` / `^` / `$` | Move the cursor (`J` `K` by more lines, `Ctrl-d` / `Ctrl-u` by half a page, counts work: `10j`) |
+| `gg` / `G` / `{n}G` | First / last / nth line of the module |
+| `n` / `p`, `]f` / `[f` | Next / previous function |
+| `Enter` / `gd` | Go to the function (or the global) under the cursor |
+| `Space` / `D` | Control flow graph of the function, on the block of the line |
+| `i` `a` `A` `I` `o` `O` | Insert mode (arrows, `Enter`, `Backspace`, `Delete`, `Tab`), `Esc` goes back to the normal mode |
+| `dd` | Delete the line |
+| `u` / `U` | Undo / redo |
+| `cn` | Rename the variable, function or global under the cursor (`:rename`) |
+| `ct` | Retype the variable under the cursor (`:retype`) |
+| `cs` | Give a prototype to the function (`:sig`, prefilled with its current one) |
+| `;` | Comment above the line |
+| `M` | Move the function to a module (`:mv`) |
+| `]c` / `[c` | Next / previous conflict between the edits and the decompiled code |
+| `x` / `C` | Cross references / call graph of the function |
+| `L` | Ask the LLM to improve the function: its proposal shows in `:review` |
+
+In the review of the LLM proposals: `j` / `k` move, `n` / `p` go to the next / previous proposal, `a` accepts it, `r`
+rejects it, `Enter` opens the code of its function. Accepted proposals are merged into `main` on the next `:w`.
+
+Commands:
+
+| Command | Action |
+|---|---|
+| `:0x401000`, `:main` | Go to an address, a function or a symbol |
+| `:c [function]` | C code of the module of a function |
+| `:source <module>` | C code of a module |
+| `:callgraph [function]`, `:depth <n>`, `:up` | Call graph from a function (or the entry point), its depth, its parent |
+| `:functions`, `:strings`, `:imports`, `:modules`, `:sections` | Tables |
+| `:entry` | Graph of the entry point |
+| `:sp [function]`, `:vs [function]` | Split below / on the right, on a function |
+| `:tabnew [function]`, `:tabclose`, `:tabnext`, `:tabprevious`, `:only` | Tabs and splits |
+| `:link`, `:unlink` | Link the split with the previous one (their cursors follow each other) |
+| `:rename <name> <new>` | Rename a variable of the current function, a function or a global (`-` restores the original name) |
+| `:retype <variable> <C type>` | Retype a variable (same size only: the code stays correct, `-` restores it) |
+| `:sig <prototype>` | Give a prototype to the current function: `int parse(const char *text, size_t size)` (its callers follow) |
+| `:summary [text]` | Summary of the function (a comment at the top of its code) |
+| `:comment <text>` | Comment above the line |
+| `:mv <module> [function]`, `:mkmod <module>`, `:rmmod <module>`, `:renmod <old> <new>` | Organize the modules (paths such as `net/socket.c`) |
+| `:revert` | Drop the edits of the current function |
+| `:ours`, `:theirs`, `:both` | Resolve the conflict under the cursor: keep the edited code, the decompiled code, or both |
+| `:llm`, `:llm modules [module\|all]` | Ask the LLM to improve the current function / to organize the functions of a module (or of the program) |
+| `:review`, `:accept <n>`, `:reject <n>` | Review the LLM proposals |
+| `:w [directory]` | Save the project (and the session), in another directory when given |
+| `:export <directory>` | Export the C code as a source tree (once everything is decompiled) |
+| `:q`, `:q!` | Close the tab (the split when it was its last tab, execdump when it was the last split) |
+| `:qa`, `:qa!`, `:wq` | Quit, quit without saving, save and quit |
 
 ```toml
 # ~/.execdumprc
@@ -277,6 +400,7 @@ next_node = 'n'
 prev_node = 'p'
 follow_true = 't'
 follow_false = 'f'
+detail = 'v'
 ```
 
 The LLM assistance uses the `[llm]` section (any backend of the [llm](https://crates.io/crates/llm) crate):
@@ -299,3 +423,5 @@ api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
 This tool is based on several amazing open-source projects (go check them out!) :
  - [Capstone](https://github.com/capstone-engine/capstone)
  - [Ratatui](https://ratatui.rs/)
+ - [LLVM](https://llvm.org/)
+ - [libgit2](https://libgit2.org/)

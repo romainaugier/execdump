@@ -561,6 +561,7 @@ dependencies = [
  "dirs",
  "execdump-core",
  "execdump-decompiler",
+ "execdump-project",
  "execdump-tui",
  "mimalloc",
  "regex",

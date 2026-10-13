@@ -153,6 +153,20 @@ pub struct Args {
     pub llm: bool,
 
     /*
+     * Projects
+     */
+
+    /// Project directory (annotations, modules, edited code and their history), next to the binary
+    /// by default (<FILE_PATH>.edproj)
+    #[arg(long)]
+    pub project: Option<PathBuf>,
+
+    /// Decompiles every function with the annotations of the project and writes the C code as a source
+    /// tree (one file per module in src/, their headers in include/)
+    #[arg(long)]
+    pub export: Option<PathBuf>,
+
+    /*
      * Formatting
      */
 

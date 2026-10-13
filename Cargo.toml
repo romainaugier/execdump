@@ -32,6 +32,7 @@ edition.workspace = true
 [dependencies]
 execdump-core.workspace = true
 execdump-decompiler.workspace = true
+execdump-project.workspace = true
 execdump-tui.workspace = true
 clap.workspace = true
 dirs.workspace = true
