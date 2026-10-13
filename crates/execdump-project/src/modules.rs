@@ -10,6 +10,7 @@
  * The module given by the user to a function always wins.
  */
 
+use execdump_core::demangle::{detect_mangling_scheme, ManglingScheme};
 use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
 
@@ -20,19 +21,35 @@ pub fn auto_modules(program: &Program, analysis: &Analysis, default: &str) -> BT
     let functions: Vec<u64> = analysis.functions.values().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
     let mut modules: BTreeMap<u64, String> = BTreeMap::new();
 
+    // Rust paths name the module of a function (its object files are codegen units, not source files)
+    for &addr in functions.iter() {
+        let symbol = program.symbol_at(addr).filter(|s| matches!(detect_mangling_scheme(&s.name), ManglingScheme::RustLegacy | ManglingScheme::RustV0));
+
+        if let Some(module) = symbol.and_then(|s| rust_module(&s.demangled)) {
+            modules.insert(addr, module);
+        }
+    }
+
     // Object files of the local functions
-    let anchors: Vec<(u64, String)> = functions.iter().filter_map(|a| program.source_files.get(a).map(|f| (*a, source_module(f)))).collect();
+    let anchors: Vec<(u64, String)> = functions
+        .iter()
+        .filter(|a| !modules.contains_key(a))
+        .filter_map(|a| program.source_files.get(a).filter(|f| !f.contains("-cgu.")).map(|f| (*a, source_module(f))))
+        .collect();
 
     for (addr, module) in anchors.iter() {
         modules.insert(*addr, module.clone());
     }
 
-    // Between two functions of the same object file
+    // Between two functions of the same object file (the functions are in address order)
     for pair in anchors.windows(2) {
         let ((start, a), (end, b)) = (&pair[0], &pair[1]);
 
         if a == b {
-            for &addr in functions.iter().filter(|&&f| f > *start && f < *end) {
+            let first = functions.partition_point(|&f| f <= *start);
+            let last = functions.partition_point(|&f| f < *end);
+
+            for &addr in functions[first..last.max(first)].iter() {
                 modules.entry(addr).or_insert_with(|| a.clone());
             }
         }
@@ -87,6 +104,96 @@ fn namespace_module(demangled: &str) -> Option<String> {
     let path: Vec<String> = parts[..parts.len() - 1].iter().map(|p| p.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()).collect();
 
     return Some(format!("{}.cpp", path.join("/")));
+}
+
+/// Path of a Rust item without its generic arguments, closures and vendor suffix
+fn rust_path(demangled: &str) -> Vec<String> {
+    let text = demangled.split(" (.").next().unwrap_or(demangled);
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ':' if depth == 0 && chars.peek() == Some(&':') => {
+                chars.next();
+                parts.push(std::mem::take(&mut current));
+            }
+            _ if depth == 0 => current.push(c),
+            _ => {}
+        }
+    }
+
+    parts.push(current);
+    return parts.into_iter().filter(|p| !p.is_empty() && !p.starts_with('{')).collect();
+}
+
+/// Module of a Rust item: crate::module::Type::method -> crate/module.rs, the impls are in the module of
+/// their type (<alloc::vec::Vec<T> as Drop>::drop -> alloc/vec.rs)
+fn rust_module(demangled: &str) -> Option<String> {
+    let demangled = demangled.trim();
+
+    let path = if let Some(inner) = demangled.strip_prefix('<') {
+        // The type of the impl, or its trait when the type is not a path ([T], &str...)
+        let mut depth = 0;
+        let mut end = inner.len();
+
+        for (i, c) in inner.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' if depth == 0 => {
+                    end = i;
+                    break;
+                }
+                '>' => depth -= 1,
+                _ => {}
+            }
+        }
+
+        let (ty, tr) = inner[..end].split_once(" as ").map_or((&inner[..end], None), |(t, r)| (t, Some(r)));
+
+        let primitive = match ty.trim_start_matches(['&', '*']).trim_start_matches("mut ").trim_start_matches("const ") {
+            "str" => Some("str"),
+            "bool" => Some("bool"),
+            "char" => Some("char"),
+            "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => Some("num"),
+            t if t.starts_with('[') => Some("slice"),
+            _ => None,
+        };
+
+        let item = match (primitive, tr) {
+            (Some(_), Some(tr)) => tr,
+            (Some(module), None) => return Some(format!("core/{}.rs", module)),
+            (None, tr) if !ty.starts_with(|c: char| c.is_alphabetic() || c == '_') => tr?,
+            (None, _) => ty,
+        };
+
+        let mut path = rust_path(item);
+        path.push(String::new());
+        path
+    } else {
+        rust_path(demangled)
+    };
+
+    // The item itself, and the types and traits it is in
+    let name = path.last()?.clone();
+    let modules: Vec<&String> = path[..path.len() - 1].iter().take_while(|p| !p.starts_with(|c: char| c.is_uppercase())).collect();
+    let (krate, rest) = modules.split_first()?;
+    let sanitize = |p: &str| -> String { p.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect() };
+
+    if rest.is_empty() {
+        let file = if name == "main" { "main.rs" } else { "lib.rs" };
+        return Some(format!("{}/{}", sanitize(krate), file));
+    }
+
+    let mut module: Vec<String> = modules.iter().map(|p| sanitize(p)).collect();
+    let last = module.pop()?;
+    module.push(format!("{}.rs", last));
+
+    return Some(module.join("/"));
 }
 
 /// Functions of each module, in address order
@@ -181,6 +288,13 @@ mod tests {
         assert_eq!(namespace_module("net::Socket::connect(int, char const*)").as_deref(), Some("net/Socket.cpp"));
         assert_eq!(namespace_module("std::vector<int, std::allocator<int> >::push_back(int const&)").as_deref(), Some("std/vector.cpp"));
         assert_eq!(namespace_module("main"), None);
+        assert_eq!(rust_module("execdump_tui::views::DisasmView::render").as_deref(), Some("execdump_tui/views.rs"));
+        assert_eq!(rust_module("<alloc::vec::Vec<u8> as core::ops::drop::Drop>::drop").as_deref(), Some("alloc/vec.rs"));
+        assert_eq!(rust_module("<execdump_project::cache::Cache>::put::{closure#0} (.llvm.42)").as_deref(), Some("execdump_project/cache.rs"));
+        assert_eq!(rust_module("<str>::starts_with::<char>").as_deref(), Some("core/str.rs"));
+        assert_eq!(rust_module("<[u8] as core::fmt::Debug>::fmt").as_deref(), Some("core/fmt.rs"));
+        assert_eq!(rust_module("core::ptr::drop_in_place::<alloc::string::String>").as_deref(), Some("core/ptr.rs"));
+        assert_eq!(rust_module("execdump::main").as_deref(), Some("execdump/main.rs"));
     }
 
     #[test]

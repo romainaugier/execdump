@@ -1,6 +1,6 @@
 #!/bin/bash
 # Rebuilds the demangling corpus from symbols.cpp compiled for every supported ABI/OS,
-# the expected output comes from llvm-cxxfilt (Itanium) and llvm-undname (MSVC).
+# the expected output comes from llvm-cxxfilt (Itanium, Rust v0) and llvm-undname (MSVC).
 # Requires clang and LLVM 18 tools (llvm-nm, llvm-cxxfilt, llvm-undname).
 
 set -e
@@ -69,3 +69,8 @@ paste "$TMP/cxxabi.sym" <("$LLVM_BIN"/llvm-cxxfilt < "$TMP/cxxabi.sym") | awk -F
 LIBSTDCXX=$(find /usr/lib -name 'libstdc++.so.6' | head -1)
 "$LLVM_BIN"/llvm-nm -D --defined-only "$LIBSTDCXX" | awk '{print $NF}' | grep '^_Z' | sort -u | awk 'NR % 8 == 0' > "$TMP/libstdcxx.sym"
 paste "$TMP/libstdcxx.sym" <("$LLVM_BIN"/llvm-cxxfilt < "$TMP/libstdcxx.sym") | awk -F'\t' '$1 != $2' > libstdcxx.tsv
+
+# Rust v0 symbols of a Rust binary (execdump itself by default)
+RUST_BINARY=${RUST_BINARY:-../../../target/release/execdump}
+"$LLVM_BIN"/llvm-nm "$RUST_BINARY" | awk '{print $NF}' | grep -E '^_R' | sort -u | awk 'length($0) < 160' > "$TMP/rust.sym"
+paste "$TMP/rust.sym" <("$LLVM_BIN"/llvm-cxxfilt < "$TMP/rust.sym") | awk -F'\t' '$1 != $2' | awk 'NR % 60 == 0' > rust-v0.tsv

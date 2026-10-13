@@ -222,7 +222,7 @@ Disassembly:
 ### Core
 
 Utilities:
-  - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC) and Rust legacy
+  - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
   - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64)
 
 Analysis:
@@ -265,7 +265,8 @@ The C code of the whole program is a project: every function is decompiled in th
   decompile it again, a function is decompiled again only when its annotations, or the names and prototypes of what it
   calls, change (or when execdump is rebuilt). Another execdump opening the same binary at the same time keeps its cache
   in memory.
-- :heavy_check_mark: Modules found automatically: ELF FILE symbols (object files of the local functions), functions between
+- :heavy_check_mark: Modules found automatically: the paths of the Rust items (`crate::module::Type::method` is in
+  `crate/module.rs`, impls in the module of their type), ELF FILE symbols (object files of the local functions), functions between
   two functions of the same object file (linkers lay object files out contiguously), C++ namespaces and classes, then a
   default module named after the binary. Functions are moved between modules by the user (or the LLM).
 - :heavy_check_mark: Annotations: names of the functions and globals (callers and callees follow), prototypes, names and

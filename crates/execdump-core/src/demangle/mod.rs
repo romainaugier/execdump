@@ -13,6 +13,8 @@ pub enum ManglingScheme {
     Msvc,
     /// Rust legacy mangling (Itanium-like with a trailing hash)
     RustLegacy,
+    /// Rust v0 mangling (_R)
+    RustV0,
     Unknown,
 }
 
@@ -49,6 +51,10 @@ pub fn detect_mangling_scheme(symbol: &str) -> ManglingScheme {
         return ManglingScheme::RustLegacy;
     }
 
+    if rust::is_rust_v0(symbol) {
+        return ManglingScheme::RustV0;
+    }
+
     if ["_Z", "__Z", "___Z", "____Z"].iter().any(|p| symbol.starts_with(p)) {
         return ManglingScheme::Itanium;
     }
@@ -64,6 +70,7 @@ pub fn demangle(symbol: &str) -> Result<String, String> {
         ManglingScheme::Itanium => itanium::demangle(name),
         ManglingScheme::Msvc => msvc::demangle(name),
         ManglingScheme::RustLegacy => rust::demangle(name),
+        ManglingScheme::RustV0 => rust::demangle_v0(name),
         ManglingScheme::Unknown => return Err(format!("Unknown or unmangled symbol: {}", symbol)),
     };
 
@@ -81,6 +88,7 @@ pub fn demangle_symbol(symbol: &str) -> Option<Symbol> {
         ManglingScheme::Itanium => itanium::demangle_symbol(name),
         ManglingScheme::Msvc => msvc::demangle_symbol(name),
         ManglingScheme::RustLegacy => rust::demangle_symbol(name),
+        ManglingScheme::RustV0 => rust::demangle_v0_symbol(name),
         ManglingScheme::Unknown => None,
     }
 }
@@ -255,8 +263,22 @@ mod tests {
     }
 
     #[test]
+    fn rust_v0() {
+        assert_eq!(detect_mangling_scheme("_RNvCs1234_7mycrate3foo"), ManglingScheme::RustV0);
+        assert_eq!(demangle("_RNvCs1234_7mycrate3foo").unwrap(), "mycrate::foo");
+        assert_eq!(demangle("_RNCNvCs1234_7mycrate3foo0B3_").unwrap(), "mycrate::foo::{closure#0}");
+        assert_eq!(demangle("_RINvNtCs1234_4core3mem7replaceReEB4_").unwrap(), "core::mem::replace::<&str>");
+        assert_eq!(demangle("_RNvMNtCs1234_7mycrate5typesNtB2_4Type3new.llvm.42").unwrap(), "<mycrate::types::Type>::new (.llvm.42)");
+        assert_eq!(rust::decode_punycode_for_tests("Mnchen_3ya").as_deref(), Some("München"));
+
+        let symbol = demangle_symbol("_RINvNtCs1234_4core3mem7replaceReEB4_").unwrap();
+        let path: Vec<&str> = symbol.name.parts.iter().map(|p| p.ident.as_str()).collect();
+        assert_eq!(path, ["core", "mem", "replace::<&str>"]);
+    }
+
+    #[test]
     fn invalid_symbols() {
-        for symbol in ["", "main", "_Z", "_Zv", "_Z1", "_Z3fo", "_ZN3fooEX", "?", "?@", "?f@@YAX", "??_C@_0", "_ZN4core3fmt17h0123E"] {
+        for symbol in ["", "main", "_Z", "_Zv", "_Z1", "_Z3fo", "_ZN3fooEX", "?", "?@", "?f@@YAX", "??_C@_0", "_ZN4core3fmt17h0123E", "_RNvC3foo", "_RB_", "_RC3fo"] {
             assert!(demangle(symbol).is_err(), "{:?} should not demangle", symbol);
         }
     }
