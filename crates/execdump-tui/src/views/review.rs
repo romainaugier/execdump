@@ -3,8 +3,16 @@
  * the moves of functions between modules), accepted or rejected one by one
  */
 
+use crate::commands::{Command, Motion};
 use crate::theme::Theme;
-use crate::views::follow_cursor;
+use crate::views::View;
+use crate::{App, OpenMode};
+
+use ratatui::layout::Rect;
+use ratatui::text::Text;
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+use super::follow_cursor;
 
 use execdump_project::Project;
 
@@ -99,7 +107,7 @@ impl ReviewView {
         follow_cursor(self.cursor, &mut self.scroll, self.height);
 
         if self.lines.is_empty() {
-            let running = if project.llm_running() > 0 { format!(" yet ({} {} running)", super::spinner(), project.llm_running()) } else { String::new() };
+            let running = if project.llm_running() > 0 { format!(" yet ({} {} running)", crate::render::spinner(), project.llm_running()) } else { String::new() };
             return vec![Line::from(Span::styled(format!("No proposal to review{}. Ask the LLM with L in the code, or :llm modules", running), Style::default().fg(theme.dim)))];
         }
 
@@ -129,4 +137,72 @@ impl ReviewView {
 
         return lines;
     }
+}
+
+/*
+ * Commands
+ */
+
+impl App {
+    pub(crate) fn open_review(&mut self, program: usize) {
+        if let Some(project) = self.project(program) {
+            let view = ReviewView::new(program, project);
+            self.open(View::Review(view));
+        }
+    }
+
+    pub(crate) fn review_command(&mut self, command: &Command, count: Option<usize>) -> bool {
+        let repeat = count.unwrap_or(1).max(1) as isize;
+
+        let View::Review(view) = self.view_mut() else {
+            return false;
+        };
+
+        let page = (view.height / 2).max(1) as isize;
+
+        match command {
+            Command::Move(motion) => match motion {
+                Motion::PageDown => view.move_cursor(page),
+                Motion::PageUp => view.move_cursor(-page),
+                Motion::Down => view.move_cursor(repeat),
+                Motion::Up => view.move_cursor(-repeat),
+                Motion::First => view.move_cursor(isize::MIN / 2),
+                Motion::Last => view.move_cursor(isize::MAX / 2),
+                Motion::Next => view.jump(true),
+                Motion::Previous => view.jump(false),
+                _ => return false,
+            },
+            // The selected proposal (the numbered ones are for the application)
+            Command::Accept(None) | Command::Reject(None) => {
+                let accept = matches!(command, Command::Accept(_));
+                let (program, proposal) = (view.program, view.proposal());
+
+                if let Some(id) = proposal {
+                    let result = self.project(program).ok_or_else(String::new).and_then(|p| if accept { p.accept(id) } else { p.reject(id) });
+
+                    match result {
+                        Ok(()) => self.info(format!("Proposal {} {}", id, if accept { "accepted, :w to save it" } else { "rejected" })),
+                        Err(error) => self.error(error),
+                    }
+                }
+            }
+            Command::Open(OpenMode::Replace) => {
+                if let Some((program, addr)) = self.current_function() {
+                    self.open_code(program, addr);
+                }
+            }
+            _ => return false,
+        }
+
+        return true;
+    }
+}
+
+pub(crate) fn render(view: &mut ReviewView, f: &mut Frame, theme: &Theme, area: Rect, projects: &mut [Option<Project>]) {
+    let lines = match projects[view.program].as_ref() {
+        Some(project) => view.render(project, theme, area.height as usize),
+        None => Vec::new(),
+    };
+
+    f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), area);
 }

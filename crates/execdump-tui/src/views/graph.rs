@@ -11,10 +11,16 @@ use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::{Decoder, Instruction};
 use execdump_decompiler::analysis::Analysis;
 use crate::layout::{layout, GraphInput, Layout};
-use crate::source_view::highlight_with;
+use super::source::highlight_with;
 use execdump_core::program::Program;
 use execdump_project::{Priority, Project};
 use crate::theme::Theme;
+use crate::commands::{Command, Motion};
+use crate::views::disasm::DisasmView;
+use crate::views::{Target, View};
+use crate::{App, OpenMode, HORIZONTAL_STEP, VERTICAL_STEP};
+
+use ratatui::Frame;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -952,6 +958,319 @@ fn box_char(bits: u8, dashed: bool) -> char {
         _ => '┼',
     }
 }
+
+/*
+ * Commands
+ */
+
+impl App {
+    pub(crate) fn cfg_view(&mut self, program: usize, addr: u64) -> Option<GraphView> {
+        let analysis = self.analysis(program)?;
+        let decoder = self.decoders[program].as_ref()?;
+
+        return GraphView::cfg(program, &self.programs[program], &analysis, decoder, &self.theme, addr);
+    }
+
+    pub(crate) fn open_function(&mut self, program: usize, addr: u64, select: Option<u64>) {
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        let Some(function) = analysis.function_containing(addr) else {
+            self.error(format!("No function at {:#x}", addr));
+            return;
+        };
+
+        // Imported functions are opened in their library (their stub otherwise)
+        if let Some(import) = function.thunk.clone() {
+            if self.follow_import(&import, false) {
+                return;
+            }
+        }
+
+        if let Some(mut view) = self.cfg_view(program, function.addr) {
+            if let Some(select) = select.or(if addr != function.addr { Some(addr) } else { None }) {
+                view.select_addr(select);
+            }
+
+            self.open(View::Graph(view));
+        }
+    }
+
+    pub(crate) fn open_call_graph(&mut self, program: usize, root: Option<u64>, depth: usize, imports: bool) {
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        let program_ref = &self.programs[program];
+
+        let root = root
+            .or(program_ref.entry.filter(|e| analysis.functions.contains_key(e)))
+            .or(analysis.function_by_name("main").map(|f| f.addr))
+            .or(analysis.functions.keys().next().copied());
+
+        let Some(root) = root else {
+            self.error("No function found".to_string());
+            return;
+        };
+
+        if let Some(view) = GraphView::call_graph(program, &analysis, &self.theme, root, depth, imports) {
+            self.open(View::Graph(view));
+        }
+    }
+
+    /// Opens a call graph and selects a function in it
+    pub(crate) fn open_call_graph_at(&mut self, program: usize, root: u64, depth: usize, imports: bool, select: u64) {
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        if let Some(mut view) = GraphView::call_graph(program, &analysis, &self.theme, root, depth, imports) {
+            if let Some(index) = view.nodes.iter().position(|n| n.kind == NodeKind::Function && n.addr == select) {
+                view.select(index);
+            }
+
+            self.open(View::Graph(view));
+        }
+    }
+
+    /// Commands of the graphs (control flow graphs and call graphs)
+    pub(crate) fn graph_command(&mut self, command: &Command, _count: Option<usize>) -> bool {
+        let View::Graph(view) = self.view_mut() else {
+            return false;
+        };
+
+        let page = view.page_height();
+
+        match command {
+            Command::Move(motion) => match motion {
+                Motion::PageDown => view.scroll(0, page),
+                Motion::PageUp => view.scroll(0, -page),
+                Motion::Left => view.scroll(-1, 0),
+                Motion::Down => view.scroll(0, 1),
+                Motion::Up => view.scroll(0, -1),
+                Motion::Right => view.scroll(1, 0),
+                Motion::JumpLeft => view.scroll(-HORIZONTAL_STEP, 0),
+                Motion::JumpDown => view.scroll(0, VERTICAL_STEP),
+                Motion::JumpUp => view.scroll(0, -VERTICAL_STEP),
+                Motion::JumpRight => view.scroll(HORIZONTAL_STEP, 0),
+                Motion::Next => view.select_next(),
+                Motion::Previous => view.select_previous(),
+                Motion::First => view.select_first(),
+                Motion::Last => view.select_last(),
+                _ => return false,
+            },
+            Command::Center => view.center(),
+            Command::Follow(branch) => {
+                let kind = if *branch { EdgeKind::True } else { EdgeKind::False };
+
+                if !view.follow(kind) && !view.follow_single() {
+                    self.message = Some((format!("No {} branch from this node", if *branch { "true" } else { "false" }), false));
+                }
+            }
+            Command::Detail { all } => self.graph_detail(*all),
+            Command::ToggleView => self.toggle_graph_linear(),
+            Command::DepthBy(_) | Command::ToggleImports | Command::Reroot => self.call_graph_option(command),
+            Command::Depth(depth) => {
+                if let GraphKind::CallGraph { root, imports, .. } = view.kind {
+                    let program = view.program;
+                    self.open_call_graph(program, Some(root), *depth, imports);
+                }
+            }
+            Command::CallGraphUp => self.call_graph_up(),
+            Command::Open(OpenMode::Replace) => {
+                let program = view.program;
+                let node = view.selected_node().clone();
+
+                match view.kind {
+                    GraphKind::Cfg { function } => self.calls_popup(program, node.addr, function),
+                    GraphKind::CallGraph { .. } => {
+                        if node.kind == NodeKind::Function {
+                            self.open_function(program, node.addr, None);
+                        } else {
+                            self.follow_import(&node.title, false);
+                        }
+                    }
+                }
+            }
+            _ => return false,
+        }
+
+        return true;
+    }
+
+    /// Shows the C code or the disassembly in the nodes of a graph (the selected one, or all)
+    pub(crate) fn graph_detail(&mut self, all: bool) {
+        let App { workspace, projects, analyses, decoders, programs, theme, .. } = self;
+
+        let View::Graph(view) = workspace.view_mut() else {
+            return;
+        };
+
+        let program = view.program;
+        let (Some(project), Some(analysis), Some(decoder)) = (projects[program].as_mut(), analyses[program].as_ref(), decoders[program].as_ref()) else {
+            return;
+        };
+
+        let detail = view.next_detail(all);
+        view.set_detail(detail, all, &programs[program], analysis, decoder, project, theme);
+        let name = match detail {
+            Detail::Summary => "summaries",
+            Detail::Disasm => "disassembly",
+            Detail::Source => "C code",
+        };
+
+        self.info(format!("Graph nodes: {}{}", name, if all { "" } else { " (selected node, V for all)" }));
+    }
+
+    /// Changes the depth, the imports or the root of a call graph: the view is replaced, a new root is
+    /// a new view
+    fn call_graph_option(&mut self, command: &Command) {
+        let View::Graph(view) = self.view() else {
+            return;
+        };
+
+        let GraphKind::CallGraph { root, depth, imports } = view.kind else {
+            return;
+        };
+
+        let program = view.program;
+        let selected = view.selected_node().clone();
+
+        let (root, depth, imports) = match command {
+            Command::DepthBy(delta) => (root, (depth as i64 + *delta as i64).max(1) as usize, imports),
+            Command::ToggleImports => (root, depth, !imports),
+            Command::Reroot if selected.kind == NodeKind::Function => (selected.addr, depth, imports),
+            _ => return,
+        };
+
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        if let Some(mut new_view) = GraphView::call_graph(program, &analysis, &self.theme, root, depth, imports) {
+            // Keep the selection on the same function when possible
+            if let Some(index) = new_view.nodes.iter().position(|n| n.kind == selected.kind && n.addr == selected.addr && n.title == selected.title) {
+                new_view.select(index);
+            }
+
+            if *command == Command::Reroot {
+                self.open(View::Graph(new_view));
+            } else {
+                *self.view_mut() = View::Graph(new_view);
+            }
+        }
+    }
+
+    /// Re-roots the call graph at a caller of its root (popup when there are several)
+    pub(crate) fn call_graph_up(&mut self) {
+        let View::Graph(view) = self.view() else {
+            self.error("Not in a call graph".to_string());
+            return;
+        };
+
+        let GraphKind::CallGraph { root, depth, imports } = view.kind else {
+            self.error("Not in a call graph".to_string());
+            return;
+        };
+
+        let program = view.program;
+
+        let Some(analysis) = self.analysis(program) else {
+            return;
+        };
+
+        // Same edges as the call graph: calls, tail calls and references by address
+        let mut items: Vec<(String, Target)> = Vec::new();
+
+        for (&caller_addr, caller) in analysis.functions.iter() {
+            if caller_addr == root {
+                continue;
+            }
+
+            let kind = if caller.calls.iter().any(|c| c.target == CallTarget::Function(root)) {
+                "call"
+            } else if caller.refs.iter().any(|&(_, target)| target == root) {
+                "reference"
+            } else {
+                continue;
+            };
+
+            items.push((
+                format!("{:#x}  {} ({})", caller_addr, caller.name, kind),
+                Target::CallGraph { program, root: caller_addr, depth, imports, select: root },
+            ));
+        }
+
+        let name = analysis.functions.get(&root).map_or(String::new(), |f| f.name.clone());
+        self.show_popup(format!("Callers of {}", name), items);
+    }
+
+    pub(crate) fn toggle_graph_linear(&mut self) {
+        match self.view() {
+            View::Graph(view) => {
+                let GraphKind::Cfg { function } = view.kind else {
+                    return;
+                };
+
+                let program = view.program;
+                let block = view.selected_node().addr;
+
+                let Some(analysis) = self.analysis(program) else {
+                    return;
+                };
+
+                let Some(decoder) = self.decoders[program].as_ref() else {
+                    return;
+                };
+
+                if let Some(mut linear) = DisasmView::function(program, &self.programs[program], &analysis, decoder, function) {
+                    linear.height = 20;
+                    linear.goto(block);
+                    *self.view_mut() = View::Disasm(linear);
+                }
+            }
+            View::Disasm(view) => {
+                let program = view.program;
+                let function_view = view.function.is_some();
+
+                let Some(addr) = view.cursor_addr() else {
+                    return;
+                };
+
+                let Some(analysis) = self.analysis(program) else {
+                    return;
+                };
+
+                let Some(function) = analysis.function_containing(addr).map(|f| f.addr) else {
+                    self.error(format!("No function at {:#x}", addr));
+                    return;
+                };
+
+                if let Some(mut graph) = self.cfg_view(program, function) {
+                    graph.select_addr(addr);
+
+                    // A function linear view is the same "place" as its graph, a region view is not
+                    if function_view {
+                        *self.view_mut() = View::Graph(graph);
+                    } else {
+                        self.open(View::Graph(graph));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn render(view: &mut GraphView, f: &mut Frame, theme: &Theme, area: Rect, projects: &mut [Option<Project>]) {
+    if let Some(project) = projects[view.program].as_mut() {
+        view.prioritize(project);
+    }
+
+    view.render(area, f.buffer_mut(), theme);
+}
+
 
 #[cfg(test)]
 mod tests {

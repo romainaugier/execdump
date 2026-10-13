@@ -10,13 +10,19 @@
  * The code can be edited (insert mode, as in vim), the edits are kept by the project.
  */
 
+use crate::commands::{Command, Motion};
 use crate::theme::Theme;
+use crate::views::View;
+use crate::{App, OpenMode, VERTICAL_STEP};
 
 use execdump_project::{Priority, Project};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
 
 const KEYWORDS: &[&str] = &["if", "else", "while", "do", "for", "switch", "case", "default", "break", "continue", "return", "goto", "sizeof"];
 
@@ -257,6 +263,7 @@ pub struct SourceView {
     redo: Vec<(u64, String)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InsertWhere {
     Cursor,
     After,
@@ -1045,6 +1052,207 @@ fn truncate(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
 
     return out;
 }
+
+/*
+ * Commands
+ */
+
+impl App {
+    /// Source view of the module of a function, on the line of an address
+    pub(crate) fn source_view(&mut self, program: usize, addr: u64) -> Option<SourceView> {
+        let project = self.project(program)?;
+        let function = project.analysis.function_containing(addr).map(|f| f.addr);
+
+        let Some(module) = function.and_then(|f| project.module_of(f)).map(|m| m.to_string()) else {
+            match function.and_then(|f| project.analysis.functions.get(&f)).and_then(|f| f.thunk.clone()) {
+                Some(import) => {
+                    self.follow_import(&import, true);
+                }
+                None => self.error(format!("No function at {:#x}", addr)),
+            }
+
+            return None;
+        };
+
+        let mut view = SourceView::new(program, &module, project);
+        view.height = 20;
+        view.goto(project, addr);
+
+        return Some(view);
+    }
+
+    /// Opens the C code of the module of a function, on the line of an address
+    pub(crate) fn open_code(&mut self, program: usize, addr: u64) {
+        if let Some(view) = self.source_view(program, addr) {
+            self.open(View::Source(view));
+        }
+    }
+
+    pub(crate) fn open_module(&mut self, program: usize, module: &str) {
+        let Some(project) = self.project(program) else {
+            return;
+        };
+
+        if !project.modules.contains(module) {
+            self.error(format!("No module {}", module));
+            return;
+        }
+
+        let view = SourceView::new(program, module, project);
+        self.open(View::Source(view));
+    }
+
+    /// Identifier under the cursor of the C code
+    pub(crate) fn word_under_cursor(&mut self) -> Option<String> {
+        let App { workspace, projects, .. } = self;
+
+        return match workspace.view_mut() {
+            View::Source(view) => projects[view.program].as_mut().and_then(|p| view.word(p)),
+            _ => None,
+        };
+    }
+
+    pub(crate) fn current_signature(&mut self) -> Option<String> {
+        let (program, addr) = self.current_function()?;
+        let project = self.projects[program].as_mut()?;
+
+        return project.shown(addr).map(|(r, _)| r.meta.signature.clone());
+    }
+
+    /// Goes to what the identifier under the cursor refers to: a function or a global
+    pub(crate) fn definition(&mut self) {
+        let Some(word) = self.word_under_cursor() else {
+            return self.info("No name under the cursor".to_string());
+        };
+
+        let Some((program, function)) = self.current_function() else {
+            return;
+        };
+
+        let Some(project) = self.projects[program].as_mut() else {
+            return;
+        };
+
+        if let Some(addr) = project.resolve(&word).or_else(|| word.strip_prefix("sub_").and_then(|a| u64::from_str_radix(a, 16).ok())).filter(|a| project.analysis.functions.contains_key(a)) {
+            // Imported: its code is in a library
+            if let Some(import) = project.analysis.functions[&addr].thunk.clone() {
+                self.follow_import(&import, true);
+                return;
+            }
+
+            // Same module: the cursor moves, otherwise the module of the function opens
+            if let View::Source(view) = self.workspace.view_mut() {
+                if view.goto(project, addr) {
+                    return;
+                }
+            }
+
+            return self.open_code(program, addr);
+        }
+
+        if let Some(addr) = project.global(function, &word) {
+            return self.goto_address(program, addr);
+        }
+
+        // Functions of the libraries called without a stub (through the GOT)
+        if self.exporting_library(&word).is_some() {
+            self.follow_import(&word, true);
+            return;
+        }
+
+        self.info(format!("{} is not a function or a global", word));
+    }
+
+    /// Commands of the C code (normal mode)
+    pub(crate) fn source_command(&mut self, command: &Command, count: Option<usize>) -> bool {
+        let repeat = count.unwrap_or(1).max(1) as isize;
+
+        match command {
+            Command::Open(OpenMode::Replace) | Command::Definition => {
+                self.definition();
+                return true;
+            }
+            Command::Comment(text) => {
+                self.with_source(|source, project| source.comment(project, text));
+                return true;
+            }
+            Command::Resolve { edited, decompiled } => {
+                let (edited, decompiled) = (*edited, *decompiled);
+                self.with_source(|source, project| source.resolve(project, edited, decompiled));
+                return true;
+            }
+            Command::Conflict { forward } => {
+                let forward = *forward;
+                self.with_source(|source, project| if source.jump_conflict(project, forward) { Ok(()) } else { Err("No conflict in this module".to_string()) });
+                return true;
+            }
+            _ => {}
+        }
+
+        let App { workspace, projects, .. } = self;
+
+        let View::Source(view) = workspace.view_mut() else {
+            return false;
+        };
+
+        let Some(project) = projects[view.program].as_mut() else {
+            return false;
+        };
+
+        let page = (view.height / 2).max(1) as isize;
+
+        let result = match command {
+            Command::Move(motion) => {
+                match motion {
+                    Motion::PageDown => view.move_lines(project, page),
+                    Motion::PageUp => view.move_lines(project, -page),
+                    Motion::Down => view.move_lines(project, repeat),
+                    Motion::Up => view.move_lines(project, -repeat),
+                    Motion::Left => view.move_col(project, -repeat),
+                    Motion::Right => view.move_col(project, repeat),
+                    Motion::JumpDown => view.move_lines(project, VERTICAL_STEP as isize),
+                    Motion::JumpUp => view.move_lines(project, -VERTICAL_STEP as isize),
+                    Motion::First => view.first_line(),
+                    Motion::Last => match count {
+                        Some(n) => {
+                            view.first_line();
+                            view.move_lines(project, n as isize - 1);
+                        }
+                        None => view.last_line(),
+                    },
+                    Motion::Next | Motion::NextFunction => view.jump_function(true),
+                    Motion::Previous | Motion::PreviousFunction => view.jump_function(false),
+                    Motion::WordNext => (0..repeat).for_each(|_| view.word_move(project, true)),
+                    Motion::WordPrevious => (0..repeat).for_each(|_| view.word_move(project, false)),
+                    Motion::LineStart => view.line_start(project, false),
+                    Motion::LineFirst => view.line_start(project, true),
+                    Motion::LineEnd => view.line_end(project),
+                    Motion::JumpLeft | Motion::JumpRight => return false,
+                }
+
+                Ok(())
+            }
+            Command::Insert(at) => view.start_insert(project, *at),
+            Command::Undo => view.undo(project, false),
+            Command::Redo => view.undo(project, true),
+            Command::DeleteLine => view.delete_line(project),
+            _ => return false,
+        };
+
+        self.report(result);
+        return true;
+    }
+}
+
+pub(crate) fn render(view: &mut SourceView, f: &mut Frame, theme: &Theme, area: Rect, projects: &mut [Option<Project>]) {
+    let lines = match projects[view.program].as_mut() {
+        Some(project) => view.render(project, theme, area.height as usize, area.width as usize),
+        None => vec![Line::from("Analysis in progress...")],
+    };
+
+    f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), area);
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -324,6 +324,8 @@ The analysis runs in the background when the TUI starts, then the project opens 
 
 The content area is split as in vim: each split is a group of tabs, each tab shows a view and has its own jumplist. Anything can be opened in any split (graphs, C code, disassembly, tables...). Two splits can be linked (`Ctrl-w b`): the cursor of one moves the other, for instance the C code of a module next to the control flow graph of the function under the cursor.
 
+Everything the interface does is a command: the keys are bound to commands (in the global context, the explorer, any view or one kind of view, the most specific first), and every command can be typed after `:` (`:toggle-explorer`, `:next-split`, `:depth +1`...). A command goes to the focus first (the explorer or the view of the split), then to the splits and tabs, then to the application. `?` (or `:help`) lists the keys of each context with the command they run, then the commands without a key.
+
 Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
 | Keys | Action |
@@ -337,7 +339,7 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 | `/` | Search: filters the tables, finds the next matching node or line |
 | `Ctrl-o` / `Backspace` | Go back to the previous view of the tab |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
-| `?` | Help |
+| `?` | Help: the keys and the commands (`j` / `k` scroll it) |
 | `q` | Quit (refused when there are unsaved changes: `:w` saves them, `:qa!` quits without saving) |
 
 Splits and tabs:

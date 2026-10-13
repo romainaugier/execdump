@@ -1,5 +1,9 @@
 /*
- * Text based views: header dumps, hex, linear disassembly and tables
+ * Linear disassembly view
+ *
+ * A region can hold millions of instructions: the view decodes a window of it around the cursor (from
+ * an instruction start known by the analysis), and decodes another one when the cursor leaves it. The
+ * lines keep offsets only, their text is decoded when they are shown or searched.
  */
 
 use ratatui::style::{Modifier, Style};
@@ -7,205 +11,22 @@ use ratatui::text::{Line, Span};
 
 use execdump_decompiler::analysis::insn::{Decoder, Flow, InsnText, Instruction};
 use execdump_decompiler::analysis::Analysis;
-use execdump_core::dump::Dump;
 use execdump_core::program::Program;
-use crate::graph_view::insn_spans;
+
+use super::follow_cursor;
+use super::graph::insn_spans;
+use crate::commands::{Command, Motion};
 use crate::theme::Theme;
+use crate::views::View;
+use crate::{App, OpenMode, VERTICAL_STEP};
+
+use ratatui::layout::Rect;
+use ratatui::text::Text;
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
 
 use std::rc::Rc;
 use std::sync::Arc;
-
-/// Where a table row or an instruction leads to
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Target {
-    /// Control flow graph of the function at this address
-    Function(usize, u64),
-    /// Any address (opens the function, the code or the data containing it)
-    Address(usize, u64),
-    /// Call graph rooted at a function, selecting another function in it
-    CallGraph { program: usize, root: u64, depth: usize, imports: bool, select: u64 },
-    /// C code of a module
-    Module(usize, String),
-}
-
-/// Keeps a cursor visible in a scrolled list
-pub fn follow_cursor(cursor: usize, scroll: &mut usize, height: usize) {
-    let height = height.max(1);
-
-    if cursor < *scroll {
-        *scroll = cursor;
-    } else if cursor >= *scroll + height {
-        *scroll = cursor + 1 - height;
-    }
-}
-
-/*
- * Dump view (headers, tables from the parsers)
- */
-
-#[derive(Clone, Debug)]
-pub struct DumpView {
-    pub title: String,
-    pub lines: Vec<Line<'static>>,
-    pub scroll: usize,
-    pub height: usize,
-}
-
-impl DumpView {
-    pub fn new(theme: &Theme, dump: &Dump) -> Self {
-        return Self { title: dump.label().to_string(), lines: lines_from_dump(theme, dump, 0, 4), scroll: 0, height: 1 };
-    }
-
-    pub fn max_scroll(&self) -> usize {
-        return self.lines.len().saturating_sub(self.height);
-    }
-
-    pub fn search(&mut self, pattern: &str) -> bool {
-        let pattern = pattern.to_lowercase();
-        let count = self.lines.len();
-
-        for i in 1..=count {
-            let index = (self.scroll + i) % count;
-            let text: String = self.lines[index].spans.iter().map(|s| s.content.to_lowercase()).collect();
-
-            if text.contains(&pattern) {
-                self.scroll = index.min(self.max_scroll());
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    pub fn render(&mut self, height: usize) -> Vec<Line<'static>> {
-        self.height = height;
-        self.scroll = self.scroll.min(self.max_scroll());
-
-        return self.lines.iter().skip(self.scroll).take(height).cloned().collect();
-    }
-}
-
-fn lines_from_dump(theme: &Theme, dump: &Dump, indent: usize, indent_size: usize) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-
-    lines.push(Line::from(Span::styled(format!("{:>width$}{}", "", dump.label(), width = indent * indent_size), theme.title_style())));
-
-    let align = dump.fields_align();
-    let fields_indent = (indent + 1) * indent_size;
-
-    for field in dump.iter_fields() {
-        if field.key.is_empty() {
-            lines.push(Line::from(Span::styled(format!("{:>width$}{}", "", field.value, width = fields_indent), Style::default().fg(theme.value))));
-        } else {
-            let mut spans = vec![
-                Span::styled(format!("{:>width$}{:<align$}: ", "", field.key, width = fields_indent, align = align), Style::default().fg(theme.key)),
-                Span::styled(field.value.clone(), Style::default().fg(theme.value)),
-            ];
-
-            if let Some(comment) = field.comment {
-                spans.push(Span::styled(format!("  {}", comment), Style::default().fg(theme.dim).add_modifier(Modifier::ITALIC)));
-            }
-
-            lines.push(Line::from(spans));
-        }
-    }
-
-    for child in dump.iter_children() {
-        lines.extend(lines_from_dump(theme, child, indent + 1, indent_size));
-    }
-
-    return lines;
-}
-
-/*
- * Hex view
- */
-
-#[derive(Clone, Debug)]
-pub struct HexView {
-    pub title: String,
-    pub base: u64,
-    /// Shared between the copies of the view (splits, jumplists)
-    pub data: Arc<[u8]>,
-    /// First displayed row
-    pub scroll: usize,
-    pub height: usize,
-}
-
-const HEX_ROW: usize = 16;
-
-impl HexView {
-    pub fn new(title: String, base: u64, data: impl Into<Arc<[u8]>>) -> Self {
-        return Self { title, base, data: data.into(), scroll: 0, height: 1 };
-    }
-
-    pub fn rows(&self) -> usize {
-        return self.data.len().div_ceil(HEX_ROW);
-    }
-
-    pub fn max_scroll(&self) -> usize {
-        return self.rows().saturating_sub(self.height);
-    }
-
-    pub fn goto(&mut self, addr: u64) -> bool {
-        if addr < self.base || addr >= self.base + self.data.len() as u64 {
-            return false;
-        }
-
-        self.scroll = ((addr - self.base) as usize / HEX_ROW).saturating_sub(2);
-        return true;
-    }
-
-    pub fn render(&mut self, theme: &Theme, height: usize) -> Vec<Line<'static>> {
-        self.height = height;
-        self.scroll = self.scroll.min(self.max_scroll());
-
-        let addr_width = format!("{:x}", self.base + self.data.len() as u64).len().max(8);
-        let mut lines = Vec::new();
-
-        for row in self.scroll..(self.scroll + height).min(self.rows()) {
-            let offset = row * HEX_ROW;
-            let chunk = &self.data[offset..(offset + HEX_ROW).min(self.data.len())];
-
-            let mut spans = vec![Span::styled(format!("{:0width$x}  ", self.base + offset as u64, width = addr_width), Style::default().fg(theme.hex_offset))];
-
-            for (i, byte) in chunk.iter().enumerate() {
-                let color = if *byte == 0 { theme.dim } else { theme.hex_data };
-                spans.push(Span::styled(format!("{:02x} ", byte), Style::default().fg(color)));
-
-                if i == 7 {
-                    spans.push(Span::raw(" "));
-                }
-            }
-
-            for i in chunk.len()..HEX_ROW {
-                spans.push(Span::raw("   "));
-
-                if i == 7 {
-                    spans.push(Span::raw(" "));
-                }
-            }
-
-            spans.push(Span::styled("│", Style::default().fg(theme.border)));
-
-            let ascii: String = chunk.iter().map(|&b| if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' }).collect();
-            spans.push(Span::styled(ascii, Style::default().fg(theme.hex_ascii)));
-            spans.push(Span::styled("│", Style::default().fg(theme.border)));
-
-            lines.push(Line::from(spans));
-        }
-
-        return lines;
-    }
-}
-
-/*
- * Linear disassembly view
- *
- * A region can hold millions of instructions: the view decodes a window of it around the cursor (from
- * an instruction start known by the analysis), and decodes another one when the cursor leaves it. The
- * lines keep offsets only, their text is decoded when they are shown or searched.
- */
 
 /// Bytes decoded on each side of the cursor
 const WINDOW_HALF: u64 = 32 << 10;
@@ -727,150 +548,92 @@ pub fn insn_target(insn: &Instruction) -> Option<u64> {
     }
 }
 
+
 /*
- * Table view (functions, strings, imports, memory map)
+ * Commands
  */
 
-#[derive(Clone, Debug)]
-pub struct TableRow {
-    pub cells: Vec<String>,
-    pub target: Target,
-    pub style: Option<Style>,
-}
-
-#[derive(Clone, Debug)]
-pub struct TableView {
-    pub title: String,
-    pub headers: Vec<String>,
-    pub rows: Vec<TableRow>,
-    pub filtered: Vec<usize>,
-    pub filter: String,
-    pub cursor: usize,
-    pub scroll: usize,
-    pub height: usize,
-    /// Optional line drawn above the table (memory map bar)
-    pub banner: Option<Line<'static>>,
-}
-
-impl TableView {
-    pub fn new(title: String, headers: Vec<&str>, rows: Vec<TableRow>) -> Self {
-        let filtered = (0..rows.len()).collect();
-
-        return Self {
-            title,
-            headers: headers.into_iter().map(|h| h.to_string()).collect(),
-            rows,
-            filtered,
-            filter: String::new(),
-            cursor: 0,
-            scroll: 0,
-            height: 1,
-            banner: None,
-        };
+impl App {
+    pub(crate) fn region_disasm(&self, program: usize, region: &str) -> Option<DisasmView> {
+        let decoder = self.decoders[program].as_ref()?;
+        return DisasmView::region(program, self.programs[program].clone(), self.analyses[program].clone(), decoder, region);
     }
 
-    pub fn set_filter(&mut self, filter: &str) {
-        self.filter = filter.to_string();
-        let pattern = filter.to_lowercase();
+    pub(crate) fn disasm_command(&mut self, command: &Command, count: Option<usize>) -> bool {
+        let repeat = count.unwrap_or(1).max(1) as isize;
 
-        self.filtered = (0..self.rows.len())
-            .filter(|&i| pattern.is_empty() || self.rows[i].cells.iter().any(|c| c.to_lowercase().contains(&pattern)))
-            .collect();
-
-        self.cursor = 0;
-        self.scroll = 0;
-    }
-
-    pub fn move_cursor(&mut self, delta: isize) {
-        let max = self.filtered.len().saturating_sub(1) as isize;
-        self.cursor = (self.cursor as isize + delta).clamp(0, max) as usize;
-        follow_cursor(self.cursor, &mut self.scroll, self.height);
-    }
-
-    pub fn selected(&self) -> Option<&TableRow> {
-        return self.filtered.get(self.cursor).map(|&i| &self.rows[i]);
-    }
-
-    pub fn render(&mut self, theme: &Theme, height: usize, width: usize) -> Vec<Line<'static>> {
-        let mut lines = Vec::new();
-
-        if let Some(banner) = &self.banner {
-            lines.push(banner.clone());
-            lines.push(Line::from(""));
-        }
-
-        // Column widths from the visible rows, the last column takes the remaining space
-        let mut widths: Vec<usize> = self.headers.iter().map(|h| h.len()).collect();
-
-        for &i in self.filtered.iter().take(2000) {
-            for (c, cell) in self.rows[i].cells.iter().enumerate() {
-                if c < widths.len() {
-                    widths[c] = widths[c].max(cell.chars().count().min(64));
-                }
-            }
-        }
-
-        let format_row = |cells: &[String]| -> String {
-            let mut text = String::new();
-
-            for (c, cell) in cells.iter().enumerate() {
-                if c + 1 == cells.len() {
-                    text.push_str(cell);
-                } else {
-                    let cell: String = cell.chars().take(widths[c]).collect();
-                    text.push_str(&format!("{:<width$}  ", cell, width = widths[c]));
-                }
-            }
-
-            return text.chars().take(width).collect();
+        let View::Disasm(view) = self.view_mut() else {
+            return false;
         };
 
-        lines.push(Line::from(Span::styled(format_row(&self.headers), theme.title_style())));
+        let page = (view.height / 2).max(1) as isize;
 
-        let rows_height = height.saturating_sub(lines.len()).max(1);
-        self.height = rows_height;
-        follow_cursor(self.cursor, &mut self.scroll, rows_height);
+        match command {
+            Command::Move(motion) => match motion {
+                Motion::PageDown => view.move_cursor(page),
+                Motion::PageUp => view.move_cursor(-page),
+                Motion::Down => view.move_cursor(repeat),
+                Motion::Up => view.move_cursor(-repeat),
+                Motion::JumpDown => view.move_cursor(VERTICAL_STEP as isize),
+                Motion::JumpUp => view.move_cursor(-VERTICAL_STEP as isize),
+                Motion::First => view.move_cursor(isize::MIN / 2),
+                Motion::Last => view.move_cursor(isize::MAX / 2),
+                Motion::Next => view.jump_label(true),
+                Motion::Previous => view.jump_label(false),
+                _ => return false,
+            },
+            Command::Open(OpenMode::Replace) => self.follow_instruction(),
+            Command::ToggleView => self.toggle_graph_linear(),
+            _ => return false,
+        }
 
-        for (pos, &i) in self.filtered.iter().enumerate().skip(self.scroll).take(rows_height) {
-            let row = &self.rows[i];
-            let mut style = row.style.unwrap_or(Style::default().fg(theme.fg));
+        return true;
+    }
 
-            if pos == self.cursor {
-                style = style.bg(theme.highlight_bg).fg(theme.highlight_fg);
+    /// Instruction under the cursor of a linear disassembly: its target opens
+    pub(crate) fn follow_instruction(&mut self) {
+        let View::Disasm(view) = self.view() else {
+            return;
+        };
+
+        let program = view.program;
+
+        let Some(analysis) = self.analyses[program].clone() else {
+            return;
+        };
+
+        let Some(insn) = view.cursor_insn(&analysis) else {
+            return;
+        };
+
+        let Some(target) = insn_target(&insn) else {
+            return;
+        };
+
+        let same_function = analysis.function_containing(insn.addr).map_or(false, |f| f.contains(target) && f.addr != target);
+
+        if same_function {
+            if let View::Disasm(view) = self.view_mut() {
+                view.goto(target);
             }
-
-            lines.push(Line::from(Span::styled(format_row(&row.cells), style)));
+        } else if analysis.functions.contains_key(&target) {
+            self.open_function(program, target, None);
+        } else {
+            self.goto_address(program, target);
         }
+    }
+}
 
-        if self.filtered.is_empty() {
-            lines.push(Line::from(Span::styled("No entries", Style::default().fg(theme.dim))));
-        }
-
-        return lines;
+pub(crate) fn render(view: &mut DisasmView, f: &mut Frame, theme: &Theme, area: Rect, programs: &[Arc<Program>], analyses: &[Option<Arc<Analysis>>], decoders: &[Option<Decoder>]) {
+    if let Some(decoder) = decoders[view.program].as_ref() {
+        let lines = view.render(theme, &programs[view.program], analyses[view.program].as_deref(), decoder, area.height as usize);
+        f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), area);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn table_filter_and_cursor() {
-        let rows = vec![
-            TableRow { cells: vec!["0x1000".to_string(), "main".to_string()], target: Target::Function(0, 0x1000), style: None },
-            TableRow { cells: vec!["0x2000".to_string(), "helper".to_string()], target: Target::Function(0, 0x2000), style: None },
-        ];
-
-        let mut table = TableView::new("Functions".to_string(), vec!["Address", "Name"], rows);
-        table.set_filter("help");
-
-        assert_eq!(table.filtered, vec![1]);
-        assert_eq!(table.selected().unwrap().target, Target::Function(0, 0x2000));
-
-        table.set_filter("");
-        table.move_cursor(10);
-        assert_eq!(table.cursor, 1);
-    }
 
     #[test]
     fn region_disassembly() {
@@ -944,15 +707,5 @@ mod tests {
 
         view.move_cursor(-FAR);
         assert_eq!(view.cursor_addr(), Some(0x100000));
-    }
-
-    #[test]
-    fn hex_goto() {
-        let mut hex = HexView::new("data".to_string(), 0x1000, vec![0; 0x1000]);
-        hex.height = 10;
-
-        assert!(hex.goto(0x1800));
-        assert_eq!(hex.scroll, 0x80 - 2);
-        assert!(!hex.goto(0x3000));
     }
 }
