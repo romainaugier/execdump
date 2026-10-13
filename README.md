@@ -21,6 +21,12 @@ libraries (`llvm-config` and the static libraries), found through `LLVM_SYS_181_
 cargo build --release
 ```
 
+The time spent in each stage of a project (analysis, background decompilation, cache, modules, export) on a binary:
+
+```
+cargo run --release -p execdump-project --example profile -- /usr/bin/python3 [workers] [max seconds of decompilation]
+```
+
 ## Usage
 
 ```
@@ -224,6 +230,9 @@ Decompiler:
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
   - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
   - :heavy_check_mark: C code generation (`--decompile c`)
+  - :heavy_check_mark: Address of the statements: each machine instruction is the debug location of the LLVM instructions
+    lifted from it, which the passes keep, so nearly every line of C has the address it comes from (the gutter of the C
+    views, and the synchronization of the C code with the disassembly and the graph)
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
 
@@ -233,7 +242,7 @@ The C code of the whole program is a project: every function is decompiled in th
 (source files), annotated and edited, and the work is saved in a git repository next to the binary.
 
 - :heavy_check_mark: Background decompilation of every function, callees first, the functions on screen before the others
-  (one decompiler per core but one), progress in the title bar
+  (one decompiler per core but one, sharing the signatures they discover), progress in the title bar
 - :heavy_check_mark: Decompilation cache on disk (`~/.cache/execdump/<id of the binary>/`): reopening a binary does not
   decompile it again, a function is decompiled again only when its annotations, or the names and prototypes of what it
   calls, change (or when execdump is rebuilt)

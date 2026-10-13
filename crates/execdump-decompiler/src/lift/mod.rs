@@ -30,7 +30,8 @@ use execdump_core::program::Program;
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::{Linkage, Module};
+use inkwell::debug_info::{AsDIScope, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
+use inkwell::module::{FlagBehavior, Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
 use inkwell::types::IntType;
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue};
@@ -45,7 +46,15 @@ pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
 
 /// Metadata kind of the address of the machine instruction an LLVM instruction comes from
-pub const ADDRESS_METADATA: &str = "execdump.addr";
+/// Address of a machine instruction as a debug location (line, column), see Lifter::locate
+pub fn encode_location(addr: u64) -> (u32, u32) {
+    return (addr as u32, ((addr >> 32) & 0xffff) as u32 + 1);
+}
+
+/// Address of a debug location, None for the locations the passes made unknown (column 0)
+pub fn decode_location(line: u32, column: u32) -> Option<u64> {
+    return (column != 0).then(|| ((column as u64 - 1) << 32) | line as u64);
+}
 
 /*
  * Signatures
@@ -499,6 +508,8 @@ pub struct Lifter<'ctx, 'a> {
     pub jump: Option<IntValue<'ctx>>,
     pub addr: u64,
     discovery: bool,
+    /// Debug information builder and scope of the function (the addresses of its instructions)
+    debug: Option<(DebugInfoBuilder<'ctx>, DIScope<'ctx>)>,
     /// Registers written and not read since the last call, with the width written
     written: RefCell<BTreeMap<Reg, u32>>,
     /// Written registers at the end of the lifted blocks, merged at the start of their successors
@@ -506,8 +517,7 @@ pub struct Lifter<'ctx, 'a> {
     /// Instructions of the last flag producer whose flags have not been read yet: dead when the
     /// next producer of the same block overwrites them (keeps the IR to optimize small)
     unread_flags: RefCell<Vec<InstructionValue<'ctx>>>,
-    /// Flag computations found dead, erased at the end of the block (the instructions of a block are
-    /// tagged with their address as they are lifted, erasing them before would break the tagging)
+    /// Flag computations found dead, erased at the end of the block
     dead_flags: RefCell<Vec<InstructionValue<'ctx>>>,
     /// Whether the current block produced flags, and read the stored ones before
     produced_flags: Cell<bool>,
@@ -531,7 +541,16 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
 
     let builder = cx.create_builder();
     let entry = cx.append_basic_block(llvm, "entry");
+
+    // The discovery of a signature does not need the addresses
+    let debug = (!discovery).then(|| debug_info(cx, module, llvm, &sig.name));
     builder.position_at_end(entry);
+
+    // The stack frame belongs to the first instruction
+    if let Some((debug, scope)) = debug.as_ref() {
+        let (line, column) = encode_location(function.addr);
+        builder.set_current_debug_location(debug.create_debug_location(cx, line, column, *scope, None));
+    }
 
     let regs: Vec<PointerValue> = env.regs.regs.iter().map(|r| builder.build_alloca(int_type(cx, r.bits), r.name).unwrap()).collect();
 
@@ -556,6 +575,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         jump: None,
         addr: function.addr,
         discovery,
+        debug,
         written: RefCell::new(BTreeMap::new()),
         written_out: HashMap::new(),
         unread_flags: RefCell::new(Vec::new()),
@@ -586,6 +606,10 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
 
     lifter.drop_unread_tail_flags();
 
+    if let Some((builder, _)) = lifter.debug.as_ref() {
+        builder.finalize();
+    }
+
     // Blocks the reverse post order did not reach (only reachable through unresolved jumps)
     for block in blocks.values() {
         if block.get_terminator().is_none() {
@@ -595,6 +619,38 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
     }
 
     return Ok(llvm);
+}
+
+/// Debug information of a lifted function: a compile unit and a subprogram, the scope of the locations
+fn debug_info<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, function: FunctionValue<'ctx>, name: &str) -> (DebugInfoBuilder<'ctx>, DIScope<'ctx>) {
+    if module.get_flag("Debug Info Version").is_none() {
+        module.add_basic_value_flag("Debug Info Version", FlagBehavior::Warning, cx.i32_type().const_int(3, false));
+    }
+
+    let (builder, unit) = module.create_debug_info_builder(
+        true,
+        DWARFSourceLanguage::C,
+        "binary",
+        ".",
+        "execdump",
+        true,
+        "",
+        0,
+        "",
+        DWARFEmissionKind::LineTablesOnly,
+        0,
+        false,
+        false,
+        "",
+        "",
+    );
+
+    let file = unit.get_file();
+    let ty = builder.create_subroutine_type(file, None, &[], DIFlags::ZERO);
+    let subprogram = builder.create_function(unit.as_debug_info_scope(), name, None, file, 0, ty, false, true, 0, DIFlags::ZERO, true);
+    function.set_subprogram(subprogram);
+
+    return (builder, subprogram.as_debug_info_scope());
 }
 
 fn function_type<'ctx>(cx: &'ctx Context, sig: &Signature, discovery: bool) -> FunctionType<'ctx> {
@@ -696,15 +752,12 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Insn::Aarch64(i) => i.addr,
             };
 
-            let current = self.builder.get_insert_block().ok_or("no current block")?;
-            let before = current.get_last_instruction();
+            self.locate(self.addr);
 
             match insn {
                 Insn::X86(i) => x86::lift(self, i)?,
                 Insn::Aarch64(i) => aarch64::lift(self, i)?,
             }
-
-            self.tag_address(current, before)?;
 
             insn.track(self.env.regs, &mut self.tracker);
         }
@@ -794,21 +847,15 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
-    /// Tags the instructions added to a block with the address of the machine instruction
-    fn tag_address(&self, block: LlvmBlock<'ctx>, before: Option<InstructionValue<'ctx>>) -> Result<(), String> {
-        let kind = self.cx.get_kind_id(ADDRESS_METADATA);
-        let node = self.cx.metadata_node(&[self.constant(64, self.addr).into()]);
-        let mut next = match before {
-            Some(instruction) => instruction.get_next_instruction(),
-            None => block.get_first_instruction(),
-        };
-
-        while let Some(instruction) = next {
-            instruction.set_metadata(node, kind).map_err(|e| e.to_string())?;
-            next = instruction.get_next_instruction();
+    /// The instructions built from now on come from the machine instruction at this address. The address is
+    /// their debug location (line: low 32 bits, column: the next 16 bits plus one), which the LLVM passes
+    /// keep on the instructions they create from others, unlike other metadata.
+    fn locate(&self, addr: u64) {
+        if let Some((builder, scope)) = self.debug.as_ref() {
+            let (line, column) = encode_location(addr);
+            let location = builder.create_debug_location(self.cx, line, column, *scope, None);
+            self.builder.set_current_debug_location(location);
         }
-
-        return Ok(());
     }
 
     fn build_return(&mut self) -> Result<(), String> {

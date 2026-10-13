@@ -444,10 +444,10 @@ impl Printer<'_> {
                 self.line(depth, "}", None);
             }
             StmtKind::DoWhile(body, cond) => {
-                self.line(depth, "do {", addr);
+                self.line(depth, "do {", first_address(body).or(addr));
                 self.block(body, depth + 1);
                 let text = format!("}} while ({});", self.expr(cond));
-                self.line(depth, &text, None);
+                self.line(depth, &text, addr);
             }
             StmtKind::For(init, cond, step, body) => {
                 let text = format!("for ({}; {}; {}) {{", self.simple(init), self.expr(cond), self.simple(step));
@@ -496,6 +496,10 @@ impl Printer<'_> {
             }
         }
     }
+}
+
+fn first_address(stmts: &[Stmt]) -> Option<u64> {
+    return stmts.iter().find_map(|s| s.addr);
 }
 
 fn escape(text: &str) -> String {

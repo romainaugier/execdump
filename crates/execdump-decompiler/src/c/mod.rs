@@ -40,6 +40,8 @@ pub struct Context<'a> {
     pub noreturn: &'a HashSet<String>,
     /// Text of the instruction at an address (kept as inline assembly)
     pub instruction: Box<dyn Fn(u64) -> String + 'a>,
+    /// The return instruction, when there is only one (the returns merged by LLVM have no address)
+    pub ret: Option<u64>,
 }
 
 impl Context<'_> {

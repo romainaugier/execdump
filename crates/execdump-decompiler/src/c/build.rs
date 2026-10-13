@@ -934,8 +934,9 @@ impl<'a> Builder<'a> {
         };
     }
 
-    /// Phi assignments of an edge, in an order that reads every value before it is overwritten
-    fn copies(&mut self, from: usize, to: usize) -> Vec<Stmt> {
+    /// Phi assignments of an edge, in an order that reads every value before it is overwritten. They
+    /// execute with the jump of the edge, they get its address.
+    fn copies(&mut self, from: usize, to: usize, jump: Option<u64>) -> Vec<Stmt> {
         let f = self.f;
         let mut pending: Vec<(VarId, Expr, Option<u64>)> = Vec::new();
 
@@ -955,7 +956,7 @@ impl<'a> Builder<'a> {
             let value = self.expr(operands[position]);
 
             if value != Expr::Var(var) {
-                pending.push((var, value, f.addr(id)));
+                pending.push((var, value, f.addr(id).or(jump)));
             }
         }
 
@@ -1056,7 +1057,13 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
     for block in 0..count {
         let stmts = builder.block_stmts(block);
         let terminator = f.blocks[block].insts.last().copied();
-        let addr = terminator.and_then(|t| f.addr(t)).or(stmts.first().and_then(|s| s.addr));
+        let mut addr = terminator.and_then(|t| f.addr(t));
+
+        if let (None, Some((Op::Ret, operands))) = (addr, terminator.and_then(|t| f.inst(t))) {
+            addr = operands.first().and_then(|&v| f.addr(v)).or(ctx.ret);
+        }
+
+        let addr = addr.or(stmts.first().and_then(|s| s.addr));
 
         let Some((op, operands)) = terminator.and_then(|t| f.inst(t)) else {
             blocks.push(SBlock { stmts, term: Term::Unreachable, addr });
@@ -1073,7 +1080,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
                 return count + edges.len() - 1;
             }
 
-            let copies = builder.copies(block, to);
+            let copies = builder.copies(block, to, addr);
 
             if copies.is_empty() {
                 return to;

@@ -12,7 +12,7 @@ use crate::cxx;
 use crate::lift::regs::{Abi, RegisterFile};
 use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
 use crate::typedb::{Platform, TypeDb};
-use crate::analysis::insn::Decoder;
+use crate::analysis::insn::{Decoder, Flow};
 use crate::c::{self, ast::CFunction};
 use crate::llm::{self, Assistant, LlmConfig, Renames};
 use crate::types::{CType, DataModel, FuncType, Param, Prototype};
@@ -200,12 +200,12 @@ impl<'a> Decompiler<'a> {
         let cx = Context::create();
         let module = self.lift_function(&cx, addr)?;
 
-        // The instruction addresses are metadata for the C backend
+        // The instruction addresses are debug locations for the C backend
         let text = module.print_to_string().to_string();
         let text: Vec<String> = text
             .lines()
             .filter(|l| !l.starts_with('!'))
-            .map(|l| l.split(", !execdump.addr").next().unwrap_or(l).to_string())
+            .map(|l| without_debug_locations(l))
             .collect();
 
         return Ok(text.join("\n"));
@@ -215,6 +215,14 @@ impl<'a> Decompiler<'a> {
     pub fn c_code(&self, addr: u64) -> Result<String, String> {
         let function = self.c_function(addr)?;
         return Ok(function.print().text);
+    }
+
+    /// The return instruction of a function that has only one
+    fn single_return(&self, addr: u64) -> Option<u64> {
+        let function = self.analysis.functions.get(&addr)?;
+        let mut rets = function.blocks.values().filter_map(|b| b.insns.last()).filter(|i| i.flow == Flow::Ret);
+        let ret = rets.next()?;
+        return rets.next().is_none().then_some(ret.addr);
     }
 
     /// The C function of a function, with the address of each statement
@@ -234,6 +242,7 @@ impl<'a> Decompiler<'a> {
             prototypes: &prototypes,
             noreturn: &noreturn,
             instruction: Box::new(|a| self.instruction_text(a)),
+            ret: self.single_return(addr),
         };
 
         let mut function = c::decompile(&module, function, &ctx, prototype.as_ref(), addr);
@@ -677,6 +686,19 @@ impl<'a> Decompiler<'a> {
     }
 }
 
+/// Line of LLVM IR without its debug attachments (", !dbg !12" on instructions, " !dbg !4" on definitions)
+fn without_debug_locations(line: &str) -> String {
+    let mut out = line.to_string();
+
+    while let Some(start) = out.find(" !dbg !") {
+        let digits = out[start + 7..].chars().take_while(|c| c.is_ascii_digit()).count();
+        let from = if out[..start].ends_with(',') { start - 1 } else { start };
+        out.replace_range(from..start + 7 + digits, "");
+    }
+
+    return out;
+}
+
 /// LLVM context dropping the names of the values (nothing reads them, naming them is costly)
 fn anonymous_context() -> Context {
     let cx = Context::create();
@@ -830,6 +852,36 @@ mod tests {
 
         let count_chars = code("count_chars");
         assert!(count_chars.starts_with("int count_chars(char *a1)"), "{}", count_chars);
+    }
+
+    #[test]
+    fn line_addresses() {
+        let program = fixture("elf_x86_64_analysis");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let (mut statements, mut located) = (0, 0);
+
+        for (&addr, function) in analysis.functions.iter() {
+            let Ok(c) = decompiler.c_function(addr) else { continue };
+            let printed = c.print();
+            let insns: std::collections::HashSet<u64> = function.blocks.values().flat_map(|b| b.insns.iter().map(|i| i.addr)).collect();
+
+            for (line, addr) in printed.text.lines().zip(printed.lines.iter()) {
+                if let Some(addr) = addr {
+                    assert!(insns.contains(addr), "{:#x} is not an instruction of {}: {}", addr, function.name, line);
+                }
+
+                let line = line.trim();
+                let statement = line.ends_with(';') && !line.starts_with('}') && !line.starts_with("//") && line.contains(['=', '(']) || line.starts_with("return") || line.starts_with("if (");
+
+                if statement && !printed.text.starts_with(line) {
+                    statements += 1;
+                    located += addr.is_some() as usize;
+                }
+            }
+        }
+
+        assert!(statements > 20 && located * 100 >= statements * 95, "{} of {} statements have an address", located, statements);
     }
 
     #[test]

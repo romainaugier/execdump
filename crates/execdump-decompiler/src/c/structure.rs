@@ -1060,8 +1060,10 @@ fn loop_conditions(stmts: &mut Vec<Stmt>) {
             let rest = &body[..body.len() - 1];
 
             if is_single(&then, &StmtKind::Break) && otherwise.is_empty() && !has_loop_jump(rest, &StmtKind::Continue) {
-                body.pop();
+                // The address of a do while is the one of its test
+                let test = body.pop().and_then(|s| s.addr);
                 stmt.kind = StmtKind::DoWhile(std::mem::take(body), c.not());
+                stmt.addr = test.or(stmt.addr);
             }
         }
     }

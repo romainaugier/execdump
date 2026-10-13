@@ -3,7 +3,7 @@
  * (values in an arena, constant expressions like ptrtoint (ptr @g to i64) are values too)
  */
 
-use crate::lift::ADDRESS_METADATA;
+use crate::lift::decode_location;
 
 use inkwell::llvm_sys::core::*;
 use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef};
@@ -311,7 +311,6 @@ struct Reader {
     ids: HashMap<LLVMValueRef, ValueId>,
     blocks: HashMap<LLVMBasicBlockRef, BlockId>,
     params: Vec<LLVMValueRef>,
-    address_kind: u32,
 }
 
 unsafe fn name(value: LLVMValueRef) -> String {
@@ -424,19 +423,16 @@ impl Reader {
         }
     }
 
+    /// Address of the machine instruction an instruction comes from (its debug location)
     unsafe fn address(&self, raw: LLVMValueRef) -> Option<u64> {
         unsafe {
-            let node = LLVMGetMetadata(raw, self.address_kind);
+            let location = inkwell::llvm_sys::debuginfo::LLVMInstructionGetDebugLoc(raw);
 
-            if node.is_null() {
+            if location.is_null() {
                 return None;
             }
 
-            let count = LLVMGetMDNodeNumOperands(node);
-            let mut operands = vec![std::ptr::null_mut(); count as usize];
-            LLVMGetMDNodeOperands(node, operands.as_mut_ptr());
-
-            return operands.first().filter(|o| !o.is_null()).map(|&o| LLVMConstIntGetZExtValue(o));
+            return decode_location(inkwell::llvm_sys::debuginfo::LLVMDILocationGetLine(location), inkwell::llvm_sys::debuginfo::LLVMDILocationGetColumn(location));
         }
     }
 }
@@ -445,12 +441,9 @@ impl Reader {
 pub fn read(module: &Module, function: FunctionValue) -> Func {
     unsafe {
         let raw = function.as_value_ref();
-        let kind_name = ADDRESS_METADATA;
-        let context = LLVMGetModuleContext(module.as_mut_ptr());
-        let address_kind = LLVMGetMDKindIDInContext(context, kind_name.as_ptr() as *const _, kind_name.len() as u32);
 
         let params: Vec<LLVMValueRef> = (0..LLVMCountParams(raw)).map(|i| LLVMGetParam(raw, i)).collect();
-        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), address_kind };
+        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone() };
 
         let param_ids: Vec<ValueId> = params.iter().map(|&p| reader.value(p)).collect();
 
