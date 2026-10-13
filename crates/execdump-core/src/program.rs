@@ -152,8 +152,15 @@ impl Program {
     pub fn region_at(&self, addr: u64) -> Option<&Region> {
         let idx = self.regions.partition_point(|r| r.vaddr <= addr);
 
-        // Regions can overlap (ELF .tbss for example), look back a few regions
-        return self.regions[..idx].iter().rev().take(4).find(|r| r.contains(addr));
+        // Regions can overlap (ELF .tbss for example), look back a few regions, the ones with data first
+        let mut candidates = self.regions[..idx].iter().rev().take(4).filter(|r| r.contains(addr));
+        let first = candidates.next()?;
+
+        if !first.data.is_empty() {
+            return Some(first);
+        }
+
+        return candidates.find(|r| !r.data.is_empty()).or(Some(first));
     }
 
     pub fn is_executable(&self, addr: u64) -> bool {
@@ -245,7 +252,8 @@ impl Program {
     }
 
     fn finalize(&mut self) {
-        self.regions.sort_by_key(|r| (r.vaddr, r.size));
+        // The name breaks the ties: overlapping regions (TLS sections) are found in the same order every time
+        self.regions.sort_by(|a, b| (a.vaddr, a.size, &a.name).cmp(&(b.vaddr, b.size, &b.name)));
 
         let mut seen = HashSet::new();
         self.seeds.sort_by_key(|s| (s.source, s.addr));
@@ -280,7 +288,7 @@ fn program_from_elf(elf: &ELF) -> Program {
         .filter(|s| (s.header.flags() & ELFSectionFlags::Alloc as u64) != 0 && s.size() > 0)
         .collect();
 
-    sections.sort_by_key(|s| s.offset());
+    sections.sort_by(|a, b| (a.offset(), a.header.virtual_address(), &a.name).cmp(&(b.offset(), b.header.virtual_address(), &b.name)));
 
     // Relocatable objects have all their sections at address 0, lay them out one after the other
     let mut next_address = 0u64;
@@ -763,6 +771,20 @@ mod tests {
 
         let analysis = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_analysis")).unwrap())).remove(0);
         assert_eq!(analysis.source_names, ["analysis.c"]);
+    }
+
+    #[test]
+    fn overlapping_regions() {
+        let mut program = Program::default();
+        program.regions.push(Region { name: ".tbss".to_string(), vaddr: 0x1000, size: 0x10, ..Default::default() });
+        program.regions.push(Region { name: ".init_array".to_string(), vaddr: 0x1000, size: 8, data: vec![1; 8], ..Default::default() });
+        program.regions.push(Region { name: ".fini_array".to_string(), vaddr: 0x1008, size: 8, data: vec![2; 8], ..Default::default() });
+        program.finalize();
+
+        assert_eq!(program.regions.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), [".init_array", ".tbss", ".fini_array"]);
+        assert_eq!(program.region_at(0x1000).unwrap().name, ".init_array");
+        assert_eq!(program.region_at(0x1008).unwrap().name, ".fini_array");
+        assert_eq!(program.read_u64(0x1000), Some(0x0101010101010101));
     }
 
     #[test]
