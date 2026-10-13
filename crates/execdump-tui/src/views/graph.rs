@@ -584,13 +584,15 @@ impl GraphView {
     }
 
     /// Selects the next node (in reading order) whose text contains the pattern
-    pub fn search(&mut self, pattern: &str) -> bool {
+    /// Next (or previous) node, in the reading order, whose text contains a pattern
+    pub fn search(&mut self, pattern: &str, forward: bool) -> bool {
         let pattern = pattern.to_lowercase();
         let pos = self.order_position();
         let count = self.layout.order.len();
 
         for i in 1..=count {
-            let node = self.layout.order[(pos + i) % count];
+            let index = if forward { (pos + i) % count } else { (pos + count * 2 - i) % count };
+            let node = self.layout.order[index];
 
             if self.nodes[node].text.to_lowercase().contains(&pattern) || self.nodes[node].title.to_lowercase().contains(&pattern) {
                 self.select(node);

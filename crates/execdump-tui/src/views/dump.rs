@@ -34,12 +34,12 @@ impl DumpView {
         return self.lines.len().saturating_sub(self.height);
     }
 
-    pub fn search(&mut self, pattern: &str) -> bool {
+    pub fn search(&mut self, pattern: &str, forward: bool) -> bool {
         let pattern = pattern.to_lowercase();
         let count = self.lines.len();
 
         for i in 1..=count {
-            let index = (self.scroll + i) % count;
+            let index = if forward { (self.scroll + i) % count } else { (self.scroll + count * 2 - i) % count };
             let text: String = self.lines[index].spans.iter().map(|s| s.content.to_lowercase()).collect();
 
             if text.contains(&pattern) {

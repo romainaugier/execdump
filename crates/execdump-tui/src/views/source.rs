@@ -263,6 +263,105 @@ pub struct SourceView {
     redo: Vec<(u64, String)>,
 }
 
+/// What an operator (delete, change) goes over from the cursor
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    Word,
+    WordEnd,
+    WordBack,
+    LineEnd,
+    LineStart,
+    LineFirst,
+    /// Whole lines: the cursor line, the lines below, the lines above
+    Line,
+    Down,
+    Up,
+    Char,
+    CharBack,
+}
+
+/// Kind of a character for the word moves: blank, identifier or punctuation
+fn char_class(c: char) -> u8 {
+    return if c.is_whitespace() { 0 } else if c.is_ascii_alphanumeric() || c == '_' { 1 } else { 2 };
+}
+
+/// Start of the next word of a line (its length at the last word)
+fn next_word(chars: &[char], mut i: usize) -> usize {
+    let class = chars.get(i).map(|&c| char_class(c));
+
+    while i < chars.len() && class != Some(0) && Some(char_class(chars[i])) == class {
+        i += 1;
+    }
+
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+
+    return i;
+}
+
+/// End of the word (after its last character), from the next character
+fn word_end(chars: &[char], i: usize) -> usize {
+    let mut i = (i + 1).min(chars.len());
+
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+
+    let class = chars.get(i).map(|&c| char_class(c));
+
+    while i < chars.len() && Some(char_class(chars[i])) == class {
+        i += 1;
+    }
+
+    return i;
+}
+
+/// Start of the previous word of a line
+fn previous_word(chars: &[char], mut i: usize) -> usize {
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+
+    let class = i.checked_sub(1).map(|j| char_class(chars[j]));
+
+    while i > 0 && Some(char_class(chars[i - 1])) == class {
+        i -= 1;
+    }
+
+    return i;
+}
+
+/// Characters of a line an operator goes over (start, end), repeated count times
+fn reach_range(chars: &[char], col: usize, reach: Reach, count: usize, change: bool) -> (usize, usize) {
+    let indent = chars.iter().take_while(|c| c.is_whitespace()).count();
+    let ends = |mut end: usize, times: usize| {
+        for _ in 0..times {
+            end = word_end(chars, end.saturating_sub(1));
+        }
+
+        end
+    };
+
+    return match reach {
+        // cw changes to the end of the word under the cursor, as in vim
+        Reach::Word if change && chars.get(col).is_some_and(|c| !c.is_whitespace()) => {
+            let class = char_class(chars[col]);
+            let end = (col..chars.len()).find(|&i| char_class(chars[i]) != class).unwrap_or(chars.len());
+            (col, ends(end, count - 1))
+        }
+        Reach::Word => (col, (0..count).fold(col, |i, _| next_word(chars, i))),
+        Reach::WordEnd => (col, ends(word_end(chars, col), count - 1)),
+        Reach::WordBack => ((0..count).fold(col, |i, _| previous_word(chars, i)), col),
+        Reach::LineEnd => (col, chars.len()),
+        Reach::LineStart => (0, col),
+        Reach::LineFirst => (indent.min(col), indent.max(col)),
+        Reach::Char => (col, (col + count).min(chars.len())),
+        Reach::CharBack => (col.saturating_sub(count), col),
+        Reach::Line | Reach::Down | Reach::Up => (0, chars.len()),
+    };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InsertWhere {
     Cursor,
@@ -583,20 +682,36 @@ impl SourceView {
         }
     }
 
-    /// Next line (after the cursor, wrapping) containing a pattern, in the decompiled functions
-    pub fn search(&mut self, project: &mut Project, pattern: &str) -> bool {
+    /// Next (or previous) line containing a pattern, from the cursor and wrapping, in the decompiled functions
+    pub fn search(&mut self, project: &mut Project, pattern: &str, forward: bool) -> bool {
         let pattern = pattern.to_lowercase();
         let count = self.functions.len();
 
+        if count == 0 {
+            return false;
+        }
+
         for step in 0..=count {
-            let block = (self.cursor.block + step) % count.max(1);
-            let start = if step == 0 { self.cursor.line + 1 } else { 0 };
+            let block = if forward { (self.cursor.block + step) % count.max(1) } else { (self.cursor.block + count * 2 - step) % count.max(1) };
 
             let Some((rendered, _)) = project.shown(self.functions[block]) else {
                 continue;
             };
 
-            for (line, text) in rendered.text.lines().enumerate().skip(start) {
+            let mut lines: Vec<(usize, &str)> = rendered.text.lines().enumerate().collect();
+
+            // The lines after the cursor (before it backwards), then the whole blocks
+            if step == 0 {
+                lines.retain(|(line, _)| if forward { *line > self.cursor.line } else { *line < self.cursor.line });
+            } else if step == count {
+                lines.retain(|(line, _)| if forward { *line <= self.cursor.line } else { *line >= self.cursor.line });
+            }
+
+            if !forward {
+                lines.reverse();
+            }
+
+            for (line, text) in lines {
                 // Lowercasing may change the length of the characters: the column is counted in the lowercased text
                 let lower = text.to_lowercase();
 
@@ -793,6 +908,70 @@ impl SourceView {
         self.replace(project, &format!("{}\n", lines.join("\n")))?;
         self.clamp_col(project);
 
+        return Ok(());
+    }
+
+    /// Deletes what a motion goes over from the cursor (lines, or characters of the line), then starts the
+    /// insert mode there when it changes it
+    pub fn operate(&mut self, project: &mut Project, reach: Reach, count: usize, change: bool) -> Result<(), String> {
+        let addr = self.function().ok_or("no function here")?;
+
+        if project.shown(addr).is_none() {
+            return Err("this function is not decompiled yet".to_string());
+        }
+
+        let mut lines = self.block_lines(project, self.cursor.block);
+        let line = self.cursor.line;
+        let count = count.max(1);
+
+        // The blank line after a function is not part of it
+        if line >= lines.len() {
+            return Ok(());
+        }
+
+        if matches!(reach, Reach::Line | Reach::Down | Reach::Up) {
+            let (first, last) = match reach {
+                Reach::Line => (line, line + count - 1),
+                Reach::Down => (line, line + count),
+                _ => (line.saturating_sub(count), line),
+            };
+
+            let last = last.min(lines.len() - 1);
+            let indent: String = lines[first].chars().take_while(|c| c.is_whitespace()).collect();
+            lines.drain(first..=last);
+
+            if change || lines.is_empty() {
+                lines.insert(first, if change { indent.clone() } else { String::new() });
+            }
+
+            self.cursor.line = first.min(lines.len() - 1);
+            self.replace(project, &format!("{}\n", lines.join("\n")))?;
+
+            if change {
+                self.col = indent.chars().count();
+                return self.start_insert(project, InsertWhere::Cursor);
+            }
+
+            self.line_start(project, true);
+            return Ok(());
+        }
+
+        let chars: Vec<char> = lines[line].chars().collect();
+        let col = self.col.min(chars.len());
+        let (start, end) = reach_range(&chars, col, reach, count, change);
+
+        if start < end {
+            lines[line] = chars[..start].iter().chain(chars[end..].iter()).collect();
+            self.replace(project, &format!("{}\n", lines.join("\n")))?;
+        }
+
+        self.col = start;
+
+        if change {
+            return self.start_insert(project, InsertWhere::Cursor);
+        }
+
+        self.clamp_col(project);
         return Ok(());
     }
 
@@ -1236,6 +1415,7 @@ impl App {
             Command::Undo => view.undo(project, false),
             Command::Redo => view.undo(project, true),
             Command::DeleteLine => view.delete_line(project),
+            Command::Operator { change, reach } => view.operate(project, *reach, repeat as usize, *change),
             _ => return false,
         };
 
@@ -1257,6 +1437,24 @@ pub(crate) fn render(view: &mut SourceView, f: &mut Frame, theme: &Theme, area: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_reaches() {
+        let chars: Vec<char> = "    v1 = sub_1000(a1, 2);".chars().collect();
+        let text = |(start, end): (usize, usize)| chars[start..end].iter().collect::<String>();
+
+        assert_eq!(text(reach_range(&chars, 4, Reach::Word, 1, false)), "v1 ");
+        assert_eq!(text(reach_range(&chars, 4, Reach::Word, 1, true)), "v1");
+        assert_eq!(text(reach_range(&chars, 4, Reach::Word, 2, true)), "v1 =");
+        assert_eq!(text(reach_range(&chars, 9, Reach::WordEnd, 1, false)), "sub_1000");
+        assert_eq!(text(reach_range(&chars, 9, Reach::WordEnd, 2, false)), "sub_1000(");
+        assert_eq!(text(reach_range(&chars, 18, Reach::WordBack, 1, false)), "(");
+        assert_eq!(text(reach_range(&chars, 18, Reach::WordBack, 2, false)), "sub_1000(");
+        assert_eq!(text(reach_range(&chars, 9, Reach::LineEnd, 1, false)), "sub_1000(a1, 2);");
+        assert_eq!(text(reach_range(&chars, 9, Reach::LineFirst, 1, false)), "v1 = ");
+        assert_eq!(text(reach_range(&chars, 9, Reach::Char, 3, false)), "sub");
+        assert_eq!(text(reach_range(&chars, 9, Reach::CharBack, 2, false)), "= ");
+    }
 
     #[test]
     fn fenwick() {

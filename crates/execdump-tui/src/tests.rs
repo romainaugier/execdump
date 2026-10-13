@@ -364,3 +364,99 @@ fn code_editing_and_annotations() {
 
     let _ = std::fs::remove_dir_all(&location);
 }
+
+fn esc(app: &mut App) {
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+}
+
+#[test]
+fn search_operators_and_completion() {
+    let (mut app, location) = app("search");
+    let mut terminal = Terminal::new(TestBackend::new(140, 45)).unwrap();
+    wait_decompiled(&mut app);
+
+    app.run_command("c main");
+    let main = app.projects[0].as_ref().unwrap().resolve("main").unwrap();
+    let cursor = |app: &App| match app.view() {
+        View::Source(view) => (view.cursor.block, view.cursor.line),
+        _ => panic!("Expected the C code"),
+    };
+
+    // n / p go through the matches while the search is active, then through the functions again
+    keys(&mut app, "/return");
+    enter(&mut app);
+    assert!(app.searching);
+    let first = cursor(&app);
+    keys(&mut app, "n");
+    let second = cursor(&app);
+    assert_ne!(first, second);
+    keys(&mut app, "p");
+    assert_eq!(cursor(&app), first);
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+    esc(&mut app);
+    assert!(!app.searching);
+    keys(&mut app, "gg");
+    keys(&mut app, "n");
+    assert_eq!(cursor(&app), (1, 0));
+
+    // dw deletes the first word of the line, u brings it back
+    app.run_command("c main");
+    let View::Source(view) = app.view() else { panic!("Expected the C code") };
+    assert_eq!((view.function(), view.cursor.line), (Some(main), 0));
+    let before = app.projects[0].as_mut().unwrap().shown(main).unwrap().0.text.clone();
+    keys(&mut app, "0dw");
+    let after = app.projects[0].as_mut().unwrap().shown(main).unwrap().0.text.clone();
+    let first_line = before.lines().next().unwrap();
+    let rest = first_line.split_once(' ').unwrap().1;
+    assert_eq!(after.lines().next().unwrap(), rest, "{}", after);
+    keys(&mut app, "u");
+    assert_eq!(app.projects[0].as_mut().unwrap().shown(main).unwrap().0.text, before);
+
+    // cw changes the word: insert mode in its place
+    keys(&mut app, "cw");
+    keys(&mut app, "long");
+    esc(&mut app);
+    let changed = app.projects[0].as_mut().unwrap().shown(main).unwrap().0.text.clone();
+    assert!(changed.starts_with("long main("), "{}", changed);
+    keys(&mut app, "u");
+
+    // < > resize the explorer without splits, the splits with them
+    let width = app.explorer_fit;
+    keys(&mut app, "<");
+    assert_eq!(app.explorer_width, Some(width + 5));
+    keys(&mut app, "=");
+    assert_eq!(app.explorer_width, None);
+    app.run_command("vs");
+    keys(&mut app, ">");
+    assert_eq!(app.explorer_width, None);
+    app.run_command("only");
+
+    app.run_command("toggle-explorer");
+    assert!(!app.explorer_visible);
+    app.run_command("explorer");
+    assert!(app.explorer_visible);
+
+    // Suggestions: commands, then their arguments
+    keys(&mut app, ":spl");
+    assert_eq!(app.completion.as_ref().unwrap().items[0].text, "split");
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(app.input.as_ref().is_some_and(|(_, t)| t == "split"));
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    esc(&mut app);
+
+    keys(&mut app, ":c clas");
+    assert!(app.completion.as_ref().unwrap().items.iter().any(|s| s.text == "classify"));
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    enter(&mut app);
+    let View::Source(view) = app.view() else { panic!("Expected the C code") };
+    assert_eq!(view.function(), app.projects[0].as_ref().unwrap().resolve("classify"));
+
+    // The command line keeps its history
+    keys(&mut app, ":");
+    app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+    assert!(app.input.as_ref().is_some_and(|(_, t)| t == "c classify"));
+    esc(&mut app);
+
+    let _ = std::fs::remove_dir_all(&location);
+}

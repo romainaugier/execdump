@@ -7,6 +7,7 @@ use super::*;
 
 use crate::commands::{help_lines, Binding};
 use crate::popup::render_popup;
+use crate::prompt::render_completion;
 use crate::splits::render_group;
 
 /// 157204 -> 157.2k
@@ -108,7 +109,7 @@ impl App {
             },
             View::Disasm(_) => "j/k move  n/p function  Enter follow  Space graph  D code  x xrefs  / search  ^o back  ? help",
             View::Source(view) if view.insert.is_some() => "-- INSERT --  Esc normal mode",
-            View::Source(_) => "hjkl move  Enter/gd go to  i/a/o insert  dd  u/U undo/redo  cn rename  ct retype  cs signature  ; comment  M move  L LLM  :w save",
+            View::Source(_) => "hjkl move  Enter/gd go to  i/a/o insert  dd/dw/cw  u/U undo/redo  cn rename  ct retype  cs signature  ; comment  M move  L LLM  :w save",
             View::Review(_) => "j/k move  n/p proposal  a accept  r reject  Enter open the code  :w save",
             View::Table(_) => "j/k move  Enter open  / filter  Esc clear  ^o back  ? help",
             _ => "j/k scroll  ^d/^u page  g/G top/bottom  / search  ^o back  ? help",
@@ -209,11 +210,17 @@ pub(crate) fn ui(f: &mut Frame, app: &mut App) {
                 (count, _) => format!("{}{}  ", count.map_or(String::new(), |c| c.to_string()), crate::commands::sequence_name(&app.pending)),
             };
 
-            Line::from(Span::styled(format!("{}{}", pending, app.hints()), Style::default().fg(theme.dim)))
+            let search = if app.searching && !matches!(app.view(), View::Table(_)) { format!("/{}  n/p match  Esc clear  ", app.last_search) } else { String::new() };
+
+            Line::from(Span::styled(format!("{}{}{}", pending, search, app.hints()), Style::default().fg(theme.dim)))
         }
     };
 
     f.render_widget(Paragraph::new(status).style(theme.base()), chunks[2]);
+
+    if let (Some((InputKind::Command, _)), Some(completion)) = (&app.input, &app.completion) {
+        render_completion(f, &theme, completion, chunks[2]);
+    }
 
     if let Some(popup) = &app.popup {
         render_popup(f, &theme, popup);

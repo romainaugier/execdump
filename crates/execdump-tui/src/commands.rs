@@ -13,7 +13,7 @@
 
 use super::*;
 
-use crate::views::source::InsertWhere;
+use crate::views::source::{InsertWhere, Reach};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -177,6 +177,8 @@ pub(crate) enum Command {
     /// Opens the command line with a text ({word}: the identifier under the cursor, {signature}: of the function)
     Prompt(String),
     Search,
+    /// Next (or previous) match of the search
+    SearchAgain { forward: bool },
     ClearSearch,
     Help,
     Back,
@@ -222,6 +224,8 @@ pub(crate) enum Command {
     Undo,
     Redo,
     DeleteLine,
+    /// Deletes what a motion goes over, then inserts when it changes it (dw, cw, d$...)
+    Operator { change: bool, reach: Reach },
     Conflict { forward: bool },
     Rename(String, String),
     Retype(String, String),
@@ -265,10 +269,12 @@ pub(crate) enum Complete {
     Function,
     Module,
     Library,
+    /// A variable of the current function, or a function
     Name,
-    Direction,
     Llm,
     Path,
+    Proposal,
+    Words(&'static [&'static str]),
 }
 
 pub(crate) struct Spec {
@@ -277,7 +283,6 @@ pub(crate) struct Spec {
     pub usage: &'static str,
     pub help: &'static str,
     pub group: &'static str,
-    #[allow(dead_code)]
     pub complete: Complete,
 }
 
@@ -295,6 +300,9 @@ const PROJECT: &str = "Project";
 
 use Complete as C;
 
+const DIRECTIONS: &[&str] = &["left", "down", "up", "right"];
+const REACHES: &[&str] = &["word", "word-end", "word-back", "line-end", "line-start", "line-first", "line", "down", "up", "char", "char-back"];
+
 /// Every command, in the order of the help
 pub(crate) const SPECS: &[Spec] = &[
     spec("quit", &["q", "close", "clo"], "", "close the tab (the split with its last tab, execdump with the last split)", APP, C::Nothing),
@@ -305,6 +313,8 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("wq", &["x"], "", "save and quit", APP, C::Nothing),
     spec("prompt", &[], "[text]", "command line", APP, C::Nothing),
     spec("search", &[], "", "search (filters the tables, finds the nodes and the lines)", APP, C::Nothing),
+    spec("search-next", &[], "", "next match of the search", APP, C::Nothing),
+    spec("search-previous", &[], "", "previous match of the search", APP, C::Nothing),
     spec("clear-search", &["nohlsearch", "noh"], "", "clear the search (the filter of the tables)", APP, C::Nothing),
     spec("help", &["h"], "", "keys and commands", APP, C::Nothing),
     spec("back", &[], "", "previous view of the tab", APP, C::Nothing),
@@ -333,7 +343,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("line-end", &[], "", "end of the line", MOVES, C::Nothing),
     spec("next-function", &[], "", "next function of the module", MOVES, C::Nothing),
     spec("previous-function", &[], "", "previous function of the module", MOVES, C::Nothing),
-    spec("open", &[], "[tab|split|vsplit]", "open the item, follow the instruction, go to the called function", MOVES, C::Nothing),
+    spec("open", &[], "[tab|split|vsplit]", "open the item, follow the instruction, go to the called function", MOVES, C::Words(&["tab", "split", "vsplit"])),
     spec("close", &[], "", "close the node of the explorer, or go to its parent", MOVES, C::Nothing),
     spec("definition", &[], "", "go to the function or the global under the cursor", MOVES, C::Nothing),
     spec("callgraph", &["cg"], "[function]", "call graph (of the entry point without a function)", VIEWS, C::Function),
@@ -350,19 +360,21 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("toggle-code", &[], "", "C code of the function, back to its graph from the code", VIEWS, C::Nothing),
     spec("xrefs", &[], "", "cross references to the function", VIEWS, C::Nothing),
     spec("function-call-graph", &[], "", "call graph of the function", VIEWS, C::Nothing),
-    spec("follow", &[], "<true|false>", "follow the true or the false branch", GRAPH, C::Nothing),
+    spec("follow", &[], "<true|false>", "follow the true or the false branch", GRAPH, C::Words(&["true", "false"])),
     spec("center", &[], "", "center the selected node", GRAPH, C::Nothing),
-    spec("detail", &[], "[all]", "C code, disassembly or summary in the selected node (in every node)", GRAPH, C::Nothing),
+    spec("detail", &[], "[all]", "C code, disassembly or summary in the selected node (in every node)", GRAPH, C::Words(&["all"])),
     spec("depth", &[], "<n|+n|-n>", "depth of the call graph", GRAPH, C::Nothing),
     spec("toggle-imports", &[], "", "imported functions in the call graph", GRAPH, C::Nothing),
     spec("reroot", &[], "", "call graph rooted at the selected function", GRAPH, C::Nothing),
     spec("up", &["parent"], "", "call graph rooted at a caller of its root", GRAPH, C::Nothing),
-    spec("accept", &[], "[n]", "accept a proposal (the selected one without a number)", PROJECT, C::Nothing),
-    spec("reject", &[], "[n]", "reject a proposal (the selected one without a number)", PROJECT, C::Nothing),
-    spec("insert", &[], "[after|end|start|below|above]", "insert mode (Esc: back to normal mode)", CODE, C::Nothing),
+    spec("accept", &[], "[n]", "accept a proposal (the selected one without a number)", PROJECT, C::Proposal),
+    spec("reject", &[], "[n]", "reject a proposal (the selected one without a number)", PROJECT, C::Proposal),
+    spec("insert", &[], "[after|end|start|below|above]", "insert mode (Esc: back to normal mode)", CODE, C::Words(&["after", "end", "start", "below", "above"])),
     spec("undo", &[], "", "undo the last change", CODE, C::Nothing),
     spec("redo", &[], "", "redo the last undone change", CODE, C::Nothing),
     spec("delete-line", &[], "", "delete the line", CODE, C::Nothing),
+    spec("delete", &[], "<motion>", "delete over a motion: word, word-end, word-back, line-end, line-start, line-first, line, down, up, char, char-back", CODE, C::Words(REACHES)),
+    spec("change", &[], "<motion>", "delete over a motion, then insert", CODE, C::Words(REACHES)),
     spec("next-conflict", &[], "", "next conflict", CODE, C::Nothing),
     spec("previous-conflict", &[], "", "previous conflict", CODE, C::Nothing),
     spec("rename", &["ren"], "<name> <new name>", "rename a variable, a function or a global (- restores the original name)", CODE, C::Name),
@@ -390,12 +402,12 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("tabprevious", &["tabp", "tabN"], "", "previous tab", SPLITS, C::Nothing),
     spec("only", &["on"], "", "close the other splits", SPLITS, C::Nothing),
     spec("link", &["unlink"], "", "link with the previous split: their cursors follow each other", SPLITS, C::Nothing),
-    spec("focus-split", &[], "<left|down|up|right>", "go to the split in a direction", SPLITS, C::Direction),
+    spec("focus-split", &[], "<left|down|up|right>", "go to the split in a direction", SPLITS, C::Words(DIRECTIONS)),
     spec("next-split", &[], "", "next split", SPLITS, C::Nothing),
     spec("previous-split", &[], "", "previous split", SPLITS, C::Nothing),
     spec("last-split", &[], "", "split focused before", SPLITS, C::Nothing),
     spec("close-split", &[], "", "close the split", SPLITS, C::Nothing),
-    spec("move-tab", &[], "<left|down|up|right>", "move the tab to the split in a direction", SPLITS, C::Direction),
+    spec("move-tab", &[], "<left|down|up|right>", "move the tab to the split in a direction", SPLITS, C::Words(DIRECTIONS)),
     spec("equalize", &[], "", "equal sizes", SPLITS, C::Nothing),
     spec("resize-width", &[], "<+n|-n>", "wider or narrower split", SPLITS, C::Nothing),
     spec("resize-height", &[], "<+n|-n>", "taller or shorter split", SPLITS, C::Nothing),
@@ -452,6 +464,8 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "write" => Command::Write(Some(rest.to_string()).filter(|r| !r.is_empty())),
         "wq" => Command::WriteQuit,
         "search" => Command::Search,
+        "search-next" => Command::SearchAgain { forward: true },
+        "search-previous" => Command::SearchAgain { forward: false },
         "clear-search" => Command::ClearSearch,
         "help" => Command::Help,
         "back" => Command::Back,
@@ -535,6 +549,24 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "undo" => Command::Undo,
         "redo" => Command::Redo,
         "delete-line" => Command::DeleteLine,
+        "delete" | "change" => {
+            let reach = match first {
+                Some("word") => Reach::Word,
+                Some("word-end") => Reach::WordEnd,
+                Some("word-back") => Reach::WordBack,
+                Some("line-end") => Reach::LineEnd,
+                Some("line-start") => Reach::LineStart,
+                Some("line-first") => Reach::LineFirst,
+                Some("line") => Reach::Line,
+                Some("down") => Reach::Down,
+                Some("up") => Reach::Up,
+                Some("char") => Reach::Char,
+                Some("char-back") => Reach::CharBack,
+                _ => return Err(usage(spec)),
+            };
+
+            Command::Operator { change: spec.name == "change", reach }
+        }
         "next-conflict" => Command::Conflict { forward: true },
         "previous-conflict" => Command::Conflict { forward: false },
         "rename" => match (first, second) {
@@ -595,6 +627,8 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
 /// Where a binding applies, the most specific first
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Context {
+    /// A search is active: n / p go to its matches
+    Search,
     Graph,
     Source,
     Disasm,
@@ -609,6 +643,7 @@ pub(crate) enum Context {
 impl Context {
     pub fn title(&self) -> &'static str {
         return match self {
+            Context::Search => "While a search is active",
             Context::Graph => "Graphs",
             Context::Source => "C code",
             Context::Disasm => "Linear disassembly",
@@ -632,10 +667,10 @@ pub(crate) struct Binding {
 
 /// Bindings of the configured keys, then of the fixed ones
 pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
-    let mut list: Vec<(Context, String, &str)> = Vec::new();
-    let mut bind = |context: Context, keys: &[String], text: &'static str| {
+    let mut list: Vec<(Context, String, String)> = Vec::new();
+    let mut bind = |context: Context, keys: &[String], text: &str| {
         for key in keys {
-            list.push((context, key.clone(), text));
+            list.push((context, key.clone(), text.to_string()));
         }
     };
 
@@ -721,6 +756,14 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Content, &[c(k.call_graph)], "function-call-graph");
     bind(Content, &[c(k.decompile)], "toggle-code");
     bind(Content, &[c(k.toggle_view)], "toggle-view");
+    bind(Content, &[s("<lt>")], "resize-width -5");
+    bind(Content, &[s(">")], "resize-width +5");
+    bind(Content, &[s("=")], "equalize");
+
+    // While a search is active
+    bind(Search, &[c(k.next_node)], "search-next");
+    bind(Search, &[c(k.prev_node), s("N")], "search-previous");
+    bind(Search, &[s("<Esc>")], "clear-search");
 
     // Graphs
     bind(Graph, &[c(k.center)], "center");
@@ -728,7 +771,7 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Graph, &[c(k.follow_false)], "follow false");
     bind(Graph, &[c(k.detail)], "detail");
     bind(Graph, &[upper(k.detail)], "detail all");
-    bind(Graph, &[s("+"), s("=")], "depth +1");
+    bind(Graph, &[s("+")], "depth +1");
     bind(Graph, &[s("-")], "depth -1");
     bind(Graph, &[s("i")], "toggle-imports");
     bind(Graph, &[s("r")], "reroot");
@@ -759,6 +802,13 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Source, &[s("u")], "undo");
     bind(Source, &[s("U")], "redo");
     bind(Source, &[s("dd")], "delete-line");
+
+    for (motion, reach) in [("w", "word"), ("e", "word-end"), ("b", "word-back"), ("$", "line-end"), ("0", "line-start"), ("^", "line-first"), ("j", "down"), ("k", "up"), ("l", "char"), ("h", "char-back")] {
+        bind(Source, &[format!("d{}", motion)], &format!("delete {}", reach));
+        bind(Source, &[format!("c{}", motion)], &format!("change {}", reach));
+    }
+
+    bind(Source, &[s("cc")], "change line");
     bind(Source, &[s(";")], "prompt comment ");
     bind(Source, &[s("M")], "prompt mv ");
     bind(Source, &[s("cn")], "prompt rename {word} ");
@@ -775,8 +825,8 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     return list
         .into_iter()
         .filter_map(|(context, keys, text)| {
-            let command = parse(text).ok()?;
-            Some(Binding { context, keys: parse_keys(&keys), text: text.to_string(), command })
+            let command = parse(&text).ok()?;
+            Some(Binding { context, keys: parse_keys(&keys), text, command })
         })
         .collect();
 }
@@ -813,7 +863,7 @@ pub(crate) fn resolve(bindings: &[Binding], contexts: &[Context], keys: &[Key]) 
 pub(crate) fn help_lines(bindings: &[Binding]) -> Vec<(String, String)> {
     let mut lines = Vec::new();
 
-    for context in [Context::Global, Context::Explorer, Context::Content, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source] {
+    for context in [Context::Global, Context::Explorer, Context::Content, Context::Search, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source] {
         lines.push((context.title().to_string(), String::new()));
         let mut seen: Vec<&str> = Vec::new();
 
@@ -885,7 +935,10 @@ impl App {
             _ => None,
         };
 
-        return view.into_iter().chain([Context::Content, Context::Global]).collect();
+        // n / p go to the matches of an active search (the tables filter instead)
+        let search = (self.searching && !matches!(self.view(), View::Table(_))).then_some(Context::Search);
+
+        return search.into_iter().chain(view).chain([Context::Content, Context::Global]).collect();
     }
 
     /// A key in normal mode: a count, the next key of a sequence, or a binding
@@ -960,6 +1013,14 @@ impl App {
             }
             Command::Prompt(text) => self.prompt(&text),
             Command::Search => self.input = Some((InputKind::Search, String::new())),
+            Command::SearchAgain { forward } => self.search_again(forward),
+            Command::ClearSearch => {
+                self.searching = false;
+
+                if let View::Table(view) = self.view_mut() {
+                    view.set_filter("");
+                }
+            }
             Command::Help => self.help = true,
             Command::Back => self.go_back(),
             Command::Forward => self.go_forward(),
@@ -1039,7 +1100,7 @@ impl App {
                 project.revert(addr);
                 Ok(())
             }),
-            Command::Comment(_) | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Conflict { .. } => {
+            Command::Comment(_) | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } => {
                 self.error("Only in the C code (:source)".to_string());
             }
             Command::MoveFunction(module, function) => self.move_function(Some(module), function),
@@ -1057,7 +1118,6 @@ impl App {
             Command::LlmModules(scope) => self.llm_modules(program, scope),
             Command::Export(dir) => self.export(program, PathBuf::from(dir)),
             Command::Library(name) => self.library_command(&name),
-            Command::ClearSearch => {}
             Command::Move(_) | Command::Open(_) | Command::Close => {}
             Command::ToggleView | Command::ToggleCode | Command::Xrefs | Command::FunctionCallGraph => {}
             Command::ToggleImports | Command::Reroot | Command::Follow(_) | Command::Center | Command::Detail { .. } => {}

@@ -406,8 +406,9 @@ impl<V: Clone> Workspace<V> {
         }
     }
 
-    pub fn resize(&mut self, side_by_side: bool, delta: i32) {
-        self.root.resize(self.focused, side_by_side, delta);
+    /// Resizes the focused group, false when no split is along that direction
+    pub fn resize(&mut self, side_by_side: bool, delta: i32) -> bool {
+        return self.root.resize(self.focused, side_by_side, delta);
     }
 
     pub fn equalize(&mut self) {

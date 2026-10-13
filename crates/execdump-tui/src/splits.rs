@@ -139,8 +139,14 @@ impl App {
                         }
                     }
                     Command::MoveTab(dir) => self.workspace.move_tab(*dir),
+                    // Without splits side by side, the explorer gives or takes the width
+                    Command::Equalize if self.workspace.group_count() == 1 => self.explorer_resize(None),
                     Command::Equalize => self.workspace.equalize(),
-                    Command::Resize { width, delta } => self.workspace.resize(*width, delta * times),
+                    Command::Resize { width, delta } => {
+                        if !self.workspace.resize(*width, delta * times) && *width {
+                            self.explorer_resize(Some(-delta * times));
+                        }
+                    }
                     _ => return false,
                 }
 

@@ -370,24 +370,30 @@ impl DisasmView {
         };
     }
 
-    pub fn search(&mut self, pattern: &str, program: &Program, decoder: &Decoder) -> bool {
+    /// Text of a line for the search
+    fn search_text(&self, program: &Program, decoder: &Decoder, line: DisasmLine, labels: &[(String, u64)]) -> Option<String> {
+        return match line {
+            DisasmLine::Label(label) => Some(labels[label as usize].0.clone()),
+            DisasmLine::Blank => None,
+            line => self.text(program, decoder, line).map(|insn| format!("{:x} {} {}", insn.addr, insn.mnemonic, insn.operands)),
+        };
+    }
+
+    /// Next (or previous) line containing a pattern, from the cursor and wrapping
+    pub fn search(&mut self, pattern: &str, program: &Program, decoder: &Decoder, forward: bool) -> bool {
+        let pattern = pattern.to_lowercase();
+
         if self.window.is_some() {
-            return self.search_region(&pattern.to_lowercase(), program, decoder);
+            return if forward { self.search_region(&pattern, program, decoder) } else { self.search_region_back(&pattern, program, decoder) };
         }
 
-        let pattern = pattern.to_lowercase();
         let count = self.lines.len();
 
         for i in 1..=count {
-            let index = (self.cursor + i) % count;
+            let index = if forward { (self.cursor + i) % count } else { (self.cursor + count * 2 - i) % count };
 
-            let text = match self.lines[index] {
-                DisasmLine::Label(label) => self.labels[label as usize].0.clone(),
-                DisasmLine::Blank => continue,
-                line => match self.text(program, decoder, line) {
-                    Some(insn) => format!("{:x} {} {}", insn.addr, insn.mnemonic, insn.operands),
-                    None => continue,
-                },
+            let Some(text) = self.search_text(program, decoder, self.lines[index], &self.labels) else {
+                continue;
             };
 
             if text.to_lowercase().contains(&pattern) {
@@ -398,6 +404,65 @@ impl DisasmView {
         }
 
         return false;
+    }
+
+    /// Address of a line of a decoded range (labels are at their function)
+    fn decoded_addr(&self, decoded: &Decoded, line: DisasmLine) -> Option<u64> {
+        return match line {
+            DisasmLine::Label(label) => Some(decoded.labels[label as usize].1),
+            DisasmLine::Blank => None,
+            line => self.line_addr(line),
+        };
+    }
+
+    /// Searches the whole region backwards from the cursor, window after window (wrapping at its start)
+    fn search_region_back(&mut self, pattern: &str, program: &Program, decoder: &Decoder) -> bool {
+        let Some(window) = self.window.clone() else {
+            return false;
+        };
+
+        let analysis = window.analysis.as_deref();
+        let start = self.cursor_addr().unwrap_or(window.start);
+        let mut to = start;
+        let mut wrapped = false;
+
+        loop {
+            let from = to.saturating_sub(2 * WINDOW_HALF).max(window.start);
+            let decoded = decode_range(&window.program, analysis, decoder, self.base, window.anchor(from), to);
+            let mut found = None;
+
+            for &line in decoded.lines.iter() {
+                let Some(addr) = self.decoded_addr(&decoded, line) else {
+                    continue;
+                };
+
+                let before = if wrapped { addr > start && addr < to } else { addr < to };
+
+                if before && self.search_text(program, decoder, line, &decoded.labels).is_some_and(|t| t.to_lowercase().contains(pattern)) {
+                    found = Some(addr);
+                }
+            }
+
+            if let Some(addr) = found {
+                self.goto(addr);
+                return true;
+            }
+
+            to = from;
+
+            if to <= window.start {
+                if wrapped {
+                    return false;
+                }
+
+                wrapped = true;
+                to = window.end;
+            }
+
+            if wrapped && to <= start {
+                return false;
+            }
+        }
     }
 
     /// Searches the whole region from the cursor, window after window (wrapping at its end)
@@ -657,7 +722,7 @@ mod tests {
         assert_eq!(view.cursor_addr(), Some(second.addr));
         assert!(view.cursor_insn(&analysis).is_some());
 
-        assert!(view.search("classify", &program, &decoder));
+        assert!(view.search("classify", &program, &decoder, true));
         let lines = view.render(&theme, &program, Some(&analysis), &decoder, 10);
         assert_eq!(lines.len(), 10);
 
@@ -702,10 +767,14 @@ mod tests {
         assert!(view.goto(0x100000 + (2 << 20)));
         assert_eq!(view.cursor_addr(), Some(0x100000 + (2 << 20)));
 
-        assert!(view.search("ret", &program, &decoder));
+        assert!(view.search("ret", &program, &decoder, true));
         assert_eq!(view.cursor_addr(), Some(0x100000 + ret as u64));
 
         view.move_cursor(-FAR);
         assert_eq!(view.cursor_addr(), Some(0x100000));
+
+        // Backwards from the start: wraps to the end of the region
+        assert!(view.search("ret", &program, &decoder, false));
+        assert_eq!(view.cursor_addr(), Some(0x100000 + ret as u64));
     }
 }

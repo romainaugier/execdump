@@ -326,6 +326,8 @@ The content area is split as in vim: each split is a group of tabs, each tab sho
 
 Everything the interface does is a command: the keys are bound to commands (in the global context, the explorer, any view or one kind of view, the most specific first), and every command can be typed after `:` (`:toggle-explorer`, `:next-split`, `:depth +1`...). A command goes to the focus first (the explorer or the view of the split), then to the splits and tabs, then to the application. `?` (or `:help`) lists the keys of each context with the command they run, then the commands without a key.
 
+The command line suggests what can be typed: the commands (with their arguments and help) while the name is typed, then the values of the argument being typed: functions (`:c`, `:cg`, `:sp`...), modules (`:source`, `:mv`), variables and functions (`:rename`, `:retype`), libraries and files (`:lib`, `:w`, `:export`), proposals (`:accept`), the words a command takes (`:open tab`, `:focus-split left`). When there is nothing to suggest, its usage and help show.
+
 Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
 | Keys | Action |
@@ -334,9 +336,9 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 | `e` | Show/hide the explorer |
 | `Enter` / `t` / `s` / `v` | Explorer: open in the current tab / a new tab / a split below / a split on the right (`Enter` on a node folds or unfolds it) |
 | `h` | Explorer: fold the node, or go to the node of the item |
-| `<` / `>` / `=` | Explorer: narrower / wider / back to the width of its content |
-| `:` | Command line (see the commands below) |
-| `/` | Search: filters the tables, finds the next matching node or line |
+| `<` / `>` / `=` | Explorer: narrower / wider / back to the width of its content. Content: narrower / wider split / equal sizes (without splits side by side, the explorer gives or takes the width) |
+| `:` | Command line (see the commands below): suggestions while typing, `Tab` / `Shift-Tab` go through them, `Up` / `Down` through the history |
+| `/` | Search: filters the tables, finds the next matching node or line. While the search is active, `n` / `p` (or `N`) go to the next / previous match, `Esc` ends it (`n` / `p` move between the nodes, labels or functions again) |
 | `Ctrl-o` / `Backspace` | Go back to the previous view of the tab |
 | `Ctrl-r` (or `Ctrl-i` when the terminal can tell it apart from `Tab`) | Go forward |
 | `?` | Help: the keys and the commands (`j` / `k` scroll it) |
@@ -371,7 +373,7 @@ In the graphs:
 | `x` | Cross references to the function |
 | `C` | Call graph from the function |
 | `D` | C code of the module of the function, on the line of the selected block |
-| `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
+| `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function (`=` equalizes the splits) |
 | `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
  Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
@@ -386,7 +388,8 @@ In the C code (a module, every function of it one after the other; functions not
 | `Enter` / `gd` | Go to the function (or the global) under the cursor |
 | `Space` / `D` | Control flow graph of the function, on the block of the line |
 | `i` `a` `A` `I` `o` `O` | Insert mode (arrows, `Enter`, `Backspace`, `Delete`, `Tab`), `Esc` goes back to the normal mode |
-| `dd` | Delete the line |
+| `dd` | Delete the line (a count deletes several: `3dd`) |
+| `d` / `c` + `w` `e` `b` `$` `0` `^` `j` `k` `l` `h`, `cc` | Delete (change: delete then insert) to the next word, the end of the word, the previous word, the end / start / first character of the line, with the line below / above, a character after / before (`cw` changes to the end of the word as in vim, counts work: `3dw`) |
 | `u` / `U` | Undo / redo |
 | `cn` | Rename the variable, function or global under the cursor (`:rename`) |
 | `ct` | Retype the variable under the cursor (`:retype`) |
@@ -423,6 +426,9 @@ Commands:
 | `:ours`, `:theirs`, `:both` | Resolve the conflict under the cursor: keep the edited code, the decompiled code, or both |
 | `:llm`, `:llm rewrite`, `:llm modules [module\|all]` | Ask the LLM to improve the current function / to rewrite it as clear C / to organize the functions of a module (or of the program) |
 | `:review`, `:accept <n>`, `:reject <n>` | Review the LLM proposals |
+| `:toggle-explorer` (`:explorer`) | Show or hide the explorer |
+| `:search-next`, `:search-previous`, `:clear-search` | Matches of the last search |
+| `:delete <motion>`, `:change <motion>` | Operators of the C code (`word`, `word-end`, `word-back`, `line-end`, `line-start`, `line-first`, `line`, `down`, `up`, `char`, `char-back`) |
 | `:w [directory]` | Save the project (and the session), in another directory when given |
 | `:export <directory>` | Export the C code as a source tree (once everything is decompiled) |
 | `:lib <name or path>` | Load a shared library (one the binary needs, or any file), with its own project |

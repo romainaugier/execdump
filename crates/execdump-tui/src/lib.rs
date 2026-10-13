@@ -42,7 +42,7 @@ use ratatui::{
 };
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -164,7 +164,13 @@ pub(crate) struct App {
     synced: Option<(usize, u64)>,
 
     input: Option<(InputKind, String)>,
+    /// Suggestions of the command line, the commands run (Up / Down in the command line)
+    completion: Option<prompt::Completion>,
+    history: Vec<String>,
+    history_index: Option<usize>,
     last_search: String,
+    /// The last search is active: n / p go to its matches
+    searching: bool,
     message: Option<(String, bool)>,
     popup: Option<Popup>,
     help: bool,
@@ -227,7 +233,11 @@ impl App {
             open_mode: OpenMode::Replace,
             synced: None,
             input: None,
+            completion: None,
+            history: Vec::new(),
+            history_index: None,
             last_search: String::new(),
+            searching: false,
             message: None,
             popup: None,
             help: false,
