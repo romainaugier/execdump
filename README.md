@@ -303,12 +303,13 @@ Viewers:
   - :heavy_check_mark: ELF Sections
   - :heavy_check_mark: Mach-O Sections
   - :heavy_check_mark: Hex Viewer
-  - :heavy_check_mark: Disasm Viewer (linear, with function labels and annotations)
+  - :heavy_check_mark: Disasm Viewer (linear, with function labels and annotations; sections are decoded around the cursor, from the instruction starts known by the analysis, whatever their size)
   - :heavy_check_mark: Control flow graph viewer (radare2-like node graph), with the disassembly or the C code in the nodes
   - :heavy_check_mark: Call graph viewer, with the summary, the disassembly or the C code of the functions in the nodes
   - :heavy_check_mark: Functions, strings, imports, modules and memory map tables
   - :heavy_check_mark: C code of the modules (every function of a module, synchronized with the addresses, editable)
   - :heavy_check_mark: Review of the LLM proposals
+  - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
 
 The analysis runs in the background when the TUI starts, then the decompilation of every function. Their progress is
 shown in the title bar (`[+]` when there are unsaved changes).

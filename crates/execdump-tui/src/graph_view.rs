@@ -11,7 +11,7 @@ use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::{Decoder, Instruction};
 use execdump_decompiler::analysis::Analysis;
 use crate::layout::{layout, GraphInput, Layout};
-use crate::source_view::highlight;
+use crate::source_view::highlight_with;
 use execdump_core::program::Program;
 use execdump_project::{Priority, Project};
 use crate::theme::Theme;
@@ -893,11 +893,17 @@ fn source_lines(theme: &Theme, text: &str, addrs: &[Option<u64>], range: Option<
     let mut current = function;
     let mut total = 0;
 
+    let mut comment = false;
+
     for (index, line) in text.lines().enumerate() {
         // Lines without an address belong with the statement above them
         if let Some(addr) = addrs.get(index).copied().flatten() {
             current = addr;
         }
+
+        // Every line is highlighted to follow the block comments
+        let line: String = line.chars().take(MAX_LINE_WIDTH).collect();
+        let spans = highlight_with(theme, &line, &mut comment);
 
         if range.is_some_and(|(start, end)| current < start || current >= end) {
             continue;
@@ -906,8 +912,7 @@ fn source_lines(theme: &Theme, text: &str, addrs: &[Option<u64>], range: Option<
         total += 1;
 
         if lines.len() < MAX_NODE_LINES {
-            let line: String = line.chars().take(MAX_LINE_WIDTH).collect();
-            lines.push(Line::from(highlight(theme, &line)));
+            lines.push(Line::from(spans));
         }
     }
 

@@ -112,7 +112,20 @@ fn is_type(word: &str) -> bool {
     return TYPES.contains(&word) || (word.ends_with("_t") && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
 }
 
-pub fn highlight(theme: &Theme, line: &str) -> Vec<Span<'static>> {
+/// Whether a block comment is still open after some lines
+pub fn comment_after<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
+    let theme = Theme::codedark();
+    let mut comment = false;
+
+    for line in lines {
+        highlight_with(&theme, line, &mut comment);
+    }
+
+    return comment;
+}
+
+/// Highlights a line, comment tells whether it starts in a block comment and whether one is still open at its end
+pub fn highlight_with(theme: &Theme, line: &str, comment: &mut bool) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
@@ -122,11 +135,29 @@ pub fn highlight(theme: &Theme, line: &str) -> Vec<Span<'static>> {
         return vec![Span::styled(line.to_string(), Style::default().fg(theme.warning).add_modifier(Modifier::BOLD))];
     }
 
+    // End of a block comment, from the start of the line or of the comment
+    let block_end = |from: usize| (from..chars.len().saturating_sub(1)).find(|&j| chars[j] == '*' && chars[j + 1] == '/').map(|j| j + 2);
+
     while i < chars.len() {
         let c = chars[i];
         let start = i;
 
-        let color = if c == '/' && chars.get(i + 1) == Some(&'/') {
+        let color = if *comment || (c == '/' && chars.get(i + 1) == Some(&'*')) {
+            let from = if *comment { i } else { i + 2 };
+
+            match block_end(from) {
+                Some(end) => {
+                    i = end;
+                    *comment = false;
+                }
+                None => {
+                    i = chars.len();
+                    *comment = true;
+                }
+            }
+
+            theme.comment
+        } else if c == '/' && chars.get(i + 1) == Some(&'/') {
             i = chars.len();
             theme.comment
         } else if c == '"' || c == '\'' {
@@ -885,6 +916,14 @@ impl SourceView {
 
             let block_height = count + 1;
 
+            // A block comment opened above the first line shown
+            let mut comment = match (self.insert.as_ref().filter(|i| i.addr == addr), shown.as_ref()) {
+                _ if pos.line == 0 => false,
+                (Some(insert), _) => comment_after(insert.lines.iter().take(pos.line).map(|l| l.as_str())),
+                (None, Some((rendered, _))) => comment_after(rendered.text.lines().take(pos.line)),
+                (None, None) => false,
+            };
+
             for line in pos.line..block_height {
                 if lines.len() >= height {
                     break;
@@ -914,8 +953,8 @@ impl SourceView {
 
                 match content {
                     Some(text) if shown.is_none() && self.insert.is_none() => spans.push(Span::styled(text.clone(), Style::default().fg(theme.dim).add_modifier(Modifier::ITALIC))),
-                    Some(text) if is_cursor => spans.extend(with_cursor(highlight(theme, text), self.col, theme)),
-                    Some(text) => spans.extend(highlight(theme, text)),
+                    Some(text) if is_cursor => spans.extend(with_cursor(highlight_with(theme, text, &mut comment), self.col, theme)),
+                    Some(text) => spans.extend(highlight_with(theme, text, &mut comment)),
                     None if is_cursor => spans.push(Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED))),
                     None => {}
                 }
@@ -1038,10 +1077,20 @@ mod tests {
         assert_eq!(word_at("return 0x10;", 7), None);
 
         let theme = Theme::codedark();
-        let text: String = highlight(&theme, "    if (x == \"a\") { return 0x10; } // done").iter().map(|s| s.content.to_string()).collect();
+        // Block comments, over several lines, not in strings
+        let mut comment = false;
+        let spans = highlight_with(&theme, "x = \"/*\"; /* summary", &mut comment);
+        assert!(comment);
+        assert_eq!(spans.last().map(|s| (s.content.to_string(), s.style.fg)), Some(("/* summary".to_string(), Some(theme.comment))));
+        let spans = highlight_with(&theme, "   of it */ y = 1;", &mut comment);
+        assert!(!comment);
+        assert_eq!(spans[0].content, "   of it */");
+        assert!(comment_after(["/* a", "b */", "/* c"].into_iter()));
+
+        let text: String = highlight_with(&theme, "    if (x == \"a\") { return 0x10; } // done", &mut false).iter().map(|s| s.content.to_string()).collect();
         assert_eq!(text, "    if (x == \"a\") { return 0x10; } // done");
 
-        let spans = with_cursor(highlight(&theme, "int x;"), 4, &theme);
+        let spans = with_cursor(highlight_with(&theme, "int x;", &mut false), 4, &theme);
         assert!(spans.iter().any(|s| s.content == "x" && s.style.add_modifier.contains(Modifier::REVERSED)));
     }
 }

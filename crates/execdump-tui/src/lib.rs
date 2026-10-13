@@ -772,7 +772,7 @@ impl App {
 
     fn region_disasm(&self, program: usize, region: &str) -> Option<DisasmView> {
         let decoder = self.decoders[program].as_ref()?;
-        return DisasmView::region(program, &self.programs[program], self.analyses[program].as_deref(), decoder, region);
+        return DisasmView::region(program, self.programs[program].clone(), self.analyses[program].clone(), decoder, region);
     }
 
     /// Source view of the module of a function, on the line of an address
