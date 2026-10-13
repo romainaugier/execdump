@@ -371,13 +371,13 @@ struct App {
     analyses: Vec<Option<Arc<Analysis>>>,
     analysis_errors: Vec<Option<String>>,
     progress: Vec<Arc<AtomicUsize>>,
-    receiver: Receiver<(usize, Result<Analysis, String>)>,
+    /// Analysis of each program and its project, both made in the background
+    receiver: Receiver<(usize, Result<(Arc<Analysis>, Project), String>)>,
     decoders: Vec<Option<Decoder>>,
 
     /// Project of each program, opened when its analysis is done
     projects: Vec<Option<Project>>,
     project_location: Option<PathBuf>,
-    workers: usize,
     /// Session to restore once every project is open
     session_pending: bool,
     pending_export: Option<(usize, PathBuf)>,
@@ -386,6 +386,8 @@ struct App {
     explorer_state: ListState,
     explorer_visible: bool,
     explorer_version: u64,
+    /// First explorer item shown
+    explorer_offset: usize,
     focus: Focus,
 
     workspace: Workspace<View>,
@@ -409,20 +411,25 @@ struct App {
 }
 
 impl App {
-    fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings) -> Self {
+    fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings, project_location: Option<PathBuf>, workers: usize) -> Self {
         let programs: Vec<Arc<Program>> = programs_from_exec(&exec).into_iter().map(Arc::new).collect();
         let (sender, receiver) = channel();
         let mut progress = Vec::new();
+        let count = programs.len();
 
         for (i, program) in programs.iter().enumerate() {
             let counter = Arc::new(AtomicUsize::new(0));
             progress.push(counter.clone());
 
-            let program = program.clone();
-            let sender = sender.clone();
+            let (program, sender, path, location) = (program.clone(), sender.clone(), exec_path.clone(), project_location.clone());
 
             std::thread::spawn(move || {
-                let result = analyze(&program, Some(&counter)).map_err(|e| e.to_string());
+                let result = analyze(&program, Some(&counter)).map_err(|e| e.to_string()).map(|analysis| {
+                    let analysis = Arc::new(analysis);
+                    let project = Project::open(i, count, program, analysis.clone(), &path, location, workers);
+                    (analysis, project)
+                });
+
                 let _ = sender.send((i, result));
             });
         }
@@ -440,8 +447,7 @@ impl App {
             progress,
             receiver,
             projects,
-            project_location: None,
-            workers: default_workers(),
+            project_location,
             session_pending: true,
             pending_export: None,
             exec,
@@ -452,6 +458,7 @@ impl App {
             explorer_state,
             explorer_visible: true,
             explorer_version: 0,
+            explorer_offset: 0,
             focus: Focus::Explorer,
             workspace: Workspace::new(View::Welcome),
             open_mode: OpenMode::Replace,
@@ -480,11 +487,8 @@ impl App {
     fn poll_analysis(&mut self) {
         while let Ok((index, result)) = self.receiver.try_recv() {
             match result {
-                Ok(analysis) => {
-                    let analysis = Arc::new(analysis);
-                    self.analyses[index] = Some(analysis.clone());
-
-                    let project = Project::open(index, self.programs.len(), self.programs[index].clone(), analysis, &self.exec_path, self.project_location.clone(), self.workers);
+                Ok((analysis, project)) => {
+                    self.analyses[index] = Some(analysis);
                     self.projects[index] = Some(project);
                     self.explorer_version = u64::MAX;
 
@@ -1458,7 +1462,7 @@ impl App {
         let pattern = if pattern.is_empty() { self.last_search.clone() } else { pattern.to_string() };
         self.last_search = pattern.clone();
 
-        let App { workspace, projects, .. } = self;
+        let App { workspace, projects, programs, decoders, .. } = self;
 
         let found = match workspace.view_mut() {
             View::Table(view) => {
@@ -1466,7 +1470,7 @@ impl App {
                 true
             }
             View::Graph(view) => view.search(&pattern),
-            View::Disasm(view) => view.search(&pattern),
+            View::Disasm(view) => decoders[view.program].as_ref().is_some_and(|d| view.search(&pattern, &programs[view.program], d)),
             View::Source(view) => projects[view.program].as_mut().is_some_and(|p| view.search(p, &pattern)),
             View::Dump(view) => view.search(&pattern),
             _ => false,
@@ -1813,59 +1817,63 @@ impl App {
 
         self.synced = Some((program, addr));
 
-        let group = self.workspace.group(linked);
-        let target = group.tabs[group.active].view.clone();
+        let function = self.analyses[program].as_ref().and_then(|a| a.function_containing(addr)).map(|f| f.addr);
 
-        let updated = match target {
-            View::Source(mut source) if source.program == program => {
-                let Some(project) = self.projects[program].as_mut() else {
-                    return;
-                };
+        // The linked view follows in place when it can, otherwise it is replaced by the same kind of view
+        enum Replace {
+            Source,
+            Linear(u64),
+            Cfg(u64),
+        }
 
-                if source.goto(project, addr) {
-                    Some(View::Source(source))
-                } else {
-                    self.source_view(program, addr).map(View::Source)
+        let replace = {
+            let App { workspace, projects, .. } = self;
+            let group = workspace.group_mut(linked);
+            let active = group.active;
+
+            match &mut group.tabs[active].view {
+                View::Source(source) if source.program == program => match projects[program].as_mut() {
+                    Some(project) => if source.goto(project, addr) { None } else { Some(Replace::Source) },
+                    None => None,
+                },
+                View::Disasm(disasm) if disasm.program == program => {
+                    if disasm.goto(addr) { None } else { function.map(Replace::Linear) }
                 }
-            }
-            View::Disasm(mut disasm) if disasm.program == program => {
-                if disasm.goto(addr) {
-                    Some(View::Disasm(disasm))
-                } else {
-                    let function = self.analyses[program].as_ref().and_then(|a| a.function_containing(addr)).map(|f| f.addr);
-
-                    match (function, self.analyses[program].clone(), self.decoders[program].as_ref()) {
-                        (Some(function), Some(analysis), Some(decoder)) => DisasmView::function(program, &self.programs[program], &analysis, decoder, function).map(|mut v| {
-                            v.goto(addr);
-                            View::Disasm(v)
-                        }),
-                        _ => None,
+                View::Graph(graph) if graph.program == program => match graph.kind {
+                    GraphKind::Cfg { function: shown } if Some(shown) == function => {
+                        graph.select_addr(addr);
+                        None
                     }
-                }
-            }
-            View::Graph(mut graph) if graph.program == program => match graph.kind {
-                GraphKind::Cfg { function } if self.analyses[program].as_ref().and_then(|a| a.function_containing(addr)).is_some_and(|f| f.addr == function) => {
-                    graph.select_addr(addr);
-                    Some(View::Graph(graph))
-                }
-                GraphKind::Cfg { .. } => self.analyses[program].as_ref().and_then(|a| a.function_containing(addr)).map(|f| f.addr).and_then(|f| self.cfg_view(program, f)).map(|mut g| {
-                    g.select_addr(addr);
-                    View::Graph(g)
-                }),
-                GraphKind::CallGraph { .. } => {
-                    let function = self.analyses[program].as_ref().and_then(|a| a.function_containing(addr)).map(|f| f.addr);
+                    GraphKind::Cfg { .. } => function.map(Replace::Cfg),
+                    GraphKind::CallGraph { .. } => {
+                        if let Some(index) = function.and_then(|f| graph.nodes.iter().position(|n| n.kind == NodeKind::Function && n.addr == f)) {
+                            graph.select(index);
+                        }
 
-                    if let Some(index) = function.and_then(|f| graph.nodes.iter().position(|n| n.kind == NodeKind::Function && n.addr == f)) {
-                        graph.select(index);
+                        None
                     }
-
-                    Some(View::Graph(graph))
-                }
-            },
-            _ => None,
+                },
+                _ => None,
+            }
         };
 
-        if let Some(view) = updated {
+        let view = match replace {
+            None => return,
+            Some(Replace::Source) => self.source_view(program, addr).map(View::Source),
+            Some(Replace::Linear(function)) => match (self.analyses[program].clone(), self.decoders[program].as_ref()) {
+                (Some(analysis), Some(decoder)) => DisasmView::function(program, &self.programs[program], &analysis, decoder, function).map(|mut v| {
+                    v.goto(addr);
+                    View::Disasm(v)
+                }),
+                _ => None,
+            },
+            Some(Replace::Cfg(function)) => self.cfg_view(program, function).map(|mut g| {
+                g.select_addr(addr);
+                View::Graph(g)
+            }),
+        };
+
+        if let Some(view) = view {
             let group = self.workspace.group_mut(linked);
             let active = group.active;
             group.tabs[active].view = view;
@@ -2938,11 +2946,19 @@ fn ui(f: &mut Frame, app: &mut App) {
             .constraints([Constraint::Length(32.min(chunks[1].width / 3)), Constraint::Min(0)])
             .split(chunks[1]);
 
-        let names: Vec<String> = app.explorer_items.iter().map(|item| item.display_name(app)).collect();
+        // Only the visible items are built (programs can have thousands of modules)
+        let visible = main_chunks[0].height.saturating_sub(2).max(1) as usize;
+        let selected = app.explorer_state.selected().unwrap_or(0).min(app.explorer_items.len().saturating_sub(1));
 
-        let items: Vec<ListItem> = app.explorer_items.iter().zip(names).map(|(item, name)| {
+        if selected < app.explorer_offset {
+            app.explorer_offset = selected;
+        } else if selected >= app.explorer_offset + visible {
+            app.explorer_offset = selected + 1 - visible;
+        }
+
+        let items: Vec<ListItem> = app.explorer_items.iter().skip(app.explorer_offset).take(visible).map(|item| {
             let style = if matches!(item, ExplorerItem::Group(_)) { theme.title_style() } else { Style::default().fg(theme.fg) };
-            ListItem::new(name).style(style)
+            ListItem::new(item.display_name(app)).style(style)
         }).collect();
 
         let active = app.focus == Focus::Explorer;
@@ -2958,7 +2974,9 @@ fn ui(f: &mut Frame, app: &mut App) {
             .highlight_style(if active { Style::default().fg(theme.highlight_fg).bg(theme.highlight_bg) } else { Style::default().fg(theme.fg).bg(theme.cursor_bg) })
             .highlight_symbol("> ");
 
-        f.render_stateful_widget(explorer, main_chunks[0], &mut app.explorer_state);
+        let mut state = ListState::default();
+        state.select(Some(selected - app.explorer_offset));
+        f.render_stateful_widget(explorer, main_chunks[0], &mut state);
 
         main_chunks[1]
     } else {
@@ -3142,9 +3160,8 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(exec, exec_path.clone(), keys);
+    let mut app = App::new(exec, exec_path.clone(), keys, project, default_workers());
     app.llm = llm;
-    app.project_location = project;
 
     let result: Result<(), Box<dyn Error>> = (|| {
         loop {
@@ -3204,9 +3221,7 @@ mod tests {
         let location = std::env::temp_dir().join(format!("execdump-tui-{}-{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&location);
 
-        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path, KeyBindings::default());
-        app.project_location = Some(location.clone());
-        app.workers = 1;
+        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path, KeyBindings::default(), Some(location.clone()), 1);
 
         for _ in 0..500 {
             app.poll_analysis();
@@ -3383,8 +3398,7 @@ mod tests {
         app.run_command("w");
         assert!(location.join("session.toml").exists());
 
-        let (mut reopened, _) = (App::new(Exec::ELF(parse_elf(&app.exec_path).unwrap()), app.exec_path.clone(), KeyBindings::default()), ());
-        reopened.project_location = Some(location.clone());
+        let mut reopened = App::new(Exec::ELF(parse_elf(&app.exec_path).unwrap()), app.exec_path.clone(), KeyBindings::default(), Some(location.clone()), 1);
 
         for _ in 0..500 {
             reopened.poll_analysis();

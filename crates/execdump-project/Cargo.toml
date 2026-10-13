@@ -11,3 +11,6 @@ dirs.workspace = true
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 serde.workspace = true
 toml.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+mimalloc = { version = "0.1.52", default-features = false, features = ["override"] }

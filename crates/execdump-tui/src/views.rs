@@ -12,6 +12,9 @@ use execdump_core::program::Program;
 use crate::graph_view::insn_spans;
 use crate::theme::Theme;
 
+use std::rc::Rc;
+use std::sync::Arc;
+
 /// Where a table row or an instruction leads to
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -122,7 +125,8 @@ fn lines_from_dump(theme: &Theme, dump: &Dump, indent: usize, indent_size: usize
 pub struct HexView {
     pub title: String,
     pub base: u64,
-    pub data: Vec<u8>,
+    /// Shared between the copies of the view (splits, jumplists)
+    pub data: Arc<[u8]>,
     /// First displayed row
     pub scroll: usize,
     pub height: usize,
@@ -131,8 +135,8 @@ pub struct HexView {
 const HEX_ROW: usize = 16;
 
 impl HexView {
-    pub fn new(title: String, base: u64, data: Vec<u8>) -> Self {
-        return Self { title, base, data, scroll: 0, height: 1 };
+    pub fn new(title: String, base: u64, data: impl Into<Arc<[u8]>>) -> Self {
+        return Self { title, base, data: data.into(), scroll: 0, height: 1 };
     }
 
     pub fn rows(&self) -> usize {
@@ -197,30 +201,31 @@ impl HexView {
 
 /*
  * Linear disassembly view
+ *
+ * A region can hold millions of instructions: the view keeps their offsets only (8 bytes per line),
+ * their text is decoded when they are shown or searched.
  */
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisasmLine {
     Blank,
-    Label(String, u64),
-    Insn(InsnText),
-}
-
-impl DisasmLine {
-    pub fn addr(&self) -> Option<u64> {
-        match self {
-            DisasmLine::Insn(insn) => Some(insn.addr),
-            DisasmLine::Label(_, addr) => Some(*addr),
-            DisasmLine::Blank => None,
-        }
-    }
+    /// Index of the label
+    Label(u32),
+    /// Offset of the instruction from the base address, and its size
+    Insn(u32, u8),
+    /// Bytes that do not decode
+    Data(u32, u8),
 }
 
 #[derive(Clone, Debug)]
 pub struct DisasmView {
     pub program: usize,
     pub title: String,
-    pub lines: Vec<DisasmLine>,
+    base: u64,
+    lines: Rc<Vec<DisasmLine>>,
+    labels: Rc<Vec<(String, u64)>>,
+    /// Lines of the instructions, in address order
+    insns: Rc<Vec<u32>>,
     pub cursor: usize,
     pub scroll: usize,
     pub height: usize,
@@ -235,24 +240,32 @@ impl DisasmView {
     /// Linear disassembly of a whole region
     pub fn region(program_index: usize, program: &Program, analysis: Option<&Analysis>, decoder: &Decoder, region_name: &str) -> Option<Self> {
         let region = program.regions.iter().find(|r| r.name == region_name)?;
-        let insns = decoder.text_all(&region.data, region.vaddr);
+        let mut lines = Vec::with_capacity(region.data.len() / 4);
+        let mut labels = Vec::new();
 
-        let mut lines = Vec::with_capacity(insns.len());
+        decoder.sweep(&region.data, region.vaddr, |addr, size, valid| {
+            let offset = (addr - region.vaddr) as u32;
 
-        for insn in insns {
-            if let Some(function) = analysis.and_then(|a| a.functions.get(&insn.addr)) {
+            if let Some(function) = analysis.and_then(|a| a.functions.get(&addr)) {
                 lines.push(DisasmLine::Blank);
-                lines.push(DisasmLine::Label(function.name.clone(), insn.addr));
+                lines.push(DisasmLine::Label(labels.len() as u32));
+                labels.push((function.name.clone(), addr));
             }
 
-            lines.push(DisasmLine::Insn(insn));
-        }
+            lines.push(if valid { DisasmLine::Insn(offset, size) } else { DisasmLine::Data(offset, size) });
+        });
+
+        lines.shrink_to_fit();
+        let insns = instruction_lines(&lines);
 
         return Some(Self {
             program: program_index,
             title: format!("{} ({:#x} - {:#x})", region.name, region.vaddr, region.end()),
+            base: region.vaddr,
             addr_width: format!("{:x}", region.end()).len(),
-            lines,
+            lines: Rc::new(lines),
+            labels: Rc::new(labels),
+            insns: Rc::new(insns),
             cursor: 0,
             scroll: 0,
             height: 1,
@@ -262,28 +275,34 @@ impl DisasmView {
     }
 
     /// Linear disassembly of a function, block by block
-    pub fn function(program_index: usize, program: &Program, analysis: &Analysis, decoder: &Decoder, addr: u64) -> Option<Self> {
+    pub fn function(program_index: usize, _program: &Program, analysis: &Analysis, _decoder: &Decoder, addr: u64) -> Option<Self> {
         let function = analysis.functions.get(&addr)?;
-        let mut lines = vec![DisasmLine::Label(function.name.clone(), function.addr)];
+        let base = function.blocks.keys().next().copied().unwrap_or(addr).min(addr);
+        let mut labels = vec![(function.name.clone(), function.addr)];
+        let mut lines = vec![DisasmLine::Label(0)];
 
         for block in function.blocks.values() {
             if block.start != function.addr {
                 lines.push(DisasmLine::Blank);
-                lines.push(DisasmLine::Label(format!("{:#x}", block.start), block.start));
+                lines.push(DisasmLine::Label(labels.len() as u32));
+                labels.push((format!("{:#x}", block.start), block.start));
             }
 
             for insn in block.insns.iter() {
-                if let Some(text) = program.bytes_from(insn.addr).and_then(|b| decoder.text(b, insn.addr)) {
-                    lines.push(DisasmLine::Insn(text));
-                }
+                lines.push(DisasmLine::Insn((insn.addr - base) as u32, insn.size));
             }
         }
+
+        let insns = instruction_lines(&lines);
 
         return Some(Self {
             program: program_index,
             title: format!("{} @ {:#x} (linear)", function.name, function.addr),
+            base,
             addr_width: format!("{:x}", function.end()).len(),
-            lines,
+            lines: Rc::new(lines),
+            labels: Rc::new(labels),
+            insns: Rc::new(insns),
             cursor: 0,
             scroll: 0,
             height: 1,
@@ -292,13 +311,35 @@ impl DisasmView {
         });
     }
 
-    pub fn cursor_addr(&self) -> Option<u64> {
-        return self.lines.get(self.cursor).and_then(|l| l.addr());
+    fn line_addr(&self, line: DisasmLine) -> Option<u64> {
+        return match line {
+            DisasmLine::Insn(offset, _) | DisasmLine::Data(offset, _) => Some(self.base + offset as u64),
+            DisasmLine::Label(index) => Some(self.labels[index as usize].1),
+            DisasmLine::Blank => None,
+        };
     }
 
+    pub fn cursor_addr(&self) -> Option<u64> {
+        return self.lines.get(self.cursor).and_then(|&l| self.line_addr(l));
+    }
+
+    /// Moves the cursor to the instruction containing an address (the lines are in address order)
     pub fn goto(&mut self, addr: u64) -> bool {
-        let index = self.lines.iter().position(|l| matches!(l, DisasmLine::Insn(i) if addr >= i.addr && addr < i.addr + i.size as u64))
-            .or_else(|| self.lines.iter().position(|l| l.addr() == Some(addr)));
+        let Some(offset) = addr.checked_sub(self.base).and_then(|o| u32::try_from(o).ok()) else {
+            return false;
+        };
+
+        let range = |line: u32| match self.lines[line as usize] {
+            DisasmLine::Insn(o, size) | DisasmLine::Data(o, size) => (o as u64, o as u64 + size as u64),
+            _ => (0, 0),
+        };
+
+        // First instruction ending after the address
+        let position = self.insns.partition_point(|&line| range(line).1 <= offset as u64);
+        let found = self.insns.get(position).copied().filter(|&line| range(line).0 <= offset as u64).map(|line| line as usize);
+
+        // A label at the address (the start of a function in a function view)
+        let index = found.or_else(|| self.lines.iter().position(|&l| self.line_addr(l) == Some(addr)));
 
         if let Some(index) = index {
             self.cursor = index;
@@ -311,7 +352,7 @@ impl DisasmView {
 
     pub fn move_cursor(&mut self, delta: isize) {
         let max = self.lines.len().saturating_sub(1) as isize;
-        self.cursor = (self.cursor as isize + delta).clamp(0, max) as usize;
+        self.cursor = (self.cursor as isize + delta).clamp(0, max.max(0)) as usize;
         follow_cursor(self.cursor, &mut self.scroll, self.height);
     }
 
@@ -329,17 +370,35 @@ impl DisasmView {
         }
     }
 
-    pub fn search(&mut self, pattern: &str) -> bool {
+    /// Text of an instruction line
+    fn text(&self, program: &Program, decoder: &Decoder, line: DisasmLine) -> Option<InsnText> {
+        let addr = self.line_addr(line)?;
+
+        return match line {
+            DisasmLine::Insn(..) => program.bytes_from(addr).and_then(|b| decoder.text(b, addr)),
+            DisasmLine::Data(_, size) => {
+                let bytes = program.read(addr, size as usize).unwrap_or_default();
+                let mnemonic = if size == 4 { ".word" } else { ".byte" };
+                Some(InsnText { addr, size: size as usize, mnemonic: mnemonic.to_string(), operands: bytes.iter().rev().map(|b| format!("{:02x}", b)).collect() })
+            }
+            _ => None,
+        };
+    }
+
+    pub fn search(&mut self, pattern: &str, program: &Program, decoder: &Decoder) -> bool {
         let pattern = pattern.to_lowercase();
         let count = self.lines.len();
 
         for i in 1..=count {
             let index = (self.cursor + i) % count;
 
-            let text = match &self.lines[index] {
-                DisasmLine::Insn(insn) => format!("{:x} {} {}", insn.addr, insn.mnemonic, insn.operands),
-                DisasmLine::Label(name, _) => name.clone(),
+            let text = match self.lines[index] {
+                DisasmLine::Label(label) => self.labels[label as usize].0.clone(),
                 DisasmLine::Blank => continue,
+                line => match self.text(program, decoder, line) {
+                    Some(insn) => format!("{:x} {} {}", insn.addr, insn.mnemonic, insn.operands),
+                    None => continue,
+                },
             };
 
             if text.to_lowercase().contains(&pattern) {
@@ -355,7 +414,7 @@ impl DisasmView {
     /// Instruction under the cursor, as recovered by the analysis
     pub fn cursor_insn(&self, analysis: &Analysis) -> Option<Instruction> {
         let addr = match self.lines.get(self.cursor)? {
-            DisasmLine::Insn(insn) => insn.addr,
+            &DisasmLine::Insn(offset, _) => self.base + offset as u64,
             _ => return None,
         };
 
@@ -368,15 +427,20 @@ impl DisasmView {
 
         let mut lines = Vec::new();
 
-        for (index, line) in self.lines.iter().enumerate().skip(self.scroll).take(height) {
+        for (index, &line) in self.lines.iter().enumerate().skip(self.scroll).take(height) {
             let mut rendered = match line {
                 DisasmLine::Blank => Line::from(""),
-                DisasmLine::Label(name, addr) => Line::from(vec![
-                    Span::styled(format!("{:0width$x}  ", addr, width = self.addr_width), Style::default().fg(theme.asm_address)),
-                    Span::styled(format!("{}:", name), Style::default().fg(theme.asm_label).add_modifier(Modifier::BOLD)),
-                ]),
-                DisasmLine::Insn(text) => {
-                    let insn = analysis.and_then(|a| find_insn(a, text.addr));
+                DisasmLine::Label(label) => {
+                    let (name, addr) = &self.labels[label as usize];
+
+                    Line::from(vec![
+                        Span::styled(format!("{:0width$x}  ", addr, width = self.addr_width), Style::default().fg(theme.asm_address)),
+                        Span::styled(format!("{}:", name), Style::default().fg(theme.asm_label).add_modifier(Modifier::BOLD)),
+                    ])
+                }
+                DisasmLine::Insn(..) | DisasmLine::Data(..) => {
+                    let addr = self.line_addr(line).unwrap_or(0);
+                    let insn = if matches!(line, DisasmLine::Insn(..)) { analysis.and_then(|a| find_insn(a, addr)) } else { None };
 
                     match (insn, analysis) {
                         (Some(insn), Some(analysis)) => {
@@ -384,15 +448,18 @@ impl DisasmView {
                             spans.insert(1, Span::raw("    "));
                             Line::from(spans)
                         }
-                        _ => {
-                            let mut spans = vec![
-                                Span::styled(format!("{:0width$x}      ", text.addr, width = self.addr_width), Style::default().fg(theme.asm_address)),
-                                Span::styled(format!("{:<6} ", text.mnemonic), if insn.is_none() && analysis.is_some() { Style::default().fg(theme.dim) } else { theme.mnemonic_style(&text.mnemonic) }),
-                            ];
+                        _ => match self.text(program, decoder, line) {
+                            Some(text) => {
+                                let mut spans = vec![
+                                    Span::styled(format!("{:0width$x}      ", text.addr, width = self.addr_width), Style::default().fg(theme.asm_address)),
+                                    Span::styled(format!("{:<6} ", text.mnemonic), if analysis.is_some() { Style::default().fg(theme.dim) } else { theme.mnemonic_style(&text.mnemonic) }),
+                                ];
 
-                            spans.extend(theme.operand_spans(&text.operands));
-                            Line::from(spans)
-                        }
+                                spans.extend(theme.operand_spans(&text.operands));
+                                Line::from(spans)
+                            }
+                            None => Line::from(Span::styled(format!("{:0width$x}      ???", addr, width = self.addr_width), Style::default().fg(theme.dim))),
+                        },
                     }
                 }
             };
@@ -406,6 +473,11 @@ impl DisasmView {
 
         return lines;
     }
+}
+
+/// Lines holding instructions (or undecodable bytes)
+fn instruction_lines(lines: &[DisasmLine]) -> Vec<u32> {
+    return lines.iter().enumerate().filter(|(_, l)| matches!(l, DisasmLine::Insn(..) | DisasmLine::Data(..))).map(|(i, _)| i as u32).collect();
 }
 
 /// Instruction at an address, from the recovered functions
@@ -567,6 +639,38 @@ mod tests {
         table.set_filter("");
         table.move_cursor(10);
         assert_eq!(table.cursor, 1);
+    }
+
+    #[test]
+    fn region_disassembly() {
+        use execdump_core::elf::parse_elf;
+        use execdump_core::exec::Exec;
+        use execdump_core::program::programs_from_exec;
+        use execdump_decompiler::analysis::analyze;
+
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/elf_x86_64_analysis");
+        let program = programs_from_exec(&Exec::ELF(parse_elf(&path).unwrap())).remove(0);
+        let analysis = analyze(&program, None).unwrap();
+        let decoder = Decoder::new(program.architecture()).unwrap();
+        let theme = Theme::codedark();
+
+        let mut view = DisasmView::region(0, &program, Some(&analysis), &decoder, ".text").unwrap();
+        view.height = 10;
+
+        let main = analysis.function_by_name("main").unwrap();
+        let second = main.blocks[&main.addr].insns[1];
+        assert!(view.goto(second.addr + 1));
+        assert_eq!(view.cursor_addr(), Some(second.addr));
+        assert!(view.cursor_insn(&analysis).is_some());
+
+        assert!(view.search("classify", &program, &decoder));
+        let lines = view.render(&theme, &program, Some(&analysis), &decoder, 10);
+        assert_eq!(lines.len(), 10);
+
+        let mut function = DisasmView::function(0, &program, &analysis, &decoder, main.addr).unwrap();
+        assert!(function.goto(main.addr));
+        assert_eq!(function.cursor_addr(), Some(main.addr));
+        assert!(!function.goto(0x10));
     }
 
     #[test]

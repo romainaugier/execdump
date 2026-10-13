@@ -12,7 +12,7 @@ use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
 use execdump_decompiler::notes::{apply_summary, apply_vars, used_names};
 use execdump_decompiler::types::Prototype;
-use execdump_decompiler::Decompiler;
+use execdump_decompiler::{Decompiler, SharedSignatures};
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -73,7 +73,8 @@ enum Job {
 struct Shared {
     queue: Mutex<Queue>,
     ready: Condvar,
-    controls: Vec<Mutex<Vec<Control>>>,
+    controls: Vec<Mutex<Vec<(u64, Control)>>>,
+    signatures: SharedSignatures,
 }
 
 impl Shared {
@@ -117,7 +118,12 @@ pub struct Service {
 impl Service {
     pub fn start(program: Arc<Program>, analysis: Arc<Analysis>, cache: Cache, workers: usize) -> Self {
         let workers = workers.max(1);
-        let shared = Arc::new(Shared { queue: Mutex::new(Queue::default()), ready: Condvar::new(), controls: (0..workers).map(|_| Mutex::new(Vec::new())).collect() });
+        let shared = Arc::new(Shared {
+            queue: Mutex::new(Queue::default()),
+            ready: Condvar::new(),
+            controls: (0..workers).map(|_| Mutex::new(Vec::new())).collect(),
+            signatures: SharedSignatures::default(),
+        });
         let cache = Arc::new(Mutex::new(cache));
         let (sender, events) = channel();
 
@@ -176,8 +182,11 @@ impl Service {
 
     /// Changes what the decompilers know (names, prototypes), before the functions using it are queued again
     pub fn control(&self, control: Control) {
+        // Signatures discovered with the previous annotations are not shared anymore
+        let epoch = self.shared.signatures.invalidate();
+
         for controls in self.shared.controls.iter() {
-            controls.lock().unwrap().push(control.clone());
+            controls.lock().unwrap().push((epoch, control.clone()));
         }
     }
 
@@ -215,18 +224,20 @@ impl Drop for Service {
 }
 
 fn worker(index: usize, program: &Program, analysis: &Analysis, shared: &Shared, cache: &Mutex<Cache>, events: &Sender<Event>) {
-    let decompiler = Decompiler::new(program, analysis);
+    let decompiler = Decompiler::new(program, analysis).map(|d| d.with_shared_signatures(shared.signatures.clone()));
 
     while let Some(job) = shared.next() {
         // Controls are sent before the jobs they affect are queued: drained after taking the job
         let controls = std::mem::take(&mut *shared.controls[index].lock().unwrap());
 
         if let Ok(decompiler) = decompiler.as_ref() {
-            for control in controls {
+            for (epoch, control) in controls {
                 match control {
                     Control::Rename(addr, name) => decompiler.rename(addr, name),
                     Control::Prototype(addr, prototype) => decompiler.set_prototype(addr, prototype),
                 }
+
+                decompiler.set_epoch(epoch);
             }
         }
 

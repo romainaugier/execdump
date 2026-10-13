@@ -351,7 +351,19 @@ impl SourceView {
     }
 
     pub fn cursor_line(&self, project: &mut Project) -> String {
-        return self.block_lines(project, self.cursor.block).get(self.cursor.line).cloned().unwrap_or_default();
+        let Some(&addr) = self.functions.get(self.cursor.block) else {
+            return String::new();
+        };
+
+        if let Some(insert) = self.insert.as_ref().filter(|i| i.addr == addr) {
+            return insert.lines.get(self.cursor.line).cloned().unwrap_or_default();
+        }
+
+        return match project.shown(addr) {
+            Some((rendered, _)) => rendered.text.lines().nth(self.cursor.line).unwrap_or_default().to_string(),
+            None if self.cursor.line == 0 => placeholder(project, addr),
+            None => String::new(),
+        };
     }
 
     /// Address of the line under the cursor (or of the closest line above with one)
@@ -540,10 +552,13 @@ impl SourceView {
 
         for step in 0..=count {
             let block = (self.cursor.block + step) % count.max(1);
-            let lines = self.block_lines(project, block);
             let start = if step == 0 { self.cursor.line + 1 } else { 0 };
 
-            for (line, text) in lines.iter().enumerate().skip(start) {
+            let Some((rendered, _)) = project.shown(self.functions[block]) else {
+                continue;
+            };
+
+            for (line, text) in rendered.text.lines().enumerate().skip(start) {
                 if text.to_lowercase().contains(&pattern) {
                     self.cursor = Pos { block, line };
                     self.col = text.to_lowercase().find(&pattern).map_or(0, |b| text[..b].chars().count());
@@ -848,21 +863,23 @@ impl SourceView {
             let addr = self.functions[pos.block];
             visible.push(addr);
 
+            // Only the lines that fit are read
+            let wanted = height - lines.len();
             let shown = project.shown(addr);
-            let (text, addrs, state): (Vec<String>, Vec<Option<u64>>, _) = match (self.insert.as_ref().filter(|i| i.addr == addr), shown.as_ref()) {
-                (Some(insert), _) => (insert.lines.clone(), Vec::new(), None),
-                (None, Some((rendered, state))) => (rendered.text.lines().map(|l| l.to_string()).collect(), rendered.lines.clone(), Some(*state)),
-                (None, None) => (vec![placeholder(project, addr)], vec![Some(addr)], None),
+            let (text, addrs, state, count): (Vec<String>, &[Option<u64>], _, usize) = match (self.insert.as_ref().filter(|i| i.addr == addr), shown.as_ref()) {
+                (Some(insert), _) => (insert.lines.iter().skip(pos.line).take(wanted).cloned().collect(), &[], None, insert.lines.len()),
+                (None, Some((rendered, state))) => (rendered.text.lines().skip(pos.line).take(wanted).map(|l| l.to_string()).collect(), &rendered.lines, Some(*state), rendered.line_count()),
+                (None, None) => (vec![placeholder(project, addr)].into_iter().skip(pos.line).collect(), &[], None, 1),
             };
 
-            let block_height = text.len() + 1;
+            let block_height = count + 1;
 
             for line in pos.line..block_height {
                 if lines.len() >= height {
                     break;
                 }
 
-                let content = text.get(line);
+                let content = text.get(line - pos.line);
                 let gutter = match addrs.get(line).copied().flatten() {
                     Some(a) => format!("{:>10x}", a),
                     None => " ".repeat(10),

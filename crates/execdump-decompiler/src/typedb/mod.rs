@@ -12,6 +12,7 @@ use crate::types::{CType, DataModel, FuncType, Prototype};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::sync::Mutex;
 
 pub use parse::preprocess;
 
@@ -79,8 +80,17 @@ impl TypeDb {
         };
     }
 
-    /// Bundled database of a platform, laid out for the target data model
+    /// Bundled database of a platform, laid out for the target data model (parsed once per process,
+    /// every decompiler gets a copy)
     pub fn bundled(platform: Platform, model: DataModel) -> Self {
+        static PARSED: Mutex<Vec<(Platform, DataModel, TypeDb)>> = Mutex::new(Vec::new());
+
+        let mut parsed = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+
+        if let Some((_, _, db)) = parsed.iter().find(|(p, m, _)| *p == platform && *m == model) {
+            return db.clone();
+        }
+
         let mut db = TypeDb::new(model);
         let source = match platform {
             Platform::Unix => BUNDLED_LINUX,
@@ -88,6 +98,7 @@ impl TypeDb {
         };
 
         db.parse(source).expect("bundled type database must parse");
+        parsed.push((platform, model, db.clone()));
 
         return db;
     }

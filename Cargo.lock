@@ -588,6 +588,7 @@ dependencies = [
  "inkwell",
  "lang-c",
  "llm",
+ "rustc-hash",
  "serde",
  "serde_json",
  "tokio",
@@ -601,6 +602,7 @@ dependencies = [
  "execdump-core",
  "execdump-decompiler",
  "git2",
+ "mimalloc",
  "serde",
  "toml 0.9.10+spec-1.1.0",
 ]

@@ -267,48 +267,31 @@ impl Decoder {
         });
     }
 
-    /// Decodes the text of all the instructions in a buffer, skipping undecodable bytes
-    pub fn text_all(&self, bytes: &[u8], addr: u64) -> Vec<InsnText> {
-        let mut res = Vec::new();
-        let mut offset = 0usize;
+    /// Linear sweep of a buffer: calls f with the address, the size and the validity of each
+    /// instruction (undecodable bytes are skipped one by one, or by 4 on aarch64)
+    pub fn sweep(&self, bytes: &[u8], addr: u64, mut f: impl FnMut(u64, u8, bool)) {
         let step = if self.arch == Architecture::Aarch64 { 4 } else { 1 };
+        let mut offset = 0usize;
+
+        let Ok(mut iter) = self.text.disasm_iter(bytes, addr) else {
+            return;
+        };
 
         while offset < bytes.len() {
-            let Ok(insns) = self.text.disasm_all(&bytes[offset..], addr + offset as u64) else {
-                break;
-            };
-
-            let mut decoded = 0usize;
-
-            for insn in insns.iter() {
-                decoded += insn.len();
-
-                res.push(InsnText {
-                    addr: insn.address(),
-                    size: insn.len(),
-                    mnemonic: insn.mnemonic().unwrap_or("???").to_string(),
-                    operands: insn.op_str().unwrap_or("").to_string(),
-                });
-            }
-
-            offset += decoded;
-
-            // Capstone stops at the first invalid instruction, emit it as data and continue
-            if offset < bytes.len() {
-                let len = step.min(bytes.len() - offset);
-
-                res.push(InsnText {
-                    addr: addr + offset as u64,
-                    size: len,
-                    mnemonic: if len == 4 { ".word".to_string() } else { ".byte".to_string() },
-                    operands: bytes[offset..offset + len].iter().rev().map(|b| format!("{:02x}", b)).collect::<String>(),
-                });
-
-                offset += len;
+            match iter.next() {
+                Some(insn) => {
+                    f(insn.address(), insn.len() as u8, true);
+                    offset += insn.len();
+                }
+                None => {
+                    // Capstone stops at the first invalid instruction, emit it as data and continue
+                    let len = step.min(bytes.len() - offset);
+                    f(addr + offset as u64, len as u8, false);
+                    offset += len;
+                    iter.reset(&bytes[offset..], addr + offset as u64);
+                }
             }
         }
-
-        return res;
     }
 }
 

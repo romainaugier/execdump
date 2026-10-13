@@ -11,7 +11,9 @@ use crate::analysis::function::{recover_function, CallTarget, Function, Function
 use crate::analysis::insn::{Decoder, Flow, Instruction};
 use execdump_core::program::{Program, SymbolKind};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Maximum number of noreturn propagation passes
@@ -40,13 +42,13 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
     let mut analysis = Analysis::default();
     analysis.strings = strings::extract_strings(program);
 
-    let mut known_starts: BTreeSet<u64> = program.seeds.iter().map(|s| s.addr).collect();
+    let mut known_starts: HashSet<u64> = program.seeds.iter().map(|s| s.addr).collect();
     known_starts.extend(program.symbols.values().filter(|s| s.kind == SymbolKind::Import && program.is_executable(s.addr)).map(|s| s.addr));
 
     let mut queue: VecDeque<(u64, FunctionSource)> = program.seeds.iter().map(|s| (s.addr, FunctionSource::Seed(s.source))).collect();
-    let mut noreturn: HashSet<u64> = HashSet::new();
+    let mut noreturn: HashSet<u64> = HashSet::default();
 
-    let mut sizes: HashMap<u64, u64> = HashMap::new();
+    let mut sizes: HashMap<u64, u64> = HashMap::default();
 
     for seed in program.seeds.iter() {
         if let Some(size) = seed.size.filter(|&s| s > 0) {
@@ -132,7 +134,7 @@ fn is_padding(program: &Program, decoder: &Decoder, addr: u64) -> bool {
 }
 
 fn coverage(analysis: &Analysis) -> HashSet<u64> {
-    let mut covered = HashSet::new();
+    let mut covered = HashSet::default();
 
     for function in analysis.functions.values() {
         for block in function.blocks.values() {
@@ -149,7 +151,7 @@ fn discover(
     program: &Program,
     decoder: &Decoder,
     analysis: &mut Analysis,
-    known_starts: &mut BTreeSet<u64>,
+    known_starts: &mut HashSet<u64>,
     noreturn: &mut HashSet<u64>,
     sizes: &HashMap<u64, u64>,
     queue: &mut VecDeque<(u64, FunctionSource)>,
@@ -235,7 +237,7 @@ impl Analysis {
 
     /// Distinct callees of a function, in call order
     pub fn callees(&self, function: &Function) -> Vec<(CallTarget, bool)> {
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let mut res = Vec::new();
 
         for call in function.calls.iter() {
@@ -264,7 +266,7 @@ impl Analysis {
     pub fn callees_first(&self, starts: impl IntoIterator<Item = u64>) -> Vec<u64> {
         let starts: Vec<u64> = starts.into_iter().collect();
         let wanted: HashSet<u64> = starts.iter().copied().filter(|a| self.functions.get(a).is_some_and(|f| f.thunk.is_none())).collect();
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let mut order = Vec::with_capacity(wanted.len());
 
         for start in starts {

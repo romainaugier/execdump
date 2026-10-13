@@ -110,6 +110,8 @@ impl Rendered {
 #[derive(Clone, Copy, Debug)]
 struct Entry {
     offset: u64,
+    /// Size of the record, header included
+    size: u64,
     fingerprint: u64,
     lines: u32,
     ok: bool,
@@ -149,7 +151,6 @@ impl Cache {
         let mut file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
         let size = file.metadata()?.len();
         let mut index: HashMap<u64, Entry> = HashMap::new();
-        let mut sizes: HashMap<u64, u64> = HashMap::new();
         let mut offset = 0;
 
         // Only the headers are read, a torn record at the end (crash) is dropped
@@ -166,8 +167,7 @@ impl Cache {
                 break;
             }
 
-            index.insert(addr, Entry { offset, ..entry });
-            sizes.insert(addr, next - offset);
+            index.insert(addr, Entry { offset, size: next - offset, ..entry });
             offset = next;
         }
 
@@ -175,7 +175,7 @@ impl Cache {
             file.set_len(offset)?;
         }
 
-        let live = sizes.values().sum();
+        let live = index.values().map(|e| e.size).sum();
 
         return Ok(Cache { file: Some(file), size: offset, live, index, recent: HashMap::new(), order: VecDeque::new() });
     }
@@ -263,11 +263,10 @@ impl Cache {
 
             if written.is_ok() {
                 if let Some(old) = self.index.get(&addr) {
-                    let old_size = read_header(file, old.offset).ok().flatten().map_or(0, |(_, _, payload)| HEADER_SIZE + payload);
-                    self.live = self.live.saturating_sub(old_size);
+                    self.live = self.live.saturating_sub(old.size);
                 }
 
-                let entry = Entry { offset: self.size, fingerprint, lines: rendered.line_count() as u32, ok: rendered.ok };
+                let entry = Entry { offset: self.size, size: record.len() as u64, fingerprint, lines: rendered.line_count() as u32, ok: rendered.ok };
                 self.index.insert(addr, entry);
                 self.size += record.len() as u64;
                 self.live += record.len() as u64;
@@ -334,7 +333,7 @@ fn read_header(file: &mut File, offset: u64) -> io::Result<Option<(u64, Entry, u
     let ok = header[20] != 0;
     let (count, text_len, meta_len) = (u32_at(21), u32_at(25), u32_at(29));
 
-    let entry = Entry { offset, fingerprint, lines: 0, ok };
+    let entry = Entry { offset, size: 0, fingerprint, lines: 0, ok };
     let payload = text_len as u64 + count as u64 * 8 + meta_len as u64;
 
     // The line count is the number of text lines, stored with the line addresses

@@ -8,4 +8,4 @@ pub mod notes;
 pub mod typedb;
 pub mod types;
 
-pub use decompiler::Decompiler;
+pub use decompiler::{Decompiler, SharedSignatures};

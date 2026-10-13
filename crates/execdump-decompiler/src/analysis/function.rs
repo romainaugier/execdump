@@ -8,7 +8,9 @@ use execdump_core::program::{Program, SeedSource};
 
 use capstone::arch::x86::X86Reg;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Maximum number of instructions decoded for a single function
 const MAX_FUNCTION_INSNS: usize = 200_000;
@@ -160,7 +162,7 @@ pub struct RecoveryContext<'a> {
     pub program: &'a Program,
     pub decoder: &'a Decoder,
     /// Known function starts (seeds and already discovered functions)
-    pub known_starts: &'a BTreeSet<u64>,
+    pub known_starts: &'a HashSet<u64>,
     /// Functions known to never return
     pub noreturn: &'a HashSet<u64>,
     /// Function sizes known from the metadata (symbols, unwind information)
@@ -561,7 +563,7 @@ pub fn recover_function(ctx: &RecoveryContext, addr: u64, name: String, source: 
         start: addr,
         insns: BTreeMap::new(),
         leaders: BTreeSet::from([addr]),
-        stops: HashSet::new(),
+        stops: HashSet::default(),
         switches: BTreeMap::new(),
         calls: Vec::new(),
         refs: Vec::new(),
@@ -663,9 +665,9 @@ mod tests {
 
     fn recover(program: &Program, known: &[u64]) -> Function {
         let decoder = Decoder::new(program.architecture()).unwrap();
-        let known_starts: BTreeSet<u64> = known.iter().copied().collect();
-        let noreturn = HashSet::new();
-        let sizes = HashMap::new();
+        let known_starts: HashSet<u64> = known.iter().copied().collect();
+        let noreturn = HashSet::default();
+        let sizes = HashMap::default();
         let ctx = RecoveryContext { program, decoder: &decoder, known_starts: &known_starts, noreturn: &noreturn, sizes: &sizes };
 
         return recover_function(&ctx, 0x1000, "f".to_string(), FunctionSource::Call);

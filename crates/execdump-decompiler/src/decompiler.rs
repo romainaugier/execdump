@@ -10,7 +10,7 @@ use crate::analysis::function::CallTarget;
 use crate::analysis::Analysis;
 use crate::cxx;
 use crate::lift::regs::{Abi, RegisterFile};
-use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, LType, Loc, Signature, Value};
+use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
 use crate::typedb::{Platform, TypeDb};
 use crate::analysis::insn::Decoder;
 use crate::c::{self, ast::CFunction};
@@ -28,12 +28,50 @@ use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, Targe
 use inkwell::values::BasicValue;
 use inkwell::OptimizationLevel;
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 /// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
 /// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
+/// Frames kept for the final lift after the discovery of the signature
+const FRAMES: usize = 64;
+
 const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
+
+/// Signatures shared by the decompilers of a program (one per thread): a signature is discovered once
+#[derive(Clone, Default)]
+pub struct SharedSignatures(Arc<Mutex<SharedState>>);
+
+#[derive(Default)]
+struct SharedState {
+    /// Incremented when the annotations change: signatures computed before are not published
+    epoch: u64,
+    entries: HashMap<u64, (Signature, Option<Prototype>)>,
+}
+
+impl SharedSignatures {
+    /// Forgets every signature (the names or prototypes given by the user changed), returns the new epoch
+    pub fn invalidate(&self) -> u64 {
+        let mut state = self.0.lock().unwrap();
+        state.epoch += 1;
+        state.entries.clear();
+        return state.epoch;
+    }
+
+    fn get(&self, addr: u64) -> Option<(Signature, Option<Prototype>)> {
+        return self.0.lock().unwrap().entries.get(&addr).cloned();
+    }
+
+    fn publish(&self, epoch: u64, addr: u64, sig: Signature, prototype: Option<Prototype>) {
+        let mut state = self.0.lock().unwrap();
+
+        if state.epoch == epoch {
+            state.entries.insert(addr, (sig, prototype));
+        }
+    }
+}
 
 pub struct Decompiler<'a> {
     pub program: &'a Program,
@@ -51,6 +89,10 @@ pub struct Decompiler<'a> {
     /// Names of the functions that do not return (from their signature or their name)
     noreturn: RefCell<HashSet<String>>,
     decoder: Decoder,
+    /// Capstone with the instruction details, for the frames and the call sites
+    cs: capstone::Capstone,
+    /// Decoded instructions and stack frames of the latest functions (lifted for the discovery, then for the C code)
+    frames: RefCell<(HashMap<u64, Rc<Frame>>, VecDeque<u64>)>,
     /// Created once: a target machine is expensive to set up (and caches its subtargets)
     machine: TargetMachine,
     /// LLM improvement pass and the names it gave to the functions
@@ -59,6 +101,8 @@ pub struct Decompiler<'a> {
     /// Names and prototypes given by the user, by address (functions and globals share the names)
     user_names: RefCell<HashMap<u64, String>>,
     user_prototypes: RefCell<HashMap<u64, Prototype>>,
+    shared: Option<SharedSignatures>,
+    epoch: Cell<u64>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -92,12 +136,28 @@ impl<'a> Decompiler<'a> {
             prototypes: RefCell::new(HashMap::new()),
             noreturn: RefCell::new(HashSet::new()),
             decoder: Decoder::new(arch).map_err(|e| e.to_string())?,
+            cs: lift::capstone(arch)?,
+            frames: RefCell::new((HashMap::new(), VecDeque::new())),
             machine: target_machine(program)?,
             assistant: None,
             renames: RefCell::new(Renames::new()),
             user_names: RefCell::new(HashMap::new()),
             user_prototypes: RefCell::new(HashMap::new()),
+            shared: None,
+            epoch: Cell::new(0),
         });
+    }
+
+    /// Shares the signatures with the other decompilers of the program
+    pub fn with_shared_signatures(mut self, shared: SharedSignatures) -> Self {
+        self.epoch.set(shared.0.lock().unwrap().epoch);
+        self.shared = Some(shared);
+        return self;
+    }
+
+    /// Annotations up to this epoch of the shared signatures are applied
+    pub fn set_epoch(&self, epoch: u64) {
+        self.epoch.set(epoch);
     }
 
     /// Enables the LLM improvement pass of the C code
@@ -136,6 +196,7 @@ impl<'a> Decompiler<'a> {
 
     /// The optimized LLVM IR of a function
     pub fn llvm_ir(&self, addr: u64) -> Result<String, String> {
+        // Named values: the IR is read by people
         let cx = Context::create();
         let module = self.lift_function(&cx, addr)?;
 
@@ -158,7 +219,7 @@ impl<'a> Decompiler<'a> {
 
     /// The C function of a function, with the address of each statement
     pub fn c_function(&self, addr: u64) -> Result<CFunction, String> {
-        let cx = Context::create();
+        let cx = anonymous_context();
         let module = self.lift_function(&cx, addr)?;
         let sig = self.signature(addr);
         let function = module.get_function(&sig.name).ok_or("the lifted function is missing")?;
@@ -196,7 +257,7 @@ impl<'a> Decompiler<'a> {
         let global_name = |addr: u64| self.global_name(addr);
         let env = self.env(&signature, &global_name);
 
-        let frame = analyze_frame(&env, function)?;
+        let frame = self.frame(&env, function)?;
         lift::lift(cx, &module, &env, function, &frame, sig, false)?;
 
         self.optimize(&module)?;
@@ -389,6 +450,19 @@ impl<'a> Decompiler<'a> {
             return sig.clone();
         }
 
+        if let Some((sig, prototype)) = self.shared.as_ref().and_then(|s| s.get(addr)) {
+            if let Some(prototype) = prototype {
+                self.add_prototype(prototype);
+            }
+
+            if sig.noreturn {
+                self.noreturn.borrow_mut().insert(sig.name.clone());
+            }
+
+            self.signatures.borrow_mut().insert(addr, sig.clone());
+            return sig;
+        }
+
         // Recursive calls see a provisional signature
         if !self.in_progress.borrow_mut().insert(addr) {
             return self.call_signature(&CallTarget::Indirect);
@@ -404,6 +478,10 @@ impl<'a> Decompiler<'a> {
 
         self.in_progress.borrow_mut().remove(&addr);
         self.signatures.borrow_mut().insert(addr, sig.clone());
+
+        if let Some(shared) = self.shared.as_ref() {
+            shared.publish(self.epoch.get(), addr, sig.clone(), self.prototypes.borrow().get(&sig.name).cloned());
+        }
 
         return sig;
     }
@@ -461,7 +539,7 @@ impl<'a> Decompiler<'a> {
             for call in caller.calls.iter().filter(|c| c.target == CallTarget::Function(addr)) {
                 sites += 1;
 
-                if call.tail || lift::result_used(&env, caller, call.addr, self.abi.int_ret) {
+                if call.tail || lift::result_used(&env, &self.cs, caller, call.addr, self.abi.int_ret) {
                     return true;
                 }
             }
@@ -474,19 +552,40 @@ impl<'a> Decompiler<'a> {
     fn discover(&self, addr: u64, name: &str) -> Result<Signature, String> {
         let function = &self.analysis.functions[&addr];
 
-        let cx = Context::create();
+        let cx = anonymous_context();
         let module = self.module(&cx, name)?;
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
         let env = self.env(&signature, &global_name);
 
-        let frame = analyze_frame(&env, function)?;
+        let frame = self.frame(&env, function)?;
         let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params);
         let llvm = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true)?;
 
         self.optimize(&module)?;
 
         return Ok(refine(&module, llvm, &discovery, &self.abi));
+    }
+
+    /// Stack frame of a function, decoded once for its discovery and its final lift
+    fn frame(&self, env: &Env, function: &crate::analysis::function::Function) -> Result<Rc<Frame>, String> {
+        if let Some(frame) = self.frames.borrow().0.get(&function.addr) {
+            return Ok(frame.clone());
+        }
+
+        let frame = Rc::new(analyze_frame(env, &self.cs, function)?);
+        let mut frames = self.frames.borrow_mut();
+
+        if frames.1.len() >= FRAMES {
+            if let Some(old) = frames.1.pop_front() {
+                frames.0.remove(&old);
+            }
+        }
+
+        frames.0.insert(function.addr, frame.clone());
+        frames.1.push_back(function.addr);
+
+        return Ok(frame);
     }
 
     /// Keeps the first prototype given to a name
@@ -576,6 +675,13 @@ impl<'a> Decompiler<'a> {
             CType::Unknown(bits) => LType::Int(*bits as u32),
         });
     }
+}
+
+/// LLVM context dropping the names of the values (nothing reads them, naming them is costly)
+fn anonymous_context() -> Context {
+    let cx = Context::create();
+    unsafe { inkwell::llvm_sys::core::LLVMContextSetDiscardValueNames(cx.raw(), 1) };
+    return cx;
 }
 
 /// Target machine of the program (its triple and data layout for the modules, its cost model for the passes)

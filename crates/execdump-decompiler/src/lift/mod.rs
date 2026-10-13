@@ -239,9 +239,8 @@ pub fn capstone(arch: Architecture) -> Result<capstone::Capstone, String> {
 }
 
 /// Decodes the function and follows the stack pointer through its blocks (in reverse post order)
-pub fn analyze_frame(env: &Env, function: &Function) -> Result<Frame, String> {
+pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) -> Result<Frame, String> {
     let arch = env.program.architecture();
-    let cs = capstone(arch)?;
     let sp = env.abi.stack_pointer;
 
     let mut frame = Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: 0, high: 0, stack_params: BTreeSet::new() };
@@ -251,7 +250,7 @@ pub fn analyze_frame(env: &Env, function: &Function) -> Result<Frame, String> {
 
         for insn in block.insns.iter() {
             let bytes = env.program.read(insn.addr, insn.size as usize).ok_or_else(|| format!("cannot read {:#x}", insn.addr))?;
-            insns.push(Insn::decode(arch, env.regs, &cs, bytes, insn.addr).ok_or_else(|| format!("cannot decode {:#x}", insn.addr))?);
+            insns.push(Insn::decode(arch, env.regs, cs, bytes, insn.addr).ok_or_else(|| format!("cannot decode {:#x}", insn.addr))?);
         }
 
         frame.blocks.insert(block.start, insns);
@@ -297,11 +296,7 @@ pub fn analyze_frame(env: &Env, function: &Function) -> Result<Frame, String> {
 
 /// Whether a caller reads the result register after a call (or returns it), following
 /// the single successors of the block for a few blocks
-pub fn result_used(env: &Env, caller: &Function, call: u64, reg: Reg) -> bool {
-    let Ok(cs) = capstone(env.program.architecture()) else {
-        return true;
-    };
-
+pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg) -> bool {
     let Some(mut block) = caller.block_containing(call) else {
         return true;
     };
@@ -314,7 +309,7 @@ pub fn result_used(env: &Env, caller: &Function, call: u64, reg: Reg) -> bool {
                 return true;
             };
 
-            let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, &cs, bytes, insn.addr) else {
+            let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr) else {
                 return true;
             };
 
