@@ -1,3 +1,4 @@
+use execdump_core::crash;
 use execdump_core::elf::ELF;
 use execdump_core::exec::Exec;
 use execdump_core::macho::MachO;
@@ -282,18 +283,23 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
                 DecompileOutput::C => {
-                    let mut decompiler = Decompiler::new(&program, &analysis)?;
-
-                    if args.llm {
-                        decompiler = decompiler.with_assistant(&config.llm)?;
-                    }
+                    let create = || -> Result<Decompiler, Box<dyn std::error::Error>> {
+                        let decompiler = Decompiler::new(&program, &analysis)?;
+                        return Ok(if args.llm { decompiler.with_assistant(&config.llm)? } else { decompiler });
+                    };
+                    let mut decompiler = create()?;
 
                     // With the LLM the callees come first, their new names show in their callers
                     let order: Vec<u64> = if args.llm { analysis.callees_first(functions.iter().map(|f| f.addr)) } else { functions.iter().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect() };
                     let mut outputs: Vec<(u64, String)> = Vec::new();
 
                     for addr in order {
-                        let function = if args.llm { decompiler.c_function_improved(addr) } else { decompiler.c_function(addr) };
+                        let function = crash::catch(|| if args.llm { decompiler.c_function_improved(addr) } else { decompiler.c_function(addr) });
+                        let function = function.unwrap_or_else(|error| {
+                            // What the decompiler was doing is left half done
+                            decompiler = create().expect("the decompiler was created before");
+                            Err(error)
+                        });
 
                         let text = match function {
                             Ok(function) => format!("// {:#x}\n{}", addr, function.print().text),
@@ -313,7 +319,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                     let decompiler = Decompiler::new(&program, &analysis)?;
 
                     for function in functions.iter().filter(|f| f.thunk.is_none()) {
-                        match decompiler.llvm_ir(function.addr) {
+                        match crash::catch(|| decompiler.llvm_ir(function.addr)).and_then(|r| r) {
                             Ok(ir) => println!("; {} ({:#x})\n{}", function.name, function.addr, ir),
                             Err(error) => println!("; {} ({:#x}): {}\n", function.name, function.addr, error),
                         }

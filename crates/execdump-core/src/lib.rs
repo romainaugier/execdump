@@ -1,4 +1,5 @@
 pub mod aarch64;
+pub mod crash;
 pub mod demangle;
 pub mod disasm;
 pub mod dump;

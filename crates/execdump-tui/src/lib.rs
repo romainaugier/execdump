@@ -38,6 +38,7 @@ use execdump_decompiler::analysis::function::{CallTarget, EdgeKind};
 use execdump_decompiler::analysis::insn::Decoder;
 use execdump_decompiler::analysis::{analyze, Analysis};
 use execdump_decompiler::llm::LlmConfig;
+use execdump_core::crash;
 use execdump_core::dump::Dump;
 use execdump_core::exec::Exec;
 use execdump_core::program::{programs_from_exec, Program};
@@ -424,11 +425,14 @@ impl App {
             let (program, sender, path, location) = (program.clone(), sender.clone(), exec_path.clone(), project_location.clone());
 
             std::thread::spawn(move || {
-                let result = analyze(&program, Some(&counter)).map_err(|e| e.to_string()).map(|analysis| {
-                    let analysis = Arc::new(analysis);
-                    let project = Project::open(i, count, program, analysis.clone(), &path, location, workers);
-                    (analysis, project)
+                let result = crash::catch(|| {
+                    analyze(&program, Some(&counter)).map_err(|e| e.to_string()).map(|analysis| {
+                        let analysis = Arc::new(analysis);
+                        let project = Project::open(i, count, program, analysis.clone(), &path, location, workers);
+                        (analysis, project)
+                    })
                 });
+                let result = result.unwrap_or_else(|error| Err(format!("analysis failed: {}", error)));
 
                 let _ = sender.send((i, result));
             });
@@ -3152,7 +3156,14 @@ fn render_group(f: &mut Frame, app: &mut App, theme: &Theme, id: workspace::Grou
     }
 }
 
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+}
+
 pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, project: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+    crash::install();
+    crash::on_crash(Some(Box::new(restore_terminal)));
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -3184,9 +3195,8 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, 
         }
     })();
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    crash::on_crash(None);
+    restore_terminal();
 
     return result;
 }

@@ -8,6 +8,7 @@
 use crate::annotations::FunctionNotes;
 use crate::cache::{Cache, Meta, Rendered};
 
+use execdump_core::crash;
 use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
 use execdump_decompiler::notes::{apply_summary, apply_vars, used_names};
@@ -224,30 +225,47 @@ impl Drop for Service {
 }
 
 fn worker(index: usize, program: &Program, analysis: &Analysis, shared: &Shared, cache: &Mutex<Cache>, events: &Sender<Event>) {
-    let decompiler = Decompiler::new(program, analysis).map(|d| d.with_shared_signatures(shared.signatures.clone()));
+    let create = || Decompiler::new(program, analysis).map(|d| d.with_shared_signatures(shared.signatures.clone()));
+    let mut decompiler = create();
+    // Everything the decompiler was told, for the one replacing it after a panic
+    let mut controls: Vec<(u64, Control)> = Vec::new();
 
     while let Some(job) = shared.next() {
         // Controls are sent before the jobs they affect are queued: drained after taking the job
-        let controls = std::mem::take(&mut *shared.controls[index].lock().unwrap());
+        let received = std::mem::take(&mut *shared.controls[index].lock().unwrap());
 
         if let Ok(decompiler) = decompiler.as_ref() {
-            for (epoch, control) in controls {
-                match control {
-                    Control::Rename(addr, name) => decompiler.rename(addr, name),
-                    Control::Prototype(addr, prototype) => decompiler.set_prototype(addr, prototype),
-                }
-
-                decompiler.set_epoch(epoch);
-            }
+            apply(decompiler, &received);
         }
 
+        controls.extend(received);
+
+        let (addr, notes, name) = match &job {
+            Job::Render { addr, notes, .. } => (*addr, &**notes, None),
+            Job::Preview(preview) => (preview.addr, &preview.notes, preview.name.as_deref()),
+        };
+
+        let rendered = match crash::catch(|| render(decompiler.as_ref(), addr, notes, name)) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                // What the decompiler was doing is left half done
+                decompiler = create();
+
+                if let Ok(decompiler) = decompiler.as_ref() {
+                    apply(decompiler, &controls);
+                }
+
+                let name = analysis.functions.get(&addr).map_or_else(|| format!("sub_{:x}", addr), |f| f.name.clone());
+                failed(addr, &name, &error)
+            }
+        };
+
         let event = match job {
-            Job::Render { addr, fingerprint, notes } => {
-                let rendered = render(decompiler.as_ref(), addr, &notes, None);
+            Job::Render { addr, fingerprint, .. } => {
                 cache.lock().unwrap().put(addr, fingerprint, rendered);
                 Event::Decompiled { addr, fingerprint }
             }
-            Job::Preview(preview) => Event::Preview { id: preview.id, addr: preview.addr, rendered: render(decompiler.as_ref(), preview.addr, &preview.notes, preview.name.as_deref()) },
+            Job::Preview(preview) => Event::Preview { id: preview.id, addr: preview.addr, rendered },
         };
 
         shared.finished();
@@ -255,6 +273,17 @@ fn worker(index: usize, program: &Program, analysis: &Analysis, shared: &Shared,
         if events.send(event).is_err() {
             return;
         }
+    }
+}
+
+fn apply(decompiler: &Decompiler, controls: &[(u64, Control)]) {
+    for (epoch, control) in controls {
+        match control {
+            Control::Rename(addr, name) => decompiler.rename(*addr, name.clone()),
+            Control::Prototype(addr, prototype) => decompiler.set_prototype(*addr, prototype.clone()),
+        }
+
+        decompiler.set_epoch(*epoch);
     }
 }
 

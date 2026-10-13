@@ -27,6 +27,17 @@ The time spent in each stage of a project (analysis, background decompilation, c
 cargo run --release -p execdump-project --example profile -- /usr/bin/python3 [workers] [max seconds of decompilation]
 ```
 
+Every function of some binaries decompiled with overflow checks, the panics grouped by where they happen
+(`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads):
+
+```
+CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true \
+    cargo run --release --target-dir target/checked -p execdump-project --example sweep -- /usr/bin/*
+```
+
+A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other
+functions are not affected. A crash of execdump itself gives the terminal back before printing the error.
+
 ## Usage
 
 ```

@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::config::Config;
 use crate::dump::dump_exec;
 
+use execdump_core::crash;
 use execdump_core::elf::parse_elf;
 use execdump_core::exec::{ExecType, guess_exectype, Exec};
 use execdump_core::macho::parse_macho;
@@ -50,6 +51,7 @@ fn export(exec: &Exec, args: &Args, dir: &std::path::Path) -> Result<(), Box<dyn
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    crash::install();
     let args = Args::parse();
 
     let exectype = guess_exectype(&args.file_path)?;

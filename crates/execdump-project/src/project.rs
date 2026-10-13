@@ -15,6 +15,7 @@ use crate::modules::{auto_modules, Modules};
 use crate::service::{Control, Event, Priority, Service};
 use crate::store::{diff_text, has_conflicts, map_lines, rebase_text, Store, GENERATED, MAIN, PROPOSALS};
 
+use execdump_core::crash;
 use execdump_core::program::{Format, Program};
 use execdump_decompiler::analysis::function::CallTarget;
 use execdump_decompiler::analysis::Analysis;
@@ -960,7 +961,7 @@ impl Project {
         std::thread::spawn(move || {
             let typedb = TypeDb::bundled(typedb_platform, model);
 
-            let notes = assistant.suggest(&rendered.text).map(|suggestions| {
+            let notes = crash::catch(|| assistant.suggest(&rendered.text)).and_then(|r| r).map(|suggestions| {
                 let mut notes = FunctionNotes::default();
 
                 if !named {
@@ -1020,7 +1021,7 @@ impl Project {
         self.llm_running += 1;
 
         std::thread::spawn(move || {
-            let moves = assistant.suggest_modules(&listing).map(|suggestions| {
+            let moves = crash::catch(|| assistant.suggest_modules(&listing)).and_then(|r| r).map(|suggestions| {
                 let mut moves = Vec::new();
 
                 for file in suggestions.files {
