@@ -10,12 +10,13 @@ execdump might evolve into a library later, instead of just being a standalone c
 
 ## Building
 
-The decompiler lifts the code to LLVM IR and links LLVM 18 statically: building needs the LLVM 18 development
-libraries (`llvm-config` and the static libraries), found through `LLVM_SYS_181_PREFIX` or the `PATH`.
+The decompiler lifts the code to LLVM IR and links LLVM 18 statically: building needs the LLVM 18 development libraries (`llvm-config` and the static libraries), found through `LLVM_SYS_181_PREFIX` or the `PATH`.
 
 - Debian/Ubuntu: `apt install llvm-18-dev libpolly-18-dev libzstd-dev zlib1g-dev`
 - macOS: `brew install llvm@18 zstd`, then `export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)`
 - Windows: a static LLVM build such as [llvm-package-windows](https://github.com/vovkos/llvm-package-windows), then set `LLVM_SYS_181_PREFIX`
+
+If you don't want to use a package manager and instead install only what is needed, you can use the `get_llvm.sh` script, and then set `LLVM_SYS_181_PREFIX` to `/third_party/llvm/\<os\>_\<arch\>` (where the necessary llvm components have been installed).
 
 ```
 cargo build --release
@@ -27,20 +28,14 @@ The time spent in each stage of a project (analysis, background decompilation, c
 cargo run --release -p execdump-project --example profile -- /usr/bin/python3 [workers] [max seconds of decompilation]
 ```
 
-Every function of some binaries decompiled with overflow checks, the panics grouped by where they happen
-(`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads and
-`SWEEP_STACK` their stack size, a small one finds the deepest recursions):
+Every function of some binaries decompiled with overflow checks, the panics grouped by where they happen (`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads and `SWEEP_STACK` their stack size, a small one finds the deepest recursions):
 
 ```
 CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true \
     cargo run --release --target-dir target/checked -p execdump-project --example sweep -- /usr/bin/*
 ```
 
-A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other
-functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal
-errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler
-run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big
-functions, and are much slower, `--release` is the way to explore large binaries.
+A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
 
 ## Usage
 
@@ -260,8 +255,7 @@ Decompiler:
 
 ### Projects
 
-The C code of the whole program is a project: every function is decompiled in the background, organized in modules
-(source files), annotated and edited, and the work is saved in a git repository next to the binary.
+The C code of the whole program is a project: every function is decompiled in the background, organized in modules (source files), annotated and edited, and the work is saved in a git repository next to the binary.
 
 - :heavy_check_mark: Background decompilation of every function, callees first, the functions on screen before the others
   (one decompiler per core but one, sharing the signatures they discover), progress in the title bar
@@ -284,8 +278,7 @@ The C code of the whole program is a project: every function is decompiled in th
   functions), `include/execdump.h` (`undefined` types), `include/execdump_imports.h` and `include/execdump_globals.h`.
   The tree is meant to be read and built upon, it does not always compile as it is.
 
-The project directory (`<binary>.edproj` by default, `--project` or `:w <dir>` to choose another one) holds a bare git
-repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
+The project directory (`<binary>.edproj` by default, `--project` or `:w <dir>` to choose another one) holds a bare git repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
 
 | Branch | Content |
 |---|---|
@@ -293,8 +286,7 @@ repository (`repo.git`) and the session (`session.toml`, the splits and tabs, re
 | `generated` | The decompiled code the edited functions were edited on (`git diff generated main -- fn/401a20.c` shows the edits) |
 | `llm/<n>` | A proposal of the LLM waiting for a review (merged into main when accepted and saved) |
 
-Only the annotated and edited functions are in the repository, its size follows the work, not the size of the binary.
-Fat binaries keep each program under `p<index>/`.
+Only the annotated and edited functions are in the repository, its size follows the work, not the size of the binary. Fat binaries keep each program under `p<index>/`.
 
 ### TUI
 
@@ -317,14 +309,9 @@ Viewers:
     needed, from the graphs, the call graphs and the C code with `gd`), the libraries loaded are restored with the session
   - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
 
-The analysis runs in the background when the TUI starts, then the project opens (modules, cache) and every function is
-decompiled. The title bar shows the stage, the progress of the decompilation (bar, percentage, remaining time) and `[+]`
-when there are unsaved changes.
+The analysis runs in the background when the TUI starts, then the project opens (modules, cache) and every function is decompiled. The title bar shows the stage, the progress of the decompilation (bar, percentage, remaining time) and `[+]` when there are unsaved changes.
 
-The content area is split as in vim: each split is a group of tabs, each tab shows a view and has its own jumplist.
-Anything can be opened in any split (graphs, C code, disassembly, tables...). Two splits can be linked (`Ctrl-w b`): the
-cursor of one moves the other, for instance the C code of a module next to the control flow graph of the function under
-the cursor.
+The content area is split as in vim: each split is a group of tabs, each tab shows a view and has its own jumplist. Anything can be opened in any split (graphs, C code, disassembly, tables...). Two splits can be linked (`Ctrl-w b`): the cursor of one moves the other, for instance the C code of a module next to the control flow graph of the function under the cursor.
 
 Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
 
@@ -374,11 +361,9 @@ In the graphs:
 | `+` / `-` / `i` / `r` | Call graph depth / show imports / re-root at the selected function |
 | `U` | Call graph: go up to the parent graph (re-root at a caller of the root, picked in a popup when there are several) |
 
-Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
+ Edges colors: green for a taken conditional branch (`t`), red for a conditional branch not taken (`f`), blue for unconditional jumps, grey for fall-through, purple for jump table entries. In the call graph, dashed edges are tail calls (purple) and functions referenced by address (grey).
 
-In the C code (a module, every function of it one after the other; functions not decompiled yet show a placeholder
-until their code arrives). The gutter shows the address of each line, `~` marks the edited functions, `!` the conflict
-markers and `·` the functions being decompiled again:
+In the C code (a module, every function of it one after the other; functions not decompiled yet show a placeholder until their code arrives). The gutter shows the address of each line, `~` marks the edited functions, `!` the conflict markers and `·` the functions being decompiled again:
 
 | Keys | Action |
 |---|---|
@@ -399,8 +384,7 @@ markers and `·` the functions being decompiled again:
 | `x` / `C` | Cross references / call graph of the function |
 | `L` | Ask the LLM to improve the function: its proposal shows in `:review` |
 
-In the review of the LLM proposals: `j` / `k` move, `n` / `p` go to the next / previous proposal, `a` accepts it, `r`
-rejects it, `Enter` opens the code of its function. Accepted proposals are merged into `main` on the next `:w`.
+In the review of the LLM proposals: `j` / `k` move, `n` / `p` go to the next / previous proposal, `a` accepts it, `r` rejects it, `Enter` opens the code of its function. Accepted proposals are merged into `main` on the next `:w`.
 
 Commands:
 
@@ -458,8 +442,6 @@ api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
 # max_tokens = 2048
 # temperature = 0.2
 ```
-
-![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
 
 ## Acknowledgement
 
