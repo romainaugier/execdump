@@ -225,6 +225,9 @@ Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
   - :heavy_check_mark: Function discovery by recursive descent, seeded by the entry point, symbols, exports, PE exception table (.pdata), Mach-O LC_FUNCTION_STARTS, ELF .eh_frame and init arrays, then call targets and code references (works on stripped binaries)
   - :heavy_check_mark: Control flow graphs (true/false branches, tail calls, x86 jump tables)
+  - :heavy_check_mark: Functions split by the compiler (hot and cold parts): the jumps between the parts do not create
+    functions in the middle of others, the code reached only from a cold part is a fragment that stops at the code
+    already recovered (no copies of the rest of the function)
   - :heavy_check_mark: Noreturn functions (known names and propagation)
   - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking)
   - :heavy_check_mark: Call graph and cross references

@@ -45,8 +45,8 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
     let mut known_starts: HashSet<u64> = program.seeds.iter().map(|s| s.addr).collect();
     known_starts.extend(program.symbols.values().filter(|s| s.kind == SymbolKind::Import && program.is_executable(s.addr)).map(|s| s.addr));
 
-    let mut queue: VecDeque<(u64, FunctionSource)> = program.seeds.iter().map(|s| (s.addr, FunctionSource::Seed(s.source))).collect();
-    let mut noreturn: HashSet<u64> = HashSet::default();
+    let queue: VecDeque<(u64, FunctionSource)> = program.seeds.iter().map(|s| (s.addr, FunctionSource::Seed(s.source))).collect();
+    let noreturn: HashSet<u64> = HashSet::default();
 
     let mut sizes: HashMap<u64, u64> = HashMap::default();
 
@@ -56,7 +56,8 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
         }
     }
 
-    discover(program, &decoder, &mut analysis, &mut known_starts, &mut noreturn, &sizes, &mut queue, progress);
+    let mut discovery = Discovery { known_starts, noreturn, sizes: &sizes, bounds: Bounds::new(&sizes), covered: HashSet::default(), queue };
+    discovery.run(program, &decoder, &mut analysis, progress);
 
     // Code referenced by address (callbacks, main passed to __libc_start_main, vtables entries...)
     loop {
@@ -71,20 +72,21 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
         }
 
         // Only keep references to code that is not already part of a function
-        let covered = coverage(&analysis);
-        referenced.retain(|addr| !covered.contains(addr) && !is_padding(program, &decoder, *addr));
+        referenced.retain(|addr| !discovery.covered.contains(addr) && !is_padding(program, &decoder, *addr));
 
         if referenced.is_empty() {
             break;
         }
 
         for addr in referenced {
-            known_starts.insert(addr);
-            queue.push_back((addr, FunctionSource::Reference));
+            discovery.known_starts.insert(addr);
+            discovery.queue.push_back((addr, FunctionSource::Reference));
         }
 
-        discover(program, &decoder, &mut analysis, &mut known_starts, &mut noreturn, &sizes, &mut queue, progress);
+        discovery.run(program, &decoder, &mut analysis, progress);
     }
+
+    let Discovery { known_starts, mut noreturn, bounds, mut covered, .. } = discovery;
 
     // Noreturn propagation: functions calling newly found noreturn functions must be recovered again
     for _ in 0..MAX_NORETURN_PASSES {
@@ -99,10 +101,20 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
             break;
         }
 
-        let ctx = RecoveryContext { program, decoder: &decoder, known_starts: &known_starts, noreturn: &noreturn, sizes: &sizes };
-
         for (addr, name, source) in dirty {
+            // Fragments still stop at the code of the others
+            let fragment = source == FunctionSource::TailCall && bounds.inside(addr);
+
+            if fragment {
+                for insn in analysis.functions[&addr].blocks.values().flat_map(|b| b.insns.iter()) {
+                    covered.remove(&insn.addr);
+                }
+            }
+
+            let ctx = RecoveryContext { program, decoder: &decoder, known_starts: &known_starts, noreturn: &noreturn, sizes: &sizes, covered: fragment.then_some(&covered) };
             let function = recover_function(&ctx, addr, name, source);
+
+            covered.extend(function.blocks.values().flat_map(|b| b.insns.iter().map(|i| i.addr)));
             analysis.functions.insert(addr, function);
         }
     }
@@ -133,63 +145,90 @@ fn is_padding(program: &Program, decoder: &Decoder, addr: u64) -> bool {
     return matches!(text.mnemonic.as_str(), "nop" | "int3" | "udf" | "hlt") || (text.mnemonic == "add" && text.operands == "byte ptr [rax], al");
 }
 
-fn coverage(analysis: &Analysis) -> HashSet<u64> {
-    let mut covered = HashSet::default();
+/// Address ranges of the functions whose size is known (symbols, unwind information)
+struct Bounds(Vec<(u64, u64)>);
 
-    for function in analysis.functions.values() {
-        for block in function.blocks.values() {
-            for insn in block.insns.iter() {
-                covered.insert(insn.addr);
-            }
-        }
+impl Bounds {
+    fn new(sizes: &HashMap<u64, u64>) -> Self {
+        let mut ranges: Vec<(u64, u64)> = sizes.iter().map(|(&start, &size)| (start, start.saturating_add(size))).collect();
+        ranges.sort();
+        return Bounds(ranges);
     }
 
-    return covered;
+    /// The address is in the body of a function (not at its start). The parts of a function split by
+    /// the compiler (hot and cold) jump into each other: these jumps are not calls of new functions,
+    /// which would copy the rest of the other part.
+    fn inside(&self, addr: u64) -> bool {
+        let index = self.0.partition_point(|&(start, _)| start <= addr);
+        return index > 0 && self.0[..index].iter().rev().take(4).any(|&(start, end)| start < addr && addr < end);
+    }
 }
 
-fn discover(
-    program: &Program,
-    decoder: &Decoder,
-    analysis: &mut Analysis,
-    known_starts: &mut HashSet<u64>,
-    noreturn: &mut HashSet<u64>,
-    sizes: &HashMap<u64, u64>,
-    queue: &mut VecDeque<(u64, FunctionSource)>,
-    progress: Option<&AtomicUsize>,
-) {
-    while let Some((addr, source)) = queue.pop_front() {
-        if analysis.functions.contains_key(&addr) || !program.is_executable(addr) {
-            continue;
-        }
+struct Discovery<'a> {
+    known_starts: HashSet<u64>,
+    noreturn: HashSet<u64>,
+    sizes: &'a HashMap<u64, u64>,
+    bounds: Bounds,
+    /// Instructions of the functions recovered so far
+    covered: HashSet<u64>,
+    queue: VecDeque<(u64, FunctionSource)>,
+}
 
-        let function = {
-            let ctx = RecoveryContext { program, decoder, known_starts, noreturn, sizes };
-            recover_function(&ctx, addr, function_name(program, addr), source)
-        };
+impl Discovery<'_> {
+    fn run(&mut self, program: &Program, decoder: &Decoder, analysis: &mut Analysis, progress: Option<&AtomicUsize>) {
+        while let Some((addr, source)) = self.queue.pop_front() {
+            if analysis.functions.contains_key(&addr) || !program.is_executable(addr) {
+                continue;
+            }
 
-        if function.blocks.is_empty() {
-            continue;
-        }
+            // A jump into the body of another function: the code that is not recovered yet is a fragment of
+            // that function (reached through jumps the analysis could not follow), which stops at the code
+            // already recovered instead of copying it
+            let fragment = source == FunctionSource::TailCall && self.bounds.inside(addr);
 
-        if function.noreturn {
-            noreturn.insert(addr);
-        }
+            if fragment && self.covered.contains(&addr) {
+                continue;
+            }
 
-        for call in function.calls.iter() {
-            if let CallTarget::Function(target) = call.target {
-                if program.is_executable(target) && !analysis.functions.contains_key(&target) {
-                    let source = if call.tail { FunctionSource::TailCall } else { FunctionSource::Call };
+            if fragment {
+                self.known_starts.insert(addr);
+            }
 
-                    known_starts.insert(target);
-                    queue.push_back((target, source));
+            let function = {
+                let covered = fragment.then_some(&self.covered);
+                let ctx = RecoveryContext { program, decoder, known_starts: &self.known_starts, noreturn: &self.noreturn, sizes: self.sizes, covered };
+                recover_function(&ctx, addr, function_name(program, addr), source)
+            };
+
+            if function.blocks.is_empty() {
+                continue;
+            }
+
+            if function.noreturn {
+                self.noreturn.insert(addr);
+            }
+
+            for call in function.calls.iter() {
+                if let CallTarget::Function(target) = call.target {
+                    if program.is_executable(target) && !analysis.functions.contains_key(&target) {
+                        let source = if call.tail { FunctionSource::TailCall } else { FunctionSource::Call };
+
+                        // A fragment is a start once it is recovered: the code it jumps to may be in a function
+                        if !(call.tail && self.bounds.inside(target)) {
+                            self.known_starts.insert(target);
+                        }
+
+                        self.queue.push_back((target, source));
+                    }
                 }
             }
-        }
 
-        analysis.functions.insert(addr, function);
+            self.covered.extend(function.blocks.values().flat_map(|b| b.insns.iter().map(|i| i.addr)));
+            analysis.functions.insert(addr, function);
 
-        if let Some(progress) = progress {
-            progress.fetch_add(1, Ordering::Relaxed);
+            if let Some(progress) = progress {
+                progress.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -369,6 +408,39 @@ mod tests {
 
     fn fixture(name: &str) -> PathBuf {
         return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data").join(name);
+    }
+
+    #[test]
+    fn split_functions() {
+        use execdump_core::disasm::Architecture;
+        use execdump_core::program::{FunctionSeed, Perms, Region, SeedSource};
+
+        // Hot part at 0x1000 (unwind information: 0xe bytes), cold part at 0x1100 (0xa bytes) jumping back
+        let mut code = vec![0xcc; 0x10a];
+        code[..0xe].copy_from_slice(&[
+            0x85, 0xff,                         // 1000 test edi, edi
+            0x0f, 0x84, 0xf8, 0x00, 0x00, 0x00, // 1002 je 1100
+            0xb8, 0x01, 0x00, 0x00, 0x00,       // 1008 mov eax, 1
+            0xc3,                               // 100d ret
+        ]);
+        code[0x100..].copy_from_slice(&[
+            0xbf, 0x02, 0x00, 0x00, 0x00,       // 1100 mov edi, 2
+            0xe9, 0xfe, 0xfe, 0xff, 0xff,       // 1105 jmp 1008
+        ]);
+
+        let mut program = Program::default();
+        program.arch = Some(Architecture::X86_64);
+        program.pointer_size = 8;
+        program.regions.push(Region { name: ".text".to_string(), vaddr: 0x1000, size: code.len() as u64, data: code, perms: Perms { read: true, write: false, exec: true } });
+        program.seeds.push(FunctionSeed { addr: 0x1000, size: Some(0xe), source: SeedSource::EhFrame });
+        program.seeds.push(FunctionSeed { addr: 0x1100, size: Some(0xa), source: SeedSource::EhFrame });
+
+        let analysis = analyze(&program, None).unwrap();
+
+        // The jump back is not a new function, the hot part keeps its code
+        assert_eq!(analysis.functions.keys().copied().collect::<Vec<_>>(), vec![0x1000, 0x1100]);
+        assert!(analysis.functions[&0x1000].blocks.contains_key(&0x1008));
+        assert!(analysis.functions[&0x1100].calls.iter().any(|c| c.tail && c.target == CallTarget::Function(0x1008)));
     }
 
     #[test]

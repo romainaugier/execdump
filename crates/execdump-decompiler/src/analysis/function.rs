@@ -167,6 +167,8 @@ pub struct RecoveryContext<'a> {
     pub noreturn: &'a HashSet<u64>,
     /// Function sizes known from the metadata (symbols, unwind information)
     pub sizes: &'a HashMap<u64, u64>,
+    /// Code of the functions already recovered, where the recovery of a fragment of a function stops
+    pub covered: Option<&'a HashSet<u64>>,
 }
 
 impl RecoveryContext<'_> {
@@ -209,7 +211,7 @@ struct Recovery<'a, 'b> {
 
 impl Recovery<'_, '_> {
     fn is_other_function(&self, addr: u64) -> bool {
-        return addr != self.start && self.ctx.known_starts.contains(&addr);
+        return addr != self.start && (self.ctx.known_starts.contains(&addr) || self.ctx.covered.is_some_and(|c| c.contains(&addr)));
     }
 
     /// A jump leaves the function if it targets another function, non executable memory,
@@ -668,7 +670,7 @@ mod tests {
         let known_starts: HashSet<u64> = known.iter().copied().collect();
         let noreturn = HashSet::default();
         let sizes = HashMap::default();
-        let ctx = RecoveryContext { program, decoder: &decoder, known_starts: &known_starts, noreturn: &noreturn, sizes: &sizes };
+        let ctx = RecoveryContext { program, decoder: &decoder, known_starts: &known_starts, noreturn: &noreturn, sizes: &sizes, covered: None };
 
         return recover_function(&ctx, 0x1000, "f".to_string(), FunctionSource::Call);
     }
