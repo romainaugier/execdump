@@ -251,6 +251,7 @@ Decompiler:
     another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
     floating point numbers, strings, functions)
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
+  - :heavy_check_mark: LLM rewrite (`W` or `:llm rewrite` in the TUI): the function rewritten as clear C (structured control flow, no needless temporaries, meaningful names) with the same behavior, as an edit to review; the proposal says when the rewrite lost the function name, a call or the balance of its braces
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
 
 ### Projects
@@ -272,7 +273,7 @@ The C code of the whole program is a project: every function is decompiled in th
 - :heavy_check_mark: Edited code: the edits are kept with the decompiled text they were made on, and rebased when the
   decompiler renders the function differently: renames are applied to the edited text, other changes are merged by
   libgit2 (conflicts are marked as in git and resolved in the code)
-- :heavy_check_mark: LLM proposals (names, types and summary of a function, organization of the functions in modules),
+- :heavy_check_mark: LLM proposals (names, types and summary of a function, rewrites of its code, organization of the functions in modules),
   reviewed as diffs before being accepted
 - :heavy_check_mark: Export of the modules as a source tree: `src/<module>` and `include/<module>.h` (prototypes of the
   functions), `include/execdump.h` (`undefined` types), `include/execdump_imports.h` and `include/execdump_globals.h`.
@@ -383,6 +384,7 @@ In the C code (a module, every function of it one after the other; functions not
 | `]c` / `[c` | Next / previous conflict between the edits and the decompiled code |
 | `x` / `C` | Cross references / call graph of the function |
 | `L` | Ask the LLM to improve the function: its proposal shows in `:review` |
+| `W` | Ask the LLM to rewrite the function as clear C: an edit proposed in `:review` |
 
 In the review of the LLM proposals: `j` / `k` move, `n` / `p` go to the next / previous proposal, `a` accepts it, `r` rejects it, `Enter` opens the code of its function. Accepted proposals are merged into `main` on the next `:w`.
 
@@ -407,7 +409,7 @@ Commands:
 | `:mv <module> [function]`, `:mkmod <module>`, `:rmmod <module>`, `:renmod <old> <new>` | Organize the modules (paths such as `net/socket.c`) |
 | `:revert` | Drop the edits of the current function |
 | `:ours`, `:theirs`, `:both` | Resolve the conflict under the cursor: keep the edited code, the decompiled code, or both |
-| `:llm`, `:llm modules [module\|all]` | Ask the LLM to improve the current function / to organize the functions of a module (or of the program) |
+| `:llm`, `:llm rewrite`, `:llm modules [module\|all]` | Ask the LLM to improve the current function / to rewrite it as clear C / to organize the functions of a module (or of the program) |
 | `:review`, `:accept <n>`, `:reject <n>` | Review the LLM proposals |
 | `:w [directory]` | Save the project (and the session), in another directory when given |
 | `:export <directory>` | Export the C code as a source tree (once everything is decompiled) |
@@ -430,18 +432,37 @@ follow_false = 'f'
 detail = 'v'
 ```
 
-The LLM assistance uses the `[llm]` section (any backend of the [llm](https://crates.io/crates/llm) crate):
+The LLM assistance uses the `[llm]` section:
 
 ```toml
 # ~/.execdumprc
 [llm]
-backend = "anthropic"              # openai, anthropic, ollama, google, deepseek, mistral, groq, xai, openrouter
+backend = "anthropic"              # openai, anthropic, google, deepseek, mistral, groq, xai, openrouter, ollama, openai-compatible
 model = "..."
 api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
 # base_url = "http://localhost:11434"
 # max_tokens = 2048
 # temperature = 0.2
+# timeout = 120                    # seconds
 ```
+
+execdump calls the APIs itself, in three formats: OpenAI chat completions (`openai`, `deepseek`, `mistral`, `groq`,
+`xai`, `openrouter`, `ollama`, and any compatible server with `backend = "openai-compatible"` and its `base_url`,
+`http://localhost:8080/v1` for llama.cpp for instance), Anthropic messages (`anthropic`) and Google Gemini (`google`).
+`base_url` replaces the default address of a backend (with or without its version path, `/v1`), `ollama` and
+`openai-compatible` need no key. Every backend works the same way:
+
+- the answer is streamed, so a long rewrite is never cut by the timeout: it is the longest silence allowed
+- `max_tokens` is always sent (rewrites get at least 8192), an answer cut by it is an error saying to raise it
+- the answer is a JSON object following a schema: the structured output of the API when it has one (JSON schema for
+  OpenAI, Mistral, xAI, OpenRouter and Ollama, a forced tool for Anthropic, JSON mode for the others), and the schema
+  is in the system prompt
+- the errors give the HTTP status and what the API answered; the models that refuse a temperature are asked again
+  without it
+
+While the LLM works, the status line shows it with the time it has been running.
+
+![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
 
 ## Acknowledgement
 

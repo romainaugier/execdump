@@ -19,7 +19,7 @@ use execdump_core::crash;
 use execdump_core::program::{Format, Program};
 use execdump_decompiler::analysis::function::CallTarget;
 use execdump_decompiler::analysis::Analysis;
-use execdump_decompiler::llm::{parse_type, valid_identifier, Assistant, LlmConfig};
+use execdump_decompiler::llm::{check_rewrite, parse_type, valid_identifier, Assistant, LlmConfig};
 use execdump_decompiler::notes::parse_prototype;
 use execdump_decompiler::typedb::{Platform, TypeDb};
 use execdump_decompiler::types::DataModel;
@@ -89,6 +89,8 @@ pub struct Proposal {
     pub label: String,
     /// Notes to add to each function
     pub functions: BTreeMap<u64, FunctionNotes>,
+    /// Code of functions rewritten by the LLM
+    pub edits: BTreeMap<u64, String>,
     pub before: String,
     pub after: String,
     /// Waiting for the decompiler to render the proposed code
@@ -96,6 +98,11 @@ pub struct Proposal {
 }
 
 impl Proposal {
+    /// Not accepted nor rejected yet
+    pub fn is_pending(&self) -> bool {
+        return !self.functions.is_empty() || !self.edits.is_empty();
+    }
+
     pub fn diff(&self) -> String {
         return diff_text(&self.before, &self.after, &self.label);
     }
@@ -113,6 +120,7 @@ struct ProposalFile {
 enum Assisted {
     Function { addr: u64, before: String, notes: Result<FunctionNotes, String> },
     Modules { label: String, moves: Result<Vec<(u64, String)>, String> },
+    Rewrite { addr: u64, before: String, calls: Vec<String>, code: Result<String, String> },
 }
 
 pub struct Project {
@@ -835,9 +843,20 @@ impl Project {
             };
 
             let meta: ProposalFile = toml::from_str(&String::from_utf8_lossy(&meta)).unwrap_or_default();
-            let mut functions = BTreeMap::new();
+            let (mut functions, mut edits) = (BTreeMap::new(), BTreeMap::new());
 
             for (path, content) in store.files(&branch, &self.path("fn")) {
+                // Rewritten code
+                if let Some(addr) = path.strip_suffix(".c").and_then(|a| u64::from_str_radix(a, 16).ok()) {
+                    let code = String::from_utf8_lossy(&content).into_owned();
+
+                    if work.edits.get(&addr).is_none_or(|e| e.text != code) {
+                        edits.insert(addr, code);
+                    }
+
+                    continue;
+                }
+
                 let Some(addr) = path.strip_suffix(".toml").and_then(|a| u64::from_str_radix(a, 16).ok()) else {
                     continue;
                 };
@@ -851,7 +870,7 @@ impl Project {
             }
 
             self.next_proposal = self.next_proposal.max(id + 1);
-            self.proposals.push(Proposal { id, label: meta.label, functions, before: meta.before, after: meta.after, preview_pending: false });
+            self.proposals.push(Proposal { id, label: meta.label, functions, edits, before: meta.before, after: meta.after, preview_pending: false });
         }
 
         self.saved = work.clone();
@@ -925,7 +944,7 @@ impl Project {
         let annotated = work.functions.len() + work.globals.len();
         let name = self.program.name.clone();
 
-        let merged: Vec<u64> = self.proposals.iter().filter(|p| p.functions.is_empty()).map(|p| p.id).collect();
+        let merged: Vec<u64> = self.proposals.iter().filter(|p| !p.is_pending()).map(|p| p.id).collect();
         let store = self.store()?;
         let mut parents = accepted.clone();
 
@@ -943,7 +962,7 @@ impl Project {
             store.delete_branch(&format!("{}{}", PROPOSALS, id));
         }
 
-        self.proposals.retain(|p| !p.functions.is_empty());
+        self.proposals.retain(|p| p.is_pending());
         self.saved = work;
 
         return Ok(match committed {
@@ -1006,6 +1025,23 @@ impl Project {
             });
 
             let _ = sender.send(Assisted::Function { addr, before: rendered.text.clone(), notes });
+        });
+
+        return Ok(());
+    }
+
+    /// Asks the LLM to rewrite a function as clear C (the code shown, edited or not), the answer becomes a proposal
+    pub fn llm_rewrite(&mut self, addr: u64, config: &LlmConfig) -> Result<(), String> {
+        let (rendered, _) = self.shown(addr).ok_or("the function is not decompiled yet")?;
+        let assistant = Assistant::rewrite(config)?;
+        let sender = self.assisted_sender.clone();
+        let calls = rendered.meta.calls.clone();
+
+        self.llm_running += 1;
+
+        std::thread::spawn(move || {
+            let code = crash::catch(|| assistant.rewrite_code(&rendered.text, &rendered.meta.decls)).and_then(|r| r);
+            let _ = sender.send(Assisted::Rewrite { addr, before: rendered.text.clone(), calls, code });
         });
 
         return Ok(());
@@ -1083,7 +1119,7 @@ impl Project {
                 self.service.preview(id, addr, merged.clone(), notes.name.clone());
                 let label = format!("{} ({:#x})", self.function_name(addr), addr);
 
-                self.proposals.push(Proposal { id, label, functions: [(addr, notes)].into_iter().collect(), before, after: String::new(), preview_pending: true });
+                self.proposals.push(Proposal { id, label, functions: [(addr, notes)].into_iter().collect(), edits: BTreeMap::new(), before, after: String::new(), preview_pending: true });
                 self.messages.push((format!("LLM: proposal {} for {}, review it with :review", id, self.function_name(addr)), false));
             }
             Assisted::Modules { label, moves } => {
@@ -1109,9 +1145,27 @@ impl Project {
                     return self.messages.push((format!("LLM: the {} are fine as they are", label), false));
                 }
 
-                let proposal = Proposal { id, label, functions, before, after, preview_pending: false };
+                let proposal = Proposal { id, label, functions, edits: BTreeMap::new(), before, after, preview_pending: false };
                 self.persist_proposal(&proposal);
                 self.messages.push((format!("LLM: proposal {} moves {} functions, review it with :review", id, proposal.functions.len()), false));
+                self.proposals.push(proposal);
+            }
+            Assisted::Rewrite { addr, before, calls, code } => {
+                let code = match code {
+                    Ok(code) if code.trim() != before.trim() => code,
+                    Ok(_) => return self.messages.push((format!("LLM: nothing to rewrite in {}", self.function_name(addr)), false)),
+                    Err(error) => return self.messages.push((format!("LLM: {}", error), true)),
+                };
+
+                // What the rewrite may have lost is in the label of the proposal
+                let name = self.function_name(addr);
+                let warnings = check_rewrite(&name, &calls, &code);
+                let warning = if warnings.is_empty() { String::new() } else { format!(" [check: {}]", warnings.join("; ")) };
+                let label = format!("rewrite of {} ({:#x}){}", name, addr, warning);
+
+                let proposal = Proposal { id, label, functions: BTreeMap::new(), edits: [(addr, code.clone())].into_iter().collect(), before, after: code, preview_pending: false };
+                self.persist_proposal(&proposal);
+                self.messages.push((format!("LLM: proposal {} rewrites {}, review it with :review", id, name), !warnings.is_empty()));
                 self.proposals.push(proposal);
             }
         }
@@ -1128,6 +1182,10 @@ impl Project {
             let mut merged = self.saved.functions.get(&addr).cloned().unwrap_or_default();
             merged.overlay(notes);
             changes.push((self.path(&format!("fn/{:x}.toml", addr)), Some(merged.to_toml().into_bytes())));
+        }
+
+        for (&addr, code) in proposal.edits.iter() {
+            changes.push((self.path(&format!("fn/{:x}.c", addr)), Some(code.clone().into_bytes())));
         }
 
         let meta = ProposalFile { label: proposal.label.clone(), before: proposal.before.clone(), after: proposal.after.clone() };
@@ -1148,6 +1206,11 @@ impl Project {
     pub fn accept(&mut self, id: u64) -> Result<(), String> {
         let index = self.proposals.iter().position(|p| p.id == id).ok_or_else(|| format!("no proposal {}", id))?;
         let functions = std::mem::take(&mut self.proposals[index].functions);
+        let edits = std::mem::take(&mut self.proposals[index].edits);
+
+        for (addr, code) in edits {
+            self.set_edit(addr, &code)?;
+        }
 
         for (addr, notes) in functions {
             if let Some(name) = notes.name.as_deref() {
@@ -1258,6 +1321,40 @@ pub(crate) mod tests {
         assert!(text(&mut project, main).starts_with("int main("));
         assert_eq!(project.module_of(main), Some("analysis.c"));
         assert!(!project.is_dirty());
+    }
+
+    #[test]
+    fn rewrite_proposals() {
+        let location = temporary("project-rewrite");
+        let mut project = open(&location);
+        project.wait_idle();
+
+        let classify = project.resolve("classify").unwrap();
+        let before = text(&mut project, classify);
+        let calls = project.shown(classify).unwrap().0.meta.calls.clone();
+        let code = "int classify(int value)\n{\n    return value < 0 ? -1 : lib_add(value, 1);\n}\n".to_string();
+
+        // The rewrite is an edit to review, with what it may have lost in its label
+        project.llm_running += 1;
+        project.assisted_sender.send(Assisted::Rewrite { addr: classify, before, calls, code: Ok(code.clone()) }).unwrap();
+        project.wait_idle();
+
+        let proposal = project.proposals[0].clone();
+        assert!(proposal.is_pending());
+        assert!(proposal.diff().contains("+    return value < 0 ? -1 : lib_add(value, 1);"), "{}", proposal.diff());
+        assert!(proposal.label.starts_with("rewrite of classify"), "{}", proposal.label);
+
+        // Kept until accepted, then the code of the function
+        drop(project);
+        let mut project = open(&location);
+        assert_eq!(project.proposals[0].edits.get(&classify), Some(&code));
+
+        project.wait_idle();
+        project.accept(proposal.id).unwrap();
+        assert_eq!(text(&mut project, classify), code);
+        assert!(project.shown(classify).unwrap().1.edited);
+
+        let _ = std::fs::remove_dir_all(&location);
     }
 
     #[test]

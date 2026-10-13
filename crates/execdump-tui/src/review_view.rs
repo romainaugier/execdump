@@ -49,9 +49,10 @@ impl ReviewView {
         self.version = project.version;
         self.lines.clear();
 
-        for proposal in project.proposals.iter().filter(|p| !p.functions.is_empty()) {
-            let functions: Vec<String> = proposal.functions.keys().take(3).map(|&a| project.function_name(a)).collect();
-            let more = if proposal.functions.len() > 3 { format!(" and {} more", proposal.functions.len() - 3) } else { String::new() };
+        for proposal in project.proposals.iter().filter(|p| p.is_pending()) {
+            let addrs: Vec<u64> = proposal.functions.keys().chain(proposal.edits.keys()).copied().collect();
+            let functions: Vec<String> = addrs.iter().take(3).map(|&a| project.function_name(a)).collect();
+            let more = if addrs.len() > 3 { format!(" and {} more", addrs.len() - 3) } else { String::new() };
 
             self.lines.push(ReviewLine { text: format!("[{}] {}: {}{}", proposal.id, proposal.label, functions.join(", "), more), proposal: proposal.id, header: true });
 
@@ -98,7 +99,7 @@ impl ReviewView {
         follow_cursor(self.cursor, &mut self.scroll, self.height);
 
         if self.lines.is_empty() {
-            let running = if project.llm_running() > 0 { format!(" ({} requests running)", project.llm_running()) } else { String::new() };
+            let running = if project.llm_running() > 0 { format!(" yet ({} {} running)", super::spinner(), project.llm_running()) } else { String::new() };
             return vec![Line::from(Span::styled(format!("No proposal to review{}. Ask the LLM with L in the code, or :llm modules", running), Style::default().fg(theme.dim)))];
         }
 

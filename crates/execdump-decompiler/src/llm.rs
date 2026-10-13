@@ -4,16 +4,16 @@
  * The model gets the C code of a function and answers with structured suggestions (names of
  * the function and of its variables, types of the variables, a summary). Suggestions are edits
  * of the C syntax tree: names must be valid and unique C identifiers, types must be known C
- * types, anything else is dropped. The code itself is never replaced by the model's text.
+ * types, anything else is dropped. The code itself is only replaced by a rewrite the user accepts.
+ *
+ * The APIs are called by the clients of the chat module.
  */
 
 use crate::c::ast::{CFunction, Expr, Stmt, StmtKind};
 use crate::typedb::TypeDb;
 use crate::types::CType;
 
-use llm::builder::{LLMBackend, LLMBuilder};
-use llm::chat::{ChatMessage, StructuredOutputFormat};
-use llm::LLMProvider;
+use crate::chat::Chat;
 
 use serde::Deserialize;
 
@@ -29,7 +29,7 @@ unsure about. Answer with a JSON object only.";
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// openai, anthropic, ollama, google, deepseek, mistral, groq, xai, openrouter
+    /// openai, anthropic, google, deepseek, mistral, groq, xai, openrouter, ollama, openai-compatible
     pub backend: String,
     pub model: String,
     pub api_key: Option<String>,
@@ -105,7 +105,7 @@ fn schema() -> serde_json::Value {
 }
 
 pub struct Assistant {
-    provider: Box<dyn LLMProvider>,
+    chat: Chat,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -113,6 +113,29 @@ impl Assistant {
     /// Assistant improving the names and types of a function
     pub fn new(config: &LlmConfig) -> Result<Self, String> {
         return Assistant::for_task(config, SYSTEM, "suggestions", schema());
+    }
+
+    /// Assistant rewriting the code of a function as clear C
+    pub fn rewrite(config: &LlmConfig) -> Result<Self, String> {
+        return Assistant::for_task(config, REWRITE_SYSTEM, "rewrite", rewrite_schema());
+    }
+
+    /// Asks the model to rewrite a function, with the prototypes of what it uses
+    pub fn rewrite_code(&self, code: &str, declarations: &[String]) -> Result<String, String> {
+        let prototypes = if declarations.is_empty() { String::new() } else { format!("Prototypes:\n\n```c\n{}\n```\n\n", declarations.join("\n")) };
+        let text = self.ask(format!("{}Decompiled function:\n\n```c\n{}```", prototypes, code))?;
+        let start = text.find('{').ok_or("no JSON object in the answer")?;
+        let end = text.rfind('}').ok_or("no JSON object in the answer")?;
+        let rewrite: Rewrite = serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string())?;
+
+        // Models wrap code in fences out of habit
+        let code = rewrite.code.trim().trim_start_matches("```c").trim_start_matches("```").trim_end_matches("```").trim();
+
+        if code.is_empty() {
+            return Err("empty code in the answer".to_string());
+        }
+
+        return Ok(format!("{}\n", code));
     }
 
     /// Assistant organizing functions into source files
@@ -125,37 +148,16 @@ impl Assistant {
             return Err("the [llm] section of the configuration needs a backend and a model".to_string());
         }
 
-        let backend: LLMBackend = config.backend.parse().map_err(|e| format!("{}", e))?;
-        let api_key = config.api_key.clone().or_else(|| config.api_key_env.as_ref().and_then(|v| std::env::var(v).ok()));
-
-        let mut builder = LLMBuilder::new()
-            .backend(backend)
-            .model(&config.model)
-            .max_tokens(config.max_tokens)
-            .temperature(config.temperature)
-            .timeout_seconds(config.timeout)
-            .system(system)
-            .schema(StructuredOutputFormat { name: name.to_string(), description: None, schema: Some(schema), strict: Some(true) });
-
-        if let Some(key) = api_key {
-            builder = builder.api_key(key);
-        }
-
-        if let Some(url) = &config.base_url {
-            builder = builder.base_url(url);
-        }
-
-        let provider = builder.build().map_err(|e| e.to_string())?;
+        // A rewrite is the whole function: more tokens than the suggestions
+        let max_tokens = if name == "rewrite" { config.max_tokens.max(8192) } else { config.max_tokens };
+        let chat = Chat::new(config, system, name, schema, max_tokens)?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
 
-        return Ok(Assistant { provider, runtime });
+        return Ok(Assistant { chat, runtime });
     }
 
     fn ask(&self, prompt: String) -> Result<String, String> {
-        let messages = vec![ChatMessage::user().content(prompt).build()];
-        let response = self.runtime.block_on(self.provider.chat(&messages)).map_err(|e| e.to_string())?;
-
-        return response.text().ok_or_else(|| "empty answer".to_string());
+        return self.runtime.block_on(self.chat.ask(&prompt));
     }
 
     /// Asks the model for suggestions on a function (its printed C code)
@@ -172,6 +174,53 @@ impl Assistant {
 
         return serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string());
     }
+}
+
+const REWRITE_SYSTEM: &str = "You are a reverse engineer cleaning up the output of a decompiler. You are given the C code of \
+one function, decompiled from a binary, and the prototypes of what it uses. Rewrite it as clear and understandable C code, \
+the way a careful programmer would have written it: structured control flow instead of gotos where possible, for loops, \
+early returns, no needless temporaries or casts, array indexing and field access instead of pointer arithmetic when the \
+code makes the layout clear, meaningful names for the parameters and local variables, and a short comment only where the \
+code is not obvious. The behavior must stay exactly the same: keep the function name, its parameters in the same order, \
+every call (same functions, same arguments, same order of the side effects), every memory access and every constant. Do \
+not invent functions or types that are not given. Answer with a JSON object only, the code being the whole function.";
+
+fn rewrite_schema() -> serde_json::Value {
+    return serde_json::json!({
+        "type": "object",
+        "properties": {
+            "code": { "type": "string", "description": "The whole rewritten function, its signature included" }
+        },
+        "required": ["code"],
+        "additionalProperties": false
+    });
+}
+
+#[derive(Deserialize)]
+struct Rewrite {
+    code: String,
+}
+
+/// What a rewritten function may have lost: its name, the balance of its braces, the functions it called
+pub fn check_rewrite(name: &str, calls: &[String], code: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let words: HashSet<&str> = code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).collect();
+
+    if !words.contains(name) {
+        warnings.push(format!("the function is not named {} anymore", name));
+    }
+
+    if code.matches('{').count() != code.matches('}').count() || code.matches('(').count() != code.matches(')').count() {
+        warnings.push("unbalanced braces or parentheses".to_string());
+    }
+
+    let dropped: Vec<&str> = calls.iter().map(|c| c.as_str()).filter(|c| !words.contains(c)).collect();
+
+    if !dropped.is_empty() {
+        warnings.push(format!("no call to {} anymore", dropped.join(", ")));
+    }
+
+    return warnings;
 }
 
 const MODULES_SYSTEM: &str = "You are a reverse engineer organizing the functions of a decompiled binary into C source files. \
@@ -396,6 +445,35 @@ pub fn apply(function: &mut CFunction, suggestions: &Suggestions, typedb: &TypeD
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rewrite() {
+        use super::Assistant;
+
+        // Fenced code in the JSON answer
+        let answer = serde_json::json!({ "code": "```c\nint f(void)\n{\n    return 1;\n}\n```" }).to_string();
+        let body = format!("data: {}\n\ndata: [DONE]\n\n", serde_json::json!({ "choices": [{ "delta": { "content": answer }, "finish_reason": "stop" }] }));
+        let (url, request) = crate::chat::tests::serve("200 OK", body);
+
+        let config = super::LlmConfig { backend: "openai-compatible".to_string(), model: "test".to_string(), base_url: Some(url), timeout: 10, ..Default::default() };
+        let assistant = Assistant::rewrite(&config).unwrap();
+        assert_eq!(assistant.rewrite_code("int f(void) { return 1; }", &[]).unwrap(), "int f(void)\n{\n    return 1;\n}\n");
+        assert!(request.recv().unwrap().contains("\"max_tokens\":8192"));
+    }
+
+    #[test]
+    fn rewrite_checks() {
+        use super::check_rewrite;
+
+        let calls = vec!["lib_add".to_string(), "fatal".to_string()];
+        let good = "int classify(int value)\n{\n    if (value < 0) {\n        fatal(1);\n    }\n    return lib_add(value, 1);\n}\n";
+        assert!(check_rewrite("classify", &calls, good).is_empty());
+
+        let bad = "int sort_values(int value)\n{\n    return value + 1;\n";
+        let warnings = check_rewrite("classify", &calls, bad);
+        assert_eq!(warnings.len(), 3, "{:?}", warnings);
+        assert!(warnings[2].contains("lib_add, fatal"));
+    }
+
     use super::*;
 
     use crate::c::ast::Var;

@@ -133,7 +133,7 @@ impl ExplorerItem {
             ExplorerItem::Imports(p) => format!("  Imports{}", suffix(p)),
             ExplorerItem::MemoryMap(p) => format!("  Memory map{}", suffix(p)),
             ExplorerItem::Proposals(p) => {
-                let count = app.projects[*p].as_ref().map_or(0, |project| project.proposals.iter().filter(|p| !p.functions.is_empty()).count());
+                let count = app.projects[*p].as_ref().map_or(0, |project| project.proposals.iter().filter(|p| p.is_pending()).count());
                 format!("  LLM proposals ({}){}", count, suffix(p))
             }
             ExplorerItem::Module(p, name) => {
@@ -440,6 +440,8 @@ struct App {
     loading: Vec<Loading>,
     /// When the decompilation started, and how many functions were done then (for the remaining time)
     decompile_start: Option<(std::time::Instant, usize)>,
+    /// Since when the LLM is running
+    llm_start: Option<std::time::Instant>,
     /// Analysis of each program and its project, both made in the background
     receiver: Receiver<Loaded>,
     sender: Sender<Loaded>,
@@ -503,13 +505,20 @@ fn count(n: usize) -> String {
     };
 }
 
+/// Frame of the animation of the work in the background
+pub(crate) fn spinner() -> char {
+    const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let frame = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()) / 100;
+    return FRAMES[frame as usize % FRAMES.len()];
+}
+
 fn duration(seconds: f64) -> String {
     let seconds = seconds as u64;
 
     return match seconds {
-        0..=59 => format!("{}s left", seconds),
-        60..=3599 => format!("{}m{:02}s left", seconds / 60, seconds % 60),
-        _ => format!("{}h{:02}m left", seconds / 3600, seconds / 60 % 60),
+        0..=59 => format!("{}s", seconds),
+        60..=3599 => format!("{}m{:02}s", seconds / 60, seconds % 60),
+        _ => format!("{}h{:02}m", seconds / 3600, seconds / 60 % 60),
     };
 }
 
@@ -614,6 +623,7 @@ impl App {
             programs,
             loading,
             decompile_start: None,
+            llm_start: None,
             receiver,
             projects,
             project_location,
@@ -1603,8 +1613,10 @@ impl App {
                         Err(_) => {}
                     }
                 }
+                Some("rewrite") => self.rewrite_code(),
                 _ => self.improve_code(),
             },
+            "rewrite" => self.rewrite_code(),
             "accept" | "reject" => {
                 let id = argument.and_then(|a| a.parse::<u64>().ok());
                 let Some(id) = id else {
@@ -2027,6 +2039,29 @@ impl App {
     }
 
     /// Asks the LLM to improve the function under the cursor: the answer is a proposal to review
+    /// Asks the LLM to rewrite the function as clear C, a proposal to review
+    fn rewrite_code(&mut self) {
+        let Some((program, function)) = self.current_function() else {
+            return self.error("No function under the cursor".to_string());
+        };
+
+        if !self.llm.is_enabled() {
+            return self.error("No [llm] section in ~/.execdumprc (backend, model, api_key_env...)".to_string());
+        }
+
+        let llm = self.llm.clone();
+
+        let result = match self.project(program) {
+            Some(project) => project.llm_rewrite(function, &llm),
+            None => return,
+        };
+
+        match result {
+            Ok(()) => self.info("Asking the LLM to rewrite the code, its proposal will show in :review".to_string()),
+            Err(error) => self.error(format!("LLM: {}", error)),
+        }
+    }
+
     fn improve_code(&mut self) {
         let Some((program, function)) = self.current_function() else {
             return self.error("No function under the cursor".to_string());
@@ -2745,6 +2780,7 @@ impl App {
             _ if c == keys.xrefs => return self.xrefs_current(),
             _ if c == keys.call_graph => return self.call_graph_current(),
             _ if c == keys.improve => return self.improve_code(),
+            'W' => return self.rewrite_code(),
             _ => {}
         }
 
@@ -3115,8 +3151,7 @@ impl App {
      */
 
     fn status_text(&mut self) -> String {
-        let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let frame = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()) / 100) as usize % spinner.len();
+        let spinner = spinner();
 
         // Programs still loading: the stage of the first one
         let loading = (0..self.programs.len()).find(|&i| self.projects[i].is_none() && self.analysis_errors[i].is_none());
@@ -3128,8 +3163,8 @@ impl App {
             let name = self.program_suffix(index);
 
             return match self.loading[index].stage.load(Ordering::Relaxed) {
-                ANALYSIS => format!("{} 1/3 analysis{}: {} functions found", spinner[frame], name, count(found)),
-                _ => format!("{} 2/3 project{}: modules and cache of {} functions", spinner[frame], name, count(found)),
+                ANALYSIS => format!("{} 1/3 analysis{}: {} functions found", spinner, name, count(found)),
+                _ => format!("{} 2/3 project{}: modules and cache of {} functions", spinner, name, count(found)),
             };
         }
 
@@ -3144,7 +3179,7 @@ impl App {
             let (start, at_start) = *self.decompile_start.get_or_insert((std::time::Instant::now(), decompiled));
             let ratio = decompiled as f64 / decompilable as f64;
             let bar: String = (0..16).map(|i| if (i as f64 + 0.5) / 16.0 < ratio { '█' } else { '░' }).collect();
-            text.push_str(&format!("  {} 3/3 decompiling {} {:>3}% {}/{}", spinner[frame], bar, (ratio * 100.0) as usize, count(decompiled), count(decompilable)));
+            text.push_str(&format!("  {} 3/3 decompiling {} {:>3}% {}/{}", spinner, bar, (ratio * 100.0) as usize, count(decompiled), count(decompilable)));
 
             // Remaining time, from the rate since the decompilation started
             let elapsed = start.elapsed().as_secs_f64();
@@ -3152,7 +3187,7 @@ impl App {
 
             if elapsed > 5.0 && done > 0 {
                 let left = (decompilable - decompiled) as f64 * elapsed / done as f64;
-                text.push_str(&format!(" ~{}", duration(left)));
+                text.push_str(&format!(" ~{} left", duration(left)));
             }
         } else if decompilable > 0 {
             self.decompile_start = None;
@@ -3160,7 +3195,12 @@ impl App {
         }
 
         if llm > 0 {
-            text.push_str(&format!("  {} LLM", llm));
+            let start = *self.llm_start.get_or_insert_with(std::time::Instant::now);
+            let dots = ".".repeat((start.elapsed().as_millis() / 400 % 4) as usize);
+            let running = if llm > 1 { format!(" ({} requests)", llm) } else { String::new() };
+            text.push_str(&format!("  {} LLM thinking{:<3}{} {}", spinner, dots, running, duration(start.elapsed().as_secs_f64())));
+        } else {
+            self.llm_start = None;
         }
 
         if dirty {
@@ -3233,6 +3273,7 @@ const HELP: &[(&str, &str)] = &[
     ("; / M", "comment above the line / move the function to a module (:mv)"),
     ("]c [c, :ours :theirs :both", "next / previous conflict, keep the edited side, the decompiled one or both"),
     ("L", "ask the LLM to improve the function (:review to accept or reject)"),
+    ("W", "ask the LLM to rewrite the function as clear C (an edit to review)"),
 ];
 
 fn ui(f: &mut Frame, app: &mut App) {
