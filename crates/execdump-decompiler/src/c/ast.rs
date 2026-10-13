@@ -502,10 +502,20 @@ fn first_address(stmts: &[Stmt]) -> Option<u64> {
     return stmts.iter().find_map(|s| s.addr);
 }
 
+/// Text of a C literal (one character per byte, see lift::literal), the bytes that are not printable
+/// ASCII are hexadecimal escapes
 fn escape(text: &str) -> String {
     let mut out = String::new();
+    let mut hex = false;
 
     for c in text.chars() {
+        // A hexadecimal escape takes every hexadecimal digit after it: the literal is split
+        if hex && c.is_ascii_hexdigit() {
+            out.push_str("\" \"");
+        }
+
+        hex = false;
+
         match c {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
@@ -513,8 +523,9 @@ fn escape(text: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
             '\0' => out.push_str("\\0"),
-            c if c.is_control() => {
+            c if c.is_control() || ('\u{80}'..='\u{ff}').contains(&c) => {
                 let _ = write!(out, "\\x{:02x}", c as u32);
+                hex = true;
             }
             c => out.push(c),
         }
@@ -631,6 +642,7 @@ mod tests {
         assert_eq!(printer.expr(&Expr::binary(BinaryOp::Lt, a.clone(), b.clone()).not()), "a >= b");
         assert_eq!(printer.expr(&Expr::cast(CType::ptr(CType::Char), a.clone())), "(char *)a");
         assert_eq!(printer.expr(&Expr::Str("hi\n".to_string())), "\"hi\\n\"");
+        assert_eq!(printer.expr(&Expr::Str(crate::lift::literal("T3\u{c7}8x\u{c0}z".as_bytes()))), "\"T3\\xc3\\x87\" \"8x\\xc3\\x80z\"");
         assert_eq!(printer.expr(&Expr::Int(0x401000)), "0x401000");
     }
 

@@ -231,7 +231,7 @@ Analysis:
   - :heavy_check_mark: Noreturn functions (known names and propagation)
   - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking)
   - :heavy_check_mark: Call graph and cross references
-  - :heavy_check_mark: Strings (ASCII, UTF-16 for PE) and references annotations
+  - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
   - :x: aarch64 jump tables
 
 Decompiler:
@@ -243,13 +243,23 @@ Decompiler:
   - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
   - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
+  - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
+    pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
+    escaping address starts a buffer that extends to the next one (what it points to stays reachable from it, so the
+    code stays correct), the scalars below the buffers become values. Strings written on the stack by stores of
+    constants (`mov dword [ebp-0x25], 0x4763305f`...) are one `memcpy` of the string literal
+  - :heavy_check_mark: 32-bit calls: the stack arguments by size (doubles and 64-bit integers take two slots), the
+    arguments of variadic functions from their format string, the pointer sized types of the headers (`size_t`...)
   - :heavy_check_mark: C code generation (`--decompile c`)
   - :heavy_check_mark: Address of the statements: each machine instruction is the debug location of the LLVM instructions
     lifted from it, which the passes keep, so nearly every line of C has the address it comes from (the gutter of the C
     views, and the synchronization of the C code with the disassembly and the graph)
   - :heavy_check_mark: Strings and constants: addresses of strings are string literals (the ones passed to functions even when they end
     another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
-    floating point numbers, strings, functions)
+    floating point numbers, strings, functions), constants that are the address of a function are its name. Literals
+    are exact: the bytes that are not printable ASCII are escapes (`"V\xc3\xa9rification"`), so the offsets in a
+    string are the ones the code uses; the strings view shows them decoded. Printable characters stored in chars are
+    character literals
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
   - :heavy_check_mark: LLM rewrite (`W` or `:llm rewrite` in the TUI): the function rewritten as clear C (structured control flow, no needless temporaries, meaningful names) with the same behavior, as an edit to review; the proposal says when the rewrite lost the function name, a call or the balance of its braces
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables

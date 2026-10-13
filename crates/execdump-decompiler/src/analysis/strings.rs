@@ -13,7 +13,39 @@ fn is_string_char(c: u8) -> bool {
     return c.is_ascii_graphic() || c == b' ' || c == b'\t' || c == b'\n' || c == b'\r';
 }
 
-/// Extracts the NUL terminated ASCII (and UTF-16LE for PE) strings
+/// Length in bytes and in characters of the string at the start of the data: ASCII text and UTF-8
+/// characters (Vérification, réussie)
+fn text_length(data: &[u8]) -> (usize, usize) {
+    let (mut bytes, mut chars) = (0, 0);
+
+    while bytes < data.len() && chars < MAX_STRING_LENGTH {
+        if is_string_char(data[bytes]) {
+            bytes += 1;
+            chars += 1;
+            continue;
+        }
+
+        let width = match data[bytes] {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => break,
+        };
+
+        let decoded = data.get(bytes..bytes + width).and_then(|b| std::str::from_utf8(b).ok()).and_then(|s| s.chars().next());
+
+        if !decoded.is_some_and(|c| !c.is_control()) {
+            break;
+        }
+
+        bytes += width;
+        chars += 1;
+    }
+
+    return (bytes, chars);
+}
+
+/// Extracts the NUL terminated ASCII and UTF-8 (and UTF-16LE for PE) strings
 pub fn extract_strings(program: &Program) -> BTreeMap<u64, String> {
     let mut strings = BTreeMap::new();
     let wide = program.name.starts_with("PE");
@@ -23,9 +55,9 @@ pub fn extract_strings(program: &Program) -> BTreeMap<u64, String> {
         let mut start = 0usize;
 
         while start < data.len() {
-            let len = data[start..].iter().take(MAX_STRING_LENGTH).take_while(|&&c| is_string_char(c)).count();
+            let (len, chars) = text_length(&data[start..]);
 
-            if len >= MIN_STRING_LENGTH && data.get(start + len) == Some(&0) {
+            if chars >= MIN_STRING_LENGTH && data.get(start + len) == Some(&0) {
                 strings.insert(region.vaddr + start as u64, String::from_utf8_lossy(&data[start..start + len]).to_string());
             }
 
@@ -103,5 +135,20 @@ mod tests {
         assert!(!strings.values().any(|s| s == "abc"));
         assert_eq!(strings.get(&0x1012).map(|s| s.as_str()), Some("wide"));
         assert_eq!(escape("a\nb", 10), "a\\nb");
+    }
+
+    #[test]
+    fn utf8() {
+        let mut program = Program::default();
+        let data = b"\0V\xc3\xa9rification...\0abcd\xc3\0xyz\xe9zzzz\0".to_vec();
+
+        program.regions.push(Region { name: ".rodata".to_string(), vaddr: 0x1000, size: data.len() as u64, data, perms: Perms { read: true, write: false, exec: false } });
+
+        let strings = extract_strings(&program);
+
+        assert_eq!(strings.get(&0x1001).map(|s| s.as_str()), Some("Vérification..."));
+        // Invalid UTF-8 ends a string
+        assert_eq!(strings.len(), 2, "{:?}", strings);
+        assert_eq!(strings.get(&0x101c).map(|s| s.as_str()), Some("zzzz"));
     }
 }

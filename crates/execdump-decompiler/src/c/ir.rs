@@ -6,7 +6,7 @@
 use crate::lift::decode_location;
 
 use inkwell::llvm_sys::core::*;
-use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMValueRef};
+use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
 use inkwell::llvm_sys::target::{LLVMABISizeOfType, LLVMGetModuleDataLayout, LLVMOffsetOfElement};
 use inkwell::llvm_sys::{LLVMIntPredicate, LLVMOpcode, LLVMRealPredicate, LLVMTypeKind};
 use inkwell::module::Module;
@@ -157,6 +157,13 @@ pub struct Block {
     pub preds: Vec<BlockId>,
 }
 
+/// What an alloca holds: a scalar, or bytes (a buffer of the stack frame)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Allocated {
+    Scalar(Ty),
+    Bytes(u64),
+}
+
 #[derive(Clone, Debug)]
 pub struct Func {
     pub name: String,
@@ -165,6 +172,9 @@ pub struct Func {
     pub variadic: bool,
     pub values: Vec<Value>,
     pub blocks: Vec<Block>,
+    pub allocated: HashMap<ValueId, Allocated>,
+    /// Bytes of the constant globals made by the optimizations (strings written on the stack)
+    pub data: HashMap<String, Vec<u8>>,
 }
 
 impl Func {
@@ -311,6 +321,7 @@ struct Reader {
     ids: HashMap<LLVMValueRef, ValueId>,
     blocks: HashMap<LLVMBasicBlockRef, BlockId>,
     params: Vec<LLVMValueRef>,
+    data: HashMap<String, Vec<u8>>,
 }
 
 unsafe fn name(value: LLVMValueRef) -> String {
@@ -326,20 +337,22 @@ unsafe fn name(value: LLVMValueRef) -> String {
     return String::from_utf8_lossy(bytes).to_string();
 }
 
+unsafe fn type_ty(ty: LLVMTypeRef) -> Ty {
+    return match unsafe { LLVMGetTypeKind(ty) } {
+        LLVMTypeKind::LLVMIntegerTypeKind => Ty::Int(unsafe { LLVMGetIntTypeWidth(ty) }),
+        LLVMTypeKind::LLVMFloatTypeKind => Ty::Float(32),
+        LLVMTypeKind::LLVMDoubleTypeKind => Ty::Float(64),
+        LLVMTypeKind::LLVMHalfTypeKind => Ty::Float(16),
+        LLVMTypeKind::LLVMX86_FP80TypeKind => Ty::Float(80),
+        LLVMTypeKind::LLVMPointerTypeKind => Ty::Ptr,
+        LLVMTypeKind::LLVMVoidTypeKind => Ty::Void,
+        _ => Ty::Other,
+    };
+}
+
 impl Reader {
     unsafe fn ty(&self, value: LLVMValueRef) -> Ty {
-        let ty = unsafe { LLVMTypeOf(value) };
-
-        return match unsafe { LLVMGetTypeKind(ty) } {
-            LLVMTypeKind::LLVMIntegerTypeKind => Ty::Int(unsafe { LLVMGetIntTypeWidth(ty) }),
-            LLVMTypeKind::LLVMFloatTypeKind => Ty::Float(32),
-            LLVMTypeKind::LLVMDoubleTypeKind => Ty::Float(64),
-            LLVMTypeKind::LLVMHalfTypeKind => Ty::Float(16),
-            LLVMTypeKind::LLVMX86_FP80TypeKind => Ty::Float(80),
-            LLVMTypeKind::LLVMPointerTypeKind => Ty::Ptr,
-            LLVMTypeKind::LLVMVoidTypeKind => Ty::Void,
-            _ => Ty::Other,
-        };
+        return unsafe { type_ty(LLVMTypeOf(value)) };
     }
 
     fn add(&mut self, raw: LLVMValueRef, value: Value) -> ValueId {
@@ -375,6 +388,14 @@ impl Reader {
             } else if !LLVMIsAFunction(raw).is_null() {
                 ValueKind::Function(name.clone())
             } else if !LLVMIsAGlobalVariable(raw).is_null() {
+                let init = LLVMGetInitializer(raw);
+
+                if LLVMIsGlobalConstant(raw) != 0 && !init.is_null() && !LLVMIsAConstantDataSequential(init).is_null() && LLVMIsConstantString(init) != 0 {
+                    let mut length = 0;
+                    let bytes = LLVMGetAsString(init, &mut length);
+                    self.data.insert(name.clone(), std::slice::from_raw_parts(bytes as *const u8, length).to_vec());
+                }
+
                 ValueKind::Global(name.clone())
             } else if !LLVMIsAConstantExpr(raw).is_null() {
                 // Operands are read after the value is registered (constant expressions are trees)
@@ -443,7 +464,8 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
         let raw = function.as_value_ref();
 
         let params: Vec<LLVMValueRef> = (0..LLVMCountParams(raw)).map(|i| LLVMGetParam(raw, i)).collect();
-        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone() };
+        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), data: HashMap::new() };
+        let mut allocated = HashMap::new();
 
         let param_ids: Vec<ValueId> = params.iter().map(|&p| reader.value(p)).collect();
 
@@ -535,6 +557,17 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
                     _ => None,
                 };
 
+                if op == Op::Alloca {
+                    let ty = LLVMGetAllocatedType(inst);
+
+                    let kind = match type_ty(ty) {
+                        Ty::Other => Allocated::Bytes(LLVMABISizeOfType(LLVMGetModuleDataLayout(reader.module), ty)),
+                        scalar => Allocated::Scalar(scalar),
+                    };
+
+                    allocated.insert(id, kind);
+                }
+
                 let nsw = matches!(op, Op::Add | Op::Sub | Op::Mul | Op::Shl) && LLVMGetNSW(inst) != 0;
                 let addr = reader.address(inst);
 
@@ -576,6 +609,6 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
             _ => Ty::Other,
         };
 
-        return Func { name: name(raw), params: param_ids, ret, variadic: LLVMIsFunctionVarArg(fn_type) != 0, values, blocks };
+        return Func { name: name(raw), params: param_ids, ret, variadic: LLVMIsFunctionVarArg(fn_type) != 0, values, blocks, allocated, data: reader.data };
     }
 }

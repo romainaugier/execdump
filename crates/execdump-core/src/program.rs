@@ -202,6 +202,15 @@ impl Program {
         return self.read_u64(addr);
     }
 
+    /// Bytes of the NUL terminated string at an address (without the NUL)
+    pub fn c_string_bytes(&self, addr: u64, max_len: usize) -> Option<&[u8]> {
+        let bytes = self.bytes_from(addr)?;
+        let bytes = &bytes[..bytes.len().min(max_len)];
+        let nul = bytes.iter().position(|&b| b == 0)?;
+
+        return Some(&bytes[..nul]);
+    }
+
     pub fn read_c_string(&self, addr: u64, max_len: usize) -> Option<String> {
         let bytes = self.bytes_from(addr)?;
         let bytes = &bytes[..bytes.len().min(max_len)];

@@ -19,6 +19,35 @@ pub use parse::preprocess;
 const BUNDLED_LINUX: &str = include_str!("../../data/typedb/linux.h");
 const BUNDLED_WINDOWS: &str = include_str!("../../data/typedb/windows.h");
 
+/// Typedefs of the bundled headers (generated for 64-bit targets) that are as wide as a pointer
+const WORDS_LINUX: &[&str] = &[
+    "size_t", "__ssize_t", "__intptr_t", "__off_t", "__clock_t", "__time_t", "__suseconds_t", "__blksize_t", "__blkcnt_t", "__syscall_slong_t",
+    "__fd_mask", "pthread_t", "wctype_t", "nfds_t", "__cpu_mask", "__ino_t", "__nlink_t", "__rlim_t", "greg_t", "__re_long_size_t", "reg_syntax_t",
+];
+
+const WORDS_WINDOWS: &[&str] = &["size_t", "intptr_t", "uintptr_t", "INT_PTR", "UINT_PTR", "LONG_PTR", "ULONG_PTR", "HANDLE_PTR"];
+
+/// The source with the pointer sized typedefs of 32 bits
+fn narrowed_words(source: &str, words: &[&str]) -> String {
+    let mut out = String::with_capacity(source.len());
+
+    for line in source.split_inclusive('\n') {
+        let narrowed = words.iter().find_map(|word| {
+            let rest = line.trim_end().strip_prefix("typedef ")?.strip_suffix(&format!("{};", word))?.trim();
+
+            match rest {
+                "int64_t" => Some(format!("typedef int {};\n", word)),
+                "uint64_t" => Some(format!("typedef unsigned int {};\n", word)),
+                _ => None,
+            }
+        });
+
+        out.push_str(narrowed.as_deref().unwrap_or(line));
+    }
+
+    return out;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Platform {
     /// glibc, also used for Mach-O (libSystem has the same C prototypes)
@@ -92,12 +121,13 @@ impl TypeDb {
         }
 
         let mut db = TypeDb::new(model);
-        let source = match platform {
-            Platform::Unix => BUNDLED_LINUX,
-            Platform::Windows => BUNDLED_WINDOWS,
+        let (source, words) = match platform {
+            Platform::Unix => (BUNDLED_LINUX, WORDS_LINUX),
+            Platform::Windows => (BUNDLED_WINDOWS, WORDS_WINDOWS),
         };
 
-        db.parse(source).expect("bundled type database must parse");
+        let source = if model.pointer_bits == 32 { narrowed_words(source, words) } else { source.to_string() };
+        db.parse(&source).expect("bundled type database must parse");
         parsed.push((platform, model, db.clone()));
 
         return db;
@@ -335,6 +365,16 @@ mod tests {
         let stat = &db.aggregates["stat"];
         let st_size = stat.fields.iter().find(|f| f.name == "st_size").unwrap();
         assert_eq!(st_size.offset, 48);
+
+        // 32-bit targets: pointer sized typedefs of 4 bytes, the 64-bit ones are kept
+        let db = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86, false));
+        assert_eq!(db.size_of(&CType::Typedef("size_t".to_string())), Some(4));
+        assert_eq!(db.size_of(&CType::Typedef("ssize_t".to_string())), Some(4));
+        assert_eq!(db.size_of(&CType::Typedef("__off64_t".to_string())), Some(8));
+        assert_eq!(db.function("malloc").unwrap().to_string(), "void *malloc(size_t size)");
+
+        let db = TypeDb::bundled(Platform::Windows, DataModel::new(Architecture::X86, true));
+        assert_eq!(db.size_of(&CType::Typedef("SIZE_T".to_string())), Some(4));
     }
 
     #[test]

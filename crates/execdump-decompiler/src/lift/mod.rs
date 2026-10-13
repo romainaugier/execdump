@@ -12,10 +12,12 @@
  */
 
 pub mod regs;
+mod frame;
 mod refine;
 mod x86;
 mod aarch64;
 
+pub use frame::split_frame;
 pub use refine::refine;
 
 use crate::analysis::function::{CallTarget, EdgeKind, Function};
@@ -34,7 +36,7 @@ use inkwell::debug_info::{AsDIScope, DIFlags, DIFlagsConstants, DIScope, DWARFEm
 use inkwell::module::{FlagBehavior, Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
 use inkwell::types::IntType;
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionValue, IntValue, PointerValue};
+use inkwell::values::{AsValueRef, BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionOpcode, InstructionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
 use std::cell::{Cell, RefCell};
@@ -129,12 +131,32 @@ pub fn guessed_signature(name: &str, abi: &Abi) -> Signature {
     return Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: true, noreturn: false, guessed: true };
 }
 
-/// A printable C string at an address
-pub fn text_at(program: &Program, addr: u64) -> Option<String> {
-    let text = program.read_c_string(addr, 4096)?;
-    let printable = !text.is_empty() && text.chars().all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'));
+/// Printable text: ASCII, UTF-8 characters or a few other bytes
+pub fn text_bytes(bytes: &[u8]) -> bool {
+    let printable = |b: &u8| b.is_ascii_graphic() || matches!(b, b' ' | b'\n' | b'\r' | b'\t');
 
-    return printable.then_some(text);
+    if bytes.is_empty() || !bytes.iter().all(|b| printable(b) || *b >= 0x80) {
+        return false;
+    }
+
+    let ascii = bytes.iter().filter(|b| printable(b)).count();
+    return ascii == bytes.len() || std::str::from_utf8(bytes).is_ok() || ascii * 4 >= bytes.len() * 3;
+}
+
+/// Bytes of a printable C string at an address
+pub fn text_bytes_at(program: &Program, addr: u64) -> Option<&[u8]> {
+    return program.c_string_bytes(addr, 4096).filter(|bytes| text_bytes(bytes));
+}
+
+/// A printable C string at an address, as the text of a C literal (see literal)
+pub fn text_at(program: &Program, addr: u64) -> Option<String> {
+    return text_bytes_at(program, addr).map(literal);
+}
+
+/// Text of a C literal: one character per byte, the bytes above 0x7f are the characters U+0080 to
+/// U+00FF (printed as escapes, the offsets in the string stay visible)
+pub fn literal(bytes: &[u8]) -> String {
+    return bytes.iter().map(|&b| b as char).collect();
 }
 
 /*
@@ -1038,6 +1060,42 @@ impl<'ctx> Lifter<'ctx, '_> {
         return self.from_int(raw, value.ty);
     }
 
+    /// Constant last stored at [sp + delta] in the current block (an argument written before a call)
+    fn stored_constant(&self, delta: i64) -> Option<u64> {
+        let Some(Known::Stack(offset)) = self.tracker.offset(self.env.abi.stack_pointer, delta) else {
+            return None;
+        };
+
+        let index = (self.frame_base + offset) as u64;
+        let mut instruction = self.builder.get_insert_block()?.get_last_instruction();
+
+        while let Some(current) = instruction {
+            instruction = current.get_previous_instruction();
+
+            if current.get_opcode() != InstructionOpcode::Store {
+                continue;
+            }
+
+            let Some(gep) = current.get_operand(1).and_then(|o| o.value()).and_then(|v| v.as_instruction_value()) else {
+                continue;
+            };
+
+            let frame = gep.get_operand(0).and_then(|o| o.value()).is_some_and(|base| base.as_value_ref() == self.frame.as_value_ref());
+            let at = gep.get_operand(1).and_then(|o| o.value()).and_then(|v| v.into_int_value().get_zero_extended_constant());
+
+            if gep.get_opcode() != InstructionOpcode::GetElementPtr || !frame || at != Some(index) {
+                continue;
+            }
+
+            return match current.get_operand(0).and_then(|o| o.value()) {
+                Some(BasicValueEnum::IntValue(value)) => value.get_zero_extended_constant(),
+                _ => None,
+            };
+        }
+
+        return None;
+    }
+
     /*
      * Memory
      */
@@ -1168,8 +1226,8 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         // Strings keep their content, other data stays opaque (its size is unknown)
-        if let Some(text) = text_at(program, addr).filter(|_| read_only) {
-            let init = self.cx.const_string(text.as_bytes(), true);
+        if let Some(bytes) = text_bytes_at(program, addr).filter(|_| read_only) {
+            let init = self.cx.const_string(bytes, true);
             let global = self.module.add_global(init.get_type(), None, &name);
             global.set_initializer(&init);
             global.set_constant(true);
@@ -1320,6 +1378,7 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Some(Known::Const(addr)) => self.env.program.read_c_string(addr, 4096),
                 _ => None,
             },
+            Loc::Stack(offset) if param.ty == LType::Ptr => self.stored_constant(offset - self.env.abi.return_address).and_then(|addr| self.env.program.read_c_string(addr, 4096)),
             _ => None,
         });
 
@@ -1331,20 +1390,30 @@ impl<'ctx> Lifter<'ctx, '_> {
         let used_int = sig.params.iter().filter(|p| matches!(p.loc, Loc::Reg(r) if abi.int_args.contains(&r))).count();
         let used_float = sig.params.iter().filter(|p| matches!(p.loc, Loc::Reg(r) if abi.float_args.contains(&r))).count();
         let (mut next_int, mut next_float) = if abi.positional { (sig.params.len(), sig.params.len()) } else { (used_int, used_float) };
-        let mut next_stack = 0;
+        let pointer_bits = self.pointer_bits() as u16;
+        let bytes = |ty| crate::decompiler::stack_bytes(ty, abi.slot_size, pointer_bits);
+
+        // After the fixed stack arguments
+        let mut next_stack = sig.params.iter().filter_map(|p| match p.loc {
+            Loc::Stack(offset) => Some(offset - abi.stack_args + bytes(p.ty)),
+            _ => None,
+        }).max().unwrap_or(0);
+
         let mut extra = Vec::new();
 
         for float in format_conversions(&format) {
             let regs = if float { &abi.float_args } else { &abi.int_args };
             let next = if float { &mut next_float } else { &mut next_int };
 
+            let ty = if float { LType::Float(64) } else { LType::Int(abi.slot_size as u32 * 8) };
+
             let value = match regs.get(*next) {
                 // Variadic floats are passed in the integer registers on Win64
-                Some(&reg) if !(abi.positional && float) => Value { loc: Loc::Reg(reg), ty: if float { LType::Float(64) } else { LType::Int(64) }, name: None },
+                Some(&reg) if !(abi.positional && float) => Value { loc: Loc::Reg(reg), ty, name: None },
                 Some(_) => Value { loc: Loc::Reg(abi.int_args[*next]), ty: LType::Float(64), name: None },
                 None => {
-                    next_stack += 1;
-                    Value { loc: Loc::Stack(abi.stack_args + (next_stack - 1) * abi.slot_size), ty: if float { LType::Float(64) } else { LType::Int(64) }, name: None }
+                    next_stack += bytes(ty);
+                    Value { loc: Loc::Stack(abi.stack_args + next_stack - bytes(ty)), ty, name: None }
                 }
             };
 

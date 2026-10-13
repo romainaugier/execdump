@@ -4,14 +4,14 @@
  * comes from the operations values are used by, known prototypes give the types of calls
  */
 
-use super::ir::{Func, Op, Pred, Ty, ValueId, ValueKind};
+use super::ir::{Allocated, Func, Op, Pred, Ty, ValueId, ValueKind};
 use super::Context;
 
 use crate::types::CType;
 
 const ROUNDS: usize = 6;
 
-fn base_type(ty: Ty) -> CType {
+pub fn base_type(ty: Ty) -> CType {
     return match ty {
         Ty::Int(1) => CType::Bool,
         Ty::Int(8) => CType::Char,
@@ -264,6 +264,14 @@ impl Inference<'_> {
 /// C type of every value of the function
 pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
     let mut types: Vec<CType> = f.values.iter().map(|v| base_type(v.ty)).collect();
+
+    // Variables of the stack frame: buffers of chars, the type of the scalars comes from their accesses
+    for (&id, allocated) in f.allocated.iter() {
+        types[id] = CType::ptr(match allocated {
+            Allocated::Bytes(_) => CType::Char,
+            Allocated::Scalar(ty) => CType::Unknown(ty.bits() as u16),
+        });
+    }
 
     for (&param, ty) in f.params.iter().zip(params.iter()) {
         types[param] = ty.clone();

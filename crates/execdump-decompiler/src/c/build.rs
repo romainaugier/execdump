@@ -8,8 +8,8 @@
  */
 
 use super::ast::{BinaryOp, Expr, Stmt, StmtKind, UnaryOp, Var, VarId};
-use super::ir::{FloatCmp, Func, Op, Pred, Ty, ValueId, ValueKind};
-use super::typing::{is_pointer, pointee};
+use super::ir::{Allocated, FloatCmp, Func, Op, Pred, Ty, ValueId, ValueKind};
+use super::typing::{base_type, is_pointer, pointee};
 use super::Context;
 
 use crate::types::CType;
@@ -41,6 +41,8 @@ struct Builder<'a> {
     ctx: &'a Context<'a>,
     types: Vec<CType>,
     var_of: Vec<Option<VarId>>,
+    /// Variables of the stack frame (allocas): the alloca is their address
+    storage: Vec<Option<VarId>>,
     vars: Vec<Var>,
     /// Inlined expressions that read memory (loads and calls, directly or through their operands)
     reads_memory: Vec<bool>,
@@ -104,6 +106,12 @@ impl<'a> Builder<'a> {
                 continue;
             }
 
+            if op == Op::Alloca {
+                let ty = self.storage_type(id);
+                self.storage[id] = Some(self.new_var(String::new(), ty));
+                continue;
+            }
+
             let memory = matches!(op, Op::Load | Op::Call) || operands.iter().any(|&o| self.var_of[o].is_none() && self.reads_memory[o]);
             self.reads_memory[id] = memory;
 
@@ -112,7 +120,7 @@ impl<'a> Builder<'a> {
             let user_is_phi = f.op(user) == Some(Op::Phi);
 
             let inline = match op {
-                Op::Phi | Op::Alloca => false,
+                Op::Phi => false,
                 _ if single && user_is_phi => !memory,
                 _ if single && memory => self.nothing_between(id, user),
                 _ if single => true,
@@ -261,19 +269,79 @@ impl<'a> Builder<'a> {
             return Expr::Var(var);
         }
 
+        // Arrays are their address
+        if let Some(var) = self.storage[id] {
+            return if self.is_array(var) { Expr::Var(var) } else { Expr::unary(UnaryOp::AddrOf, Expr::Var(var)) };
+        }
+
         let f = self.f;
 
         return match &f.values[id].kind {
             ValueKind::Param(index) => Expr::Var(*index),
             ValueKind::Int(0) if is_pointer(self.ty(id)) => Expr::Name("NULL".to_string()),
-            // Addresses of strings in constants (non position independent code)
-            ValueKind::Int(value) => u64::try_from(*value).ok().and_then(|a| self.ctx.string_at(a, is_pointer(self.ty(id)))).map_or(Expr::Int(*value), Expr::Str),
+            // Addresses of strings and functions in constants (non position independent code)
+            ValueKind::Int(value) => {
+                let addr = u64::try_from(*value).ok().filter(|&a| a >= 0x1000);
+                let pointer_sized = f.values[id].ty.bits() == self.ctx.program.pointer_size.max(4) as u32 * 8 || is_pointer(self.ty(id));
+
+                if let Some(text) = addr.and_then(|a| self.ctx.string_at(a, is_pointer(self.ty(id)))) {
+                    Expr::Str(text)
+                } else if let Some(name) = addr.filter(|_| pointer_sized).and_then(|a| (self.ctx.function)(a)) {
+                    Expr::Name(name)
+                } else {
+                    Expr::Int(*value)
+                }
+            }
             ValueKind::Float(value) => Expr::Float(*value),
             ValueKind::Undef => Expr::Int(0),
             ValueKind::Function(name) => Expr::Name(name.clone()),
             ValueKind::Global(name) => self.global(name),
             ValueKind::Inst { .. } => self.inst(id),
         };
+    }
+
+    /// Type of a variable of the stack frame: an array of chars, or its scalar type from its accesses
+    fn storage_type(&self, id: ValueId) -> CType {
+        return match self.f.allocated.get(&id) {
+            Some(Allocated::Scalar(ty)) => {
+                let bits = if *ty == Ty::Ptr { self.ctx.program.pointer_size.max(4) as u32 * 8 } else { ty.bits() };
+
+                match pointee(&self.types[id]) {
+                    Some(known) if !known.is_unknown() && self.ctx.size_bits(known) == bits => known.clone(),
+                    _ => base_type(*ty),
+                }
+            }
+            Some(Allocated::Bytes(size)) => CType::Array(Box::new(CType::Char), Some(*size)),
+            None => CType::Unknown(0),
+        };
+    }
+
+    fn is_array(&self, var: VarId) -> bool {
+        return matches!(self.vars[var].ty, CType::Array(..));
+    }
+
+    /// Access to a variable of the stack frame: the variable, an element, or bytes of it
+    fn storage_access(&self, var: VarId, offset: i128, terms: &[(ValueId, i128)], ty: &CType, size: i128) -> Option<Expr> {
+        let var_size = self.ctx.size_of(&self.vars[var].ty).unwrap_or(0) as i128;
+
+        if !self.is_array(var) {
+            return (offset == 0 && terms.is_empty() && size == var_size).then(|| Expr::Var(var));
+        }
+
+        let index = match terms {
+            [] => Expr::Int(offset),
+            [(term, 1)] => self.index_expr(*term, offset),
+            _ => return None,
+        };
+
+        let element = Expr::Index(Box::new(Expr::Var(var)), Box::new(index));
+
+        if size == 1 && matches!(ty.unqualified(), CType::Char | CType::Int { bits: 8, .. }) {
+            return Some(element);
+        }
+
+        // Bytes of the buffer read as a wider value: *(int *)&buf[4]
+        return Some(Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), Expr::unary(UnaryOp::AddrOf, element))));
     }
 
     /// Value of a load from a constant address in read-only memory: a number, a string or a function
@@ -324,9 +392,14 @@ impl<'a> Builder<'a> {
         });
     }
 
+    /// Text of a global string: from the binary, or made by the optimizations
+    fn string_global(&self, name: &str) -> Option<String> {
+        return self.ctx.string(name).or_else(|| self.f.data.get(name).map(|bytes| crate::lift::literal(bytes.strip_suffix(&[0]).unwrap_or(bytes))));
+    }
+
     /// Strings are literals, other globals are addressed
     fn global(&self, name: &str) -> Expr {
-        if let Some(text) = self.ctx.string(name) {
+        if let Some(text) = self.string_global(name) {
             return Expr::Str(text);
         }
 
@@ -595,6 +668,11 @@ impl<'a> Builder<'a> {
         let size = self.pointee_size(base);
         let base_expr = self.expr(base);
 
+        // Address in a buffer of the frame: &buf[i]
+        if let Some(var) = self.storage[base].filter(|&v| self.is_array(v)) {
+            return Expr::unary(UnaryOp::AddrOf, Expr::Index(Box::new(Expr::Var(var)), Box::new(offset)));
+        }
+
         let elements = match &offset {
             Expr::Int(0) => return base_expr,
             Expr::Int(c) if *c % size as i128 == 0 => Some(Expr::Int(*c / size as i128)),
@@ -699,11 +777,11 @@ impl<'a> Builder<'a> {
                 return if function { name } else { Expr::unary(UnaryOp::AddrOf, name) };
             }
 
-            if offset == 0 && terms.is_empty() && self.ctx.string(name).is_none() {
+            if offset == 0 && terms.is_empty() && self.string_global(name).is_none() {
                 return Expr::Name(name.clone());
             }
 
-            if terms.is_empty() && offset % size == 0 && self.ctx.string(name).is_none() {
+            if terms.is_empty() && offset % size == 0 && self.string_global(name).is_none() {
                 return Expr::Index(Box::new(Expr::Name(name.clone())), Box::new(Expr::Int(offset / size)));
             }
 
@@ -711,6 +789,10 @@ impl<'a> Builder<'a> {
                 let index = self.index_expr(terms[0].0, offset / size);
                 return Expr::Index(Box::new(Expr::Name(name.clone())), Box::new(index));
             }
+        }
+
+        if let Some(access) = self.storage[base].and_then(|var| self.storage_access(var, offset, &terms, ty, size)) {
+            return access;
         }
 
         let base_pointee = pointee(self.ty(base)).cloned();
@@ -752,6 +834,18 @@ impl<'a> Builder<'a> {
         }
 
         let mut pointer = if is_pointer(self.ty(base)) && pointee(self.ty(base)) == Some(&CType::Char) { base_expr } else { Expr::cast(CType::ptr(CType::Char), base_expr) };
+
+        // A char is an element of the bytes: ((char *)p)[5]
+        if *ty == CType::Char {
+            let index = match (bytes, offset) {
+                (None, offset) => Expr::Int(offset),
+                (Some(bytes), 0) => bytes,
+                (Some(bytes), offset) if offset < 0 => Expr::binary(BinaryOp::Sub, bytes, Expr::Int(-offset)),
+                (Some(bytes), offset) => Expr::binary(BinaryOp::Add, bytes, Expr::Int(offset)),
+            };
+
+            return Expr::Index(Box::new(pointer), Box::new(index));
+        }
 
         if let Some(bytes) = bytes {
             pointer = Expr::binary(BinaryOp::Add, pointer, bytes);
@@ -908,7 +1002,14 @@ impl<'a> Builder<'a> {
                 Op::Store => {
                     let ty = self.types[operands[0]].clone();
                     let ty = if ty == CType::Bool { CType::uint(8) } else { ty };
-                    stmts.push(self.stmt(StmtKind::Assign(self.deref(operands[1], &ty), self.expr(operands[0])), id));
+
+                    // Printable characters stored in chars are character literals
+                    let value = match (f.int(operands[0]), &ty) {
+                        (Some(c), CType::Char) if (0x20..0x7f).contains(&c) || matches!(c, 9 | 10 | 13) => Expr::Char(c as u8),
+                        _ => self.expr(operands[0]),
+                    };
+
+                    stmts.push(self.stmt(StmtKind::Assign(self.deref(operands[1], &ty), value), id));
                 }
                 _ => match self.var_of[id] {
                     Some(var) => stmts.push(self.stmt(StmtKind::Assign(Expr::Var(var), self.inst(id)), id)),
@@ -1171,6 +1272,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         f,
         ctx,
         var_of: vec![None; f.values.len()],
+        storage: vec![None; f.values.len()],
         vars: Vec::new(),
         reads_memory: vec![false; f.values.len()],
         types,

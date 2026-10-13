@@ -33,11 +33,21 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-/// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
-/// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
+/// Bytes a stack argument takes (a double is two slots on 32-bit targets)
+pub(crate) fn stack_bytes(ty: LType, slot_size: i64, pointer_bits: u16) -> i64 {
+    let bits = match ty {
+        LType::Int(bits) | LType::Float(bits) => bits as i64,
+        LType::Ptr => pointer_bits as i64,
+    };
+
+    return ((bits / 8 + slot_size - 1) / slot_size).max(1) * slot_size;
+}
+
 /// Frames kept for the final lift after the discovery of the signature
 const FRAMES: usize = 64;
 
+/// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
+/// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
 const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
 
 /// Signatures shared by the decompilers of a program (one per thread): a signature is discovered once
@@ -296,6 +306,18 @@ impl<'a> Decompiler<'a> {
         module.verify().map_err(|e| format!("invalid IR: {}", e.to_string()))?;
 
         module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+
+        // Frames kept whole by an escaping address: split into variables, optimized again
+        let mut split = false;
+
+        for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
+            split |= lift::split_frame(module, function);
+        }
+
+        if split {
+            module.verify().map_err(|e| format!("invalid IR after the split of the stack frame: {}", e.to_string()))?;
+            module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+        }
 
         // Helpers and globals the optimizations made useless
         for function in module.get_functions().filter(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
@@ -649,8 +671,9 @@ impl<'a> Decompiler<'a> {
             let loc = match reg {
                 Some(&reg) => Loc::Reg(reg),
                 None => {
-                    next_stack += 1;
-                    Loc::Stack(abi.stack_args + (next_stack - 1) * abi.slot_size)
+                    let offset = abi.stack_args + next_stack;
+                    next_stack += stack_bytes(ty, abi.slot_size, self.model.pointer_bits);
+                    Loc::Stack(offset)
                 }
             };
 
@@ -904,6 +927,26 @@ mod tests {
 
         let count_chars = code("count_chars");
         assert!(count_chars.starts_with("int count_chars(char *a1)"), "{}", count_chars);
+    }
+
+    #[test]
+    fn stack_frame_variables() {
+        let program = fixture("elf_i386_frame");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let check = decompiler.c_code(function(&analysis, "check")).unwrap();
+
+        // The buffers are arrays, the scalars below them are values
+        assert!(check.contains("char dest[44];") && check.contains("strcpy(dest, src);"), "{}", check);
+        assert!(check.contains("for (i = 0; i <= 3; i++) {") && check.contains("+= dest[i];"), "{}", check);
+
+        // The buffer is read after the call that wrote it
+        let strcpy = check.find("strcpy(").unwrap();
+        assert!(check[strcpy..].contains("if (dest[1] == 'x') {"), "{}", check);
+
+        // A string written four bytes at a time, stack arguments after a double
+        assert!(check.contains("memcpy(v2, \"libsrty ko!\", 12);"), "{}", check);
+        assert!(check.contains("printf(\"%s %d %f\\n\", v2, v1, 2.5);"), "{}", check);
     }
 
     #[test]
