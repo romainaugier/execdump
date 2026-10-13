@@ -312,7 +312,7 @@ Viewers:
   - :heavy_check_mark: Review of the LLM proposals
   - :heavy_check_mark: Shared libraries: listed in the explorer, loaded on demand (analysis, decompilation and project of their own, in
     `libs/<library>` of the project), an imported function opens in the library that exports it (loaded first when
-    needed), the libraries loaded are restored with the session
+    needed, from the graphs, the call graphs and the C code with `gd`), the libraries loaded are restored with the session
   - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
 
 The analysis runs in the background when the TUI starts, then the project opens (modules, cache) and every function is

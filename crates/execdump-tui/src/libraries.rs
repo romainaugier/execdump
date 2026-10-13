@@ -138,27 +138,27 @@ impl App {
         return self.libraries[library].exports.as_ref();
     }
 
+    /// The library that exports a function, and its address there
+    pub(crate) fn exporting_library(&mut self, import: &str) -> Option<(usize, u64)> {
+        let name = export_name(import).to_string();
+        return (0..self.libraries.len()).find_map(|library| self.exports(library).and_then(|e| e.get(&name)).map(|&addr| (library, addr)));
+    }
+
     /// Opens an imported function in the library that exports it (loading the library first)
     pub(crate) fn follow_import(&mut self, import: &str, code: bool) -> bool {
         let name = export_name(import).to_string();
 
-        for library in 0..self.libraries.len() {
-            let Some(addr) = self.exports(library).and_then(|e| e.get(&name)).copied() else {
-                continue;
-            };
+        if let Some((library, addr)) = self.exporting_library(&name) {
+            if let Some(program) = self.load_library(library) {
+                if self.projects[program].is_some() {
+                    self.open_imported(program, addr, code);
+                } else {
+                    self.pending_import = Some(PendingImport { program, addr, code });
+                    self.info(format!("Loading {} for {}...", self.libraries[library].file_name(), name));
+                }
 
-            let Some(program) = self.load_library(library) else {
-                continue;
-            };
-
-            if self.projects[program].is_some() {
-                self.open_imported(program, addr, code);
-            } else {
-                self.pending_import = Some(PendingImport { program, addr, code });
-                self.info(format!("Loading {} for {}...", self.libraries[library].file_name(), name));
+                return true;
             }
-
-            return true;
         }
 
         let missing: Vec<String> = self.libraries.iter().filter(|l| l.needed.path.is_none()).map(|l| l.needed.name.clone()).collect();

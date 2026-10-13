@@ -2719,10 +2719,10 @@ impl App {
         };
 
         if let Some(addr) = project.resolve(&word).or_else(|| word.strip_prefix("sub_").and_then(|a| u64::from_str_radix(a, 16).ok())).filter(|a| project.analysis.functions.contains_key(a)) {
-            let thunk = project.analysis.functions[&addr].thunk.is_some();
-
-            if thunk {
-                return self.info(format!("{} is imported, its code is not in this binary", word));
+            // Imported: its code is in a library
+            if let Some(import) = project.analysis.functions[&addr].thunk.clone() {
+                self.follow_import(&import, true);
+                return;
             }
 
             // Same module: the cursor moves, otherwise the module of the function opens
@@ -2737,6 +2737,12 @@ impl App {
 
         if let Some(addr) = project.global(function, &word) {
             return self.goto_address(program, addr);
+        }
+
+        // Functions of the libraries called without a stub (through the GOT)
+        if self.exporting_library(&word).is_some() {
+            self.follow_import(&word, true);
+            return;
         }
 
         self.info(format!("{} is not a function or a global", word));
@@ -3004,7 +3010,7 @@ impl App {
                         if node.kind == NodeKind::Function {
                             self.open_function(program, node.addr, None);
                         } else {
-                            self.info(format!("{} is imported, its code is not in this binary", node.title));
+                            self.follow_import(&node.title, false);
                         }
                     }
                 }
