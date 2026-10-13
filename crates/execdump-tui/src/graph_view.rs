@@ -438,7 +438,13 @@ impl GraphView {
                     GraphKind::CallGraph { .. } => node.addr,
                 };
 
+                let import = project.analysis.functions.get(&function).and_then(|f| f.thunk.clone());
+
                 match project.shown(function) {
+                    _ if import.is_some() => {
+                        let text = format!("// {} is imported, Enter opens it in its library", import.unwrap_or_default());
+                        vec![Line::from(Span::styled(text, Style::default().fg(theme.comment)))]
+                    }
                     Some((rendered, _)) => {
                         let range = match kind {
                             GraphKind::Cfg { .. } => project.analysis.functions.get(&function).and_then(|f| f.blocks.get(&node.addr)).map(|b| (b.start, b.end)),

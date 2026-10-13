@@ -223,6 +223,7 @@ Disassembly:
 
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
+  - :heavy_check_mark: Shared libraries a binary needs, found where the loader looks for them (ELF: RPATH, LD_LIBRARY_PATH, RUNPATH, ld.so.conf, default directories; PE: next to the binary, PATH; Mach-O: @rpath, @loader_path, @executable_path)
   - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64)
 
 Analysis:
@@ -309,10 +310,14 @@ Viewers:
   - :heavy_check_mark: Functions, strings, imports, modules and memory map tables
   - :heavy_check_mark: C code of the modules (every function of a module, synchronized with the addresses, editable)
   - :heavy_check_mark: Review of the LLM proposals
+  - :heavy_check_mark: Shared libraries: listed in the explorer, loaded on demand (analysis, decompilation and project of their own, in
+    `libs/<library>` of the project), an imported function opens in the library that exports it (loaded first when
+    needed), the libraries loaded are restored with the session
   - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
 
-The analysis runs in the background when the TUI starts, then the decompilation of every function. Their progress is
-shown in the title bar (`[+]` when there are unsaved changes).
+The analysis runs in the background when the TUI starts, then the project opens (modules, cache) and every function is
+decompiled. The title bar shows the stage, the progress of the decompilation (bar, percentage, remaining time) and `[+]`
+when there are unsaved changes.
 
 The content area is split as in vim: each split is a group of tabs, each tab shows a view and has its own jumplist.
 Anything can be opened in any split (graphs, C code, disassembly, tables...). Two splits can be linked (`Ctrl-w b`): the
@@ -418,6 +423,7 @@ Commands:
 | `:review`, `:accept <n>`, `:reject <n>` | Review the LLM proposals |
 | `:w [directory]` | Save the project (and the session), in another directory when given |
 | `:export <directory>` | Export the C code as a source tree (once everything is decompiled) |
+| `:lib <name or path>` | Load a shared library (one the binary needs, or any file), with its own project |
 | `:q`, `:q!` | Close the tab (the split when it was its last tab, execdump when it was the last split) |
 | `:qa`, `:qa!`, `:wq` | Quit, quit without saving, save and quit |
 

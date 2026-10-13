@@ -11,6 +11,7 @@
 
 mod graph_view;
 mod layout;
+mod libraries;
 mod review_view;
 mod source_view;
 mod theme;
@@ -40,11 +41,16 @@ use execdump_decompiler::analysis::{analyze, Analysis};
 use execdump_decompiler::llm::LlmConfig;
 use execdump_core::crash;
 use execdump_core::dump::Dump;
-use execdump_core::exec::Exec;
+use execdump_core::elf::parse_elf;
+use execdump_core::exec::{guess_exectype, Exec, ExecType};
+use execdump_core::libraries::{needed_libraries, Needed};
+use execdump_core::macho::parse_macho;
+use execdump_core::pe::parse_pe;
 use execdump_core::program::{programs_from_exec, Program};
-use execdump_project::{default_workers, Project};
+use execdump_project::{default_location, default_workers, Project};
 
 use graph_view::{Detail, GraphKind, GraphView, NodeKind};
+use libraries::{Library, PendingImport};
 use review_view::ReviewView;
 use source_view::{InsertWhere, SourceView};
 use theme::Theme;
@@ -55,9 +61,9 @@ use serde::{Deserialize, Serialize};
 
 use std::error::Error;
 use std::io;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -102,13 +108,13 @@ enum ExplorerItem {
     MachOImports(usize),
     /// Section of a program (program index, section name)
     Section(usize, String),
+    /// Shared library needed by the binary or by a library
+    Library(usize),
 }
 
 impl ExplorerItem {
     fn display_name(&self, app: &App) -> String {
-        let suffix = |program: &usize| -> String {
-            if app.programs.len() > 1 { format!(" ({})", app.programs[*program].name) } else { String::new() }
-        };
+        let suffix = |program: &usize| -> String { app.program_suffix(*program) };
 
         match self {
             ExplorerItem::Group(name) => format!("{}/", name),
@@ -152,14 +158,16 @@ impl ExplorerItem {
             ExplorerItem::MachOSymbols(p) => format!("  Symbols{}", suffix(p)),
             ExplorerItem::MachOImports(p) => format!("  Imports{}", suffix(p)),
             ExplorerItem::Section(p, name) => format!("  {}{}", name, suffix(p)),
+            ExplorerItem::Library(library) => format!("  {} ({})", app.libraries[*library].file_name(), app.library_status(*library)),
         }
     }
 }
 
-fn explorer_items(exec: &Exec, programs: &[Arc<Program>], projects: &[Option<Project>]) -> Vec<ExplorerItem> {
+fn explorer_items(app: &App) -> Vec<ExplorerItem> {
+    let (exec, projects) = (&app.exec, &app.projects);
     let mut items = vec![ExplorerItem::Group("Analysis".to_string())];
 
-    for p in 0..programs.len() {
+    for p in 0..app.main_programs {
         items.push(ExplorerItem::EntryPoint(p));
         items.push(ExplorerItem::CallGraph(p));
         items.push(ExplorerItem::Functions(p));
@@ -169,13 +177,29 @@ fn explorer_items(exec: &Exec, programs: &[Arc<Program>], projects: &[Option<Pro
         items.push(ExplorerItem::Proposals(p));
     }
 
+    if !app.libraries.is_empty() {
+        items.push(ExplorerItem::Group("Libraries".to_string()));
+
+        for (library, entry) in app.libraries.iter().enumerate() {
+            items.push(ExplorerItem::Library(library));
+
+            if let Some(p) = entry.program.filter(|&p| projects[p].is_some()) {
+                items.push(ExplorerItem::CallGraph(p));
+                items.push(ExplorerItem::Functions(p));
+                items.push(ExplorerItem::Strings(p));
+                items.push(ExplorerItem::Imports(p));
+                items.push(ExplorerItem::Proposals(p));
+            }
+        }
+    }
+
     for (p, project) in projects.iter().enumerate() {
         let Some(project) = project else {
             continue;
         };
 
-        let title = if programs.len() > 1 { format!("Modules ({})", programs[p].name) } else { "Modules".to_string() };
-        items.push(ExplorerItem::Group(title));
+        let suffix = app.program_suffix(p);
+        items.push(ExplorerItem::Group(format!("Modules{}", suffix)));
         items.extend(project.modules.names().map(|m| ExplorerItem::Module(p, m.clone())));
     }
 
@@ -321,6 +345,28 @@ enum Resource {
     Review { program: usize },
 }
 
+impl Resource {
+    /// The resource in another program (saved programs are reloaded at other indices)
+    fn with_program(&self, programs: &std::collections::HashMap<usize, usize>) -> Option<Resource> {
+        let mut resource = self.clone();
+
+        let program = match &mut resource {
+            Resource::Welcome => return Some(resource),
+            Resource::Cfg { program, .. }
+            | Resource::CallGraph { program, .. }
+            | Resource::Linear { program, .. }
+            | Resource::Region { program, .. }
+            | Resource::Address { program, .. }
+            | Resource::Source { program, .. }
+            | Resource::Table { program, .. }
+            | Resource::Review { program } => program,
+        };
+
+        *program = *programs.get(program)?;
+        return Some(resource);
+    }
+}
+
 fn hex(addr: u64) -> String {
     return format!("{:#x}", addr);
 }
@@ -332,6 +378,9 @@ fn parse_hex(text: &str) -> u64 {
 #[derive(Serialize, Deserialize)]
 struct Session {
     layout: workspace::Layout<Resource>,
+    /// Shared libraries loaded, in the order of their programs
+    #[serde(default)]
+    libraries: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -371,9 +420,19 @@ struct App {
     programs: Vec<Arc<Program>>,
     analyses: Vec<Option<Arc<Analysis>>>,
     analysis_errors: Vec<Option<String>>,
-    progress: Vec<Arc<AtomicUsize>>,
+    loading: Vec<Loading>,
+    /// When the decompilation started, and how many functions were done then (for the remaining time)
+    decompile_start: Option<(std::time::Instant, usize)>,
     /// Analysis of each program and its project, both made in the background
-    receiver: Receiver<(usize, Result<(Arc<Analysis>, Project), String>)>,
+    receiver: Receiver<Loaded>,
+    sender: Sender<Loaded>,
+    workers: usize,
+    /// Programs of the binary, the ones after them are shared libraries
+    main_programs: usize,
+    libraries: Vec<Library>,
+    pending_import: Option<PendingImport>,
+    /// Programs of the session being restored (saved program -> program), once its libraries are loaded
+    session_programs: Option<std::collections::HashMap<usize, usize>>,
     decoders: Vec<Option<Decoder>>,
 
     /// Project of each program, opened when its analysis is done
@@ -411,44 +470,126 @@ struct App {
     llm: LlmConfig,
 }
 
+/// 157204 -> 157.2k
+fn count(n: usize) -> String {
+    return match n {
+        0..=9_999 => n.to_string(),
+        10_000..=999_999 => format!("{:.1}k", n as f64 / 1e3),
+        _ => format!("{:.1}M", n as f64 / 1e6),
+    };
+}
+
+fn duration(seconds: f64) -> String {
+    let seconds = seconds as u64;
+
+    return match seconds {
+        0..=59 => format!("{}s left", seconds),
+        60..=3599 => format!("{}m{:02}s left", seconds / 60, seconds % 60),
+        _ => format!("{}h{:02}m left", seconds / 3600, seconds / 60 % 60),
+    };
+}
+
+/// Background preparation of a program: its analysis, then its project
+struct Loading {
+    functions: Arc<AtomicUsize>,
+    /// ANALYSIS, then PROJECT
+    stage: Arc<AtomicU8>,
+}
+
+const ANALYSIS: u8 = 0;
+const PROJECT: u8 = 1;
+
+/// A program ready to be explored: parsed, analyzed, with its project open
+struct Prepared {
+    program: Arc<Program>,
+    analysis: Arc<Analysis>,
+    project: Project,
+    /// Shared libraries it needs (libraries only, the ones of the binary are known when it is opened)
+    needed: Vec<Needed>,
+}
+
+type Loaded = (usize, Result<Prepared, String>);
+
+/// The program of a binary (the first one of fat binaries), with the libraries it needs
+fn parse_binary(path: &Path) -> Result<(Program, Vec<Needed>), String> {
+    let path = path.to_path_buf();
+
+    let exec = match guess_exectype(&path).map_err(|e| e.to_string())? {
+        ExecType::PE => Exec::PE(parse_pe(&path).map_err(|e| e.to_string())?),
+        ExecType::ELF => Exec::ELF(parse_elf(&path).map_err(|e| e.to_string())?),
+        ExecType::MachO => Exec::MachO(parse_macho(&path).map_err(|e| e.to_string())?),
+    };
+
+    let program = programs_from_exec(&exec).into_iter().next().ok_or("no program in the file")?;
+    return Ok((program, needed_libraries(&exec, &path)));
+}
+
+impl Loading {
+    /// A program of the binary, parsed already
+    fn start(index: usize, count: usize, program: Arc<Program>, sender: &Sender<Loaded>, path: &Path, location: Option<PathBuf>, workers: usize) -> Self {
+        let path = path.to_path_buf();
+
+        return Loading::spawn(index, sender, move |functions, stage| {
+            let analysis = Arc::new(analyze(&program, Some(functions)).map_err(|e| e.to_string())?);
+            stage.store(PROJECT, Ordering::Relaxed);
+            let project = Project::open(index, count, program.clone(), analysis.clone(), &path, location, workers);
+            Ok(Prepared { program, analysis, project, needed: Vec::new() })
+        });
+    }
+
+    /// A shared library, parsed in the background too, with its own project
+    fn library(index: usize, sender: &Sender<Loaded>, path: &Path, location: PathBuf, workers: usize) -> Self {
+        let path = path.to_path_buf();
+
+        return Loading::spawn(index, sender, move |functions, stage| {
+            let (program, needed) = parse_binary(&path)?;
+            let program = Arc::new(program);
+            let analysis = Arc::new(analyze(&program, Some(functions)).map_err(|e| e.to_string())?);
+            stage.store(PROJECT, Ordering::Relaxed);
+            let project = Project::open(0, 1, program.clone(), analysis.clone(), &path, Some(location), workers);
+            Ok(Prepared { program, analysis, project, needed })
+        });
+    }
+
+    fn spawn(index: usize, sender: &Sender<Loaded>, work: impl FnOnce(&AtomicUsize, &AtomicU8) -> Result<Prepared, String> + Send + 'static) -> Self {
+        let loading = Loading { functions: Arc::new(AtomicUsize::new(0)), stage: Arc::new(AtomicU8::new(ANALYSIS)) };
+        let (functions, stage, sender) = (loading.functions.clone(), loading.stage.clone(), sender.clone());
+
+        let thread = crash::thread(&format!("analysis-{}", index)).spawn(move || {
+            let result = crash::catch(|| work(&functions, &stage)).unwrap_or_else(|error| Err(format!("analysis failed: {}", error)));
+            let _ = sender.send((index, result));
+        });
+
+        thread.expect("cannot start an analysis thread");
+        return loading;
+    }
+}
+
 impl App {
     fn new(exec: Exec, exec_path: PathBuf, keys: KeyBindings, project_location: Option<PathBuf>, workers: usize) -> Self {
         let programs: Vec<Arc<Program>> = programs_from_exec(&exec).into_iter().map(Arc::new).collect();
         let (sender, receiver) = channel();
-        let mut progress = Vec::new();
         let count = programs.len();
-
-        for (i, program) in programs.iter().enumerate() {
-            let counter = Arc::new(AtomicUsize::new(0));
-            progress.push(counter.clone());
-
-            let (program, sender, path, location) = (program.clone(), sender.clone(), exec_path.clone(), project_location.clone());
-
-            std::thread::spawn(move || {
-                let result = crash::catch(|| {
-                    analyze(&program, Some(&counter)).map_err(|e| e.to_string()).map(|analysis| {
-                        let analysis = Arc::new(analysis);
-                        let project = Project::open(i, count, program, analysis.clone(), &path, location, workers);
-                        (analysis, project)
-                    })
-                });
-                let result = result.unwrap_or_else(|error| Err(format!("analysis failed: {}", error)));
-
-                let _ = sender.send((i, result));
-            });
-        }
+        let loading = programs.iter().enumerate().map(|(i, program)| Loading::start(i, count, program.clone(), &sender, &exec_path, project_location.clone(), workers)).collect();
 
         let projects: Vec<Option<Project>> = programs.iter().map(|_| None).collect();
-        let explorer_items = explorer_items(&exec, &programs, &projects);
+        let libraries: Vec<Library> = needed_libraries(&exec, &exec_path).into_iter().map(Library::new).collect();
         let mut explorer_state = ListState::default();
         explorer_state.select(Some(1));
 
         return App {
+            sender,
+            workers,
+            main_programs: programs.len(),
+            libraries,
+            pending_import: None,
+            session_programs: None,
             decoders: programs.iter().map(|p| Decoder::new(p.architecture()).ok()).collect(),
             analyses: vec![None; programs.len()],
             analysis_errors: vec![None; programs.len()],
             programs,
-            progress,
+            loading,
+            decompile_start: None,
             receiver,
             projects,
             project_location,
@@ -458,10 +599,10 @@ impl App {
             exec_path,
             theme: Theme::codedark(),
             keys,
-            explorer_items,
+            explorer_items: Vec::new(),
             explorer_state,
             explorer_visible: true,
-            explorer_version: 0,
+            explorer_version: u64::MAX,
             explorer_offset: 0,
             focus: Focus::Explorer,
             workspace: Workspace::new(View::Welcome),
@@ -491,10 +632,18 @@ impl App {
     fn poll_analysis(&mut self) {
         while let Ok((index, result)) = self.receiver.try_recv() {
             match result {
-                Ok((analysis, project)) => {
-                    self.analyses[index] = Some(analysis);
-                    self.projects[index] = Some(project);
+                Ok(prepared) => {
+                    // Libraries are parsed in the background
+                    if self.decoders[index].is_none() {
+                        self.decoders[index] = Decoder::new(prepared.program.architecture()).ok();
+                    }
+
+                    self.programs[index] = prepared.program;
+                    self.analyses[index] = Some(prepared.analysis);
+                    self.projects[index] = Some(prepared.project);
                     self.explorer_version = u64::MAX;
+                    self.add_libraries(prepared.needed);
+                    self.program_loaded(index);
 
                     // Refresh the region disassemblies so they get the function labels and annotations
                     let refreshed: Vec<(usize, String, Option<u64>)> = self.workspace.views_mut()
@@ -522,9 +671,20 @@ impl App {
             }
         }
 
-        if self.session_pending && self.projects.iter().all(|p| p.is_some()) {
-            self.session_pending = false;
-            self.restore_session();
+        // The session is restored once the programs it shows are loaded, libraries included
+        let loaded = |app: &App| (0..app.programs.len()).all(|p| app.projects[p].is_some() || app.analysis_errors[p].is_some());
+
+        if self.session_pending && loaded(self) {
+            if self.session_programs.is_none() {
+                let libraries = self.session().map_or(Vec::new(), |s| s.libraries);
+                self.session_programs = Some(self.load_session_libraries(&libraries));
+            }
+
+            if loaded(self) {
+                self.session_pending = false;
+                let programs = self.session_programs.take().unwrap_or_default();
+                self.restore_session(&programs);
+            }
         }
     }
 
@@ -559,7 +719,7 @@ impl App {
         if *explorer_version != versions {
             *explorer_version = versions;
             let selected = self.explorer_state.selected().and_then(|i| self.explorer_items.get(i)).cloned();
-            self.explorer_items = explorer_items(&self.exec, &self.programs, &self.projects);
+            self.explorer_items = explorer_items(self);
 
             if let Some(index) = selected.and_then(|s| self.explorer_items.iter().position(|i| *i == s)) {
                 self.explorer_state.select(Some(index));
@@ -582,7 +742,7 @@ impl App {
         if let Some(error) = &self.analysis_errors[program] {
             self.error(format!("Analysis failed: {}", error));
         } else {
-            self.error(format!("Analysis in progress ({} functions so far), try again in a moment", self.progress[program].load(Ordering::Relaxed)));
+            self.error(format!("Analysis in progress ({} functions so far), try again in a moment", self.loading[program].functions.load(Ordering::Relaxed)));
         }
 
         return None;
@@ -724,6 +884,13 @@ impl App {
             return;
         };
 
+        // Imported functions are opened in their library (their stub otherwise)
+        if let Some(import) = function.thunk.clone() {
+            if self.follow_import(&import, false) {
+                return;
+            }
+        }
+
         if let Some(mut view) = self.cfg_view(program, function.addr) {
             if let Some(select) = select.or(if addr != function.addr { Some(addr) } else { None }) {
                 view.select_addr(select);
@@ -781,8 +948,13 @@ impl App {
         let function = project.analysis.function_containing(addr).map(|f| f.addr);
 
         let Some(module) = function.and_then(|f| project.module_of(f)).map(|m| m.to_string()) else {
-            let thunk = function.and_then(|f| project.analysis.functions.get(&f)).is_some_and(|f| f.thunk.is_some());
-            self.error(if thunk { "Imported function: its code is not in this binary".to_string() } else { format!("No function at {:#x}", addr) });
+            match function.and_then(|f| project.analysis.functions.get(&f)).and_then(|f| f.thunk.clone()) {
+                Some(import) => {
+                    self.follow_import(&import, true);
+                }
+                None => self.error(format!("No function at {:#x}", addr)),
+            }
+
             return None;
         };
 
@@ -1103,6 +1275,19 @@ impl App {
                 self.open_module(*p, module);
                 return;
             }
+            ExplorerItem::Library(library) => {
+                match self.libraries[*library].program {
+                    Some(p) if self.projects[p].is_some() => self.open_call_graph(p, None, DEFAULT_CALL_GRAPH_DEPTH, false),
+                    Some(_) => self.info(format!("{} is loading", self.libraries[*library].file_name())),
+                    None => match self.load_library(*library) {
+                        Some(_) => self.info(format!("Loading {}...", self.libraries[*library].file_name())),
+                        None => self.error(format!("{} was not found", self.libraries[*library].needed.name)),
+                    },
+                }
+
+                self.open_mode = OpenMode::Replace;
+                return;
+            }
             ExplorerItem::Functions(p) => self.functions_table(*p).map(View::Table),
             ExplorerItem::Strings(p) => self.strings_table(*p).map(View::Table),
             ExplorerItem::Imports(p) => Some(View::Table(self.imports_table(*p))),
@@ -1326,6 +1511,27 @@ impl App {
             "on" | "only" => self.workspace.only(),
             "link" | "unlink" => self.toggle_link(),
 
+            // Shared libraries: by name, or any file
+            "lib" | "library" => match argument {
+                Some(name) => {
+                    let found = self.libraries.iter().position(|l| l.file_name().starts_with(name) || l.needed.name.starts_with(name));
+
+                    let library = found.or_else(|| {
+                        Path::new(name).is_file().then(|| {
+                            self.add_libraries(vec![Needed { name: name.to_string(), path: Some(PathBuf::from(name)) }]);
+                            self.libraries.len() - 1
+                        })
+                    });
+
+                    match library.map(|l| (l, self.load_library(l))) {
+                        Some((library, Some(_))) => self.info(format!("Loading {}...", self.libraries[library].file_name())),
+                        Some((library, None)) => self.error(format!("{} was not found", self.libraries[library].needed.name)),
+                        None => self.error(format!("No library {}", name)),
+                    }
+                }
+                None => self.error("Usage: lib <name or path>".to_string()),
+            },
+
             // Project
             "export" => match argument {
                 Some(dir) => self.export(program, PathBuf::from(dir)),
@@ -1496,8 +1702,18 @@ impl App {
 
         let mut messages = Vec::new();
 
-        for project in self.projects.iter_mut().flatten() {
-            match project.save(location.clone()) {
+        for program in 0..self.projects.len() {
+            // The projects of the libraries are in the libs directory of the project
+            let location = match self.libraries.iter().find(|l| l.program == Some(program)) {
+                Some(library) => location.as_ref().map(|l| l.join("libs").join(library.file_name())),
+                None => location.clone(),
+            };
+
+            let Some(project) = self.projects[program].as_mut() else {
+                continue;
+            };
+
+            match project.save(location) {
                 Ok(message) => messages.push(message),
                 Err(error) => {
                     self.message = Some((format!("Cannot save: {}", error), true));
@@ -1599,17 +1815,18 @@ impl App {
 
         let layout = self.workspace.save(&|view| self.describe(view));
 
-        if let Ok(text) = toml::to_string(&Session { layout }) {
+        if let Ok(text) = toml::to_string(&Session { layout, libraries: self.loaded_libraries() }) {
             let _ = project.save_session(&text);
         }
     }
 
-    fn restore_session(&mut self) {
-        let Some(text) = self.projects.iter().flatten().next().and_then(|p| p.session()) else {
-            return;
-        };
+    fn session(&self) -> Option<Session> {
+        let text = self.projects.iter().flatten().next().and_then(|p| p.session())?;
+        return toml::from_str::<Session>(&text).ok();
+    }
 
-        let Ok(session) = toml::from_str::<Session>(&text) else {
+    fn restore_session(&mut self, programs: &std::collections::HashMap<usize, usize>) {
+        let Some(session) = self.session() else {
             return;
         };
 
@@ -1618,7 +1835,11 @@ impl App {
             return;
         }
 
-        let workspace = Workspace::restore(&session.layout, &mut |r| self.reopen(r));
+        // Views of libraries that are not there anymore are not restored
+        let workspace = Workspace::restore(&session.layout, &mut |r| match r.with_program(programs) {
+            Some(resource) => self.reopen(&resource),
+            None => View::Welcome,
+        });
 
         if workspace.is_valid() {
             self.workspace = workspace;
@@ -2823,15 +3044,23 @@ impl App {
      * Rendering
      */
 
-    fn status_text(&self) -> String {
-        let total = self.programs.len();
-        let done = self.analyses.iter().filter(|a| a.is_some()).count();
+    fn status_text(&mut self) -> String {
         let spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         let frame = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()) / 100) as usize % spinner.len();
 
-        if done < total {
-            let found: usize = self.progress.iter().map(|p| p.load(Ordering::Relaxed)).sum();
-            return format!("{} analyzing... {} functions", spinner[frame], found);
+        // Programs still loading: the stage of the first one
+        let loading = (0..self.programs.len()).find(|&i| self.projects[i].is_none() && self.analysis_errors[i].is_none());
+
+        if let Some(index) = loading {
+            let found: usize = self.loading[..self.main_programs].iter().map(|l| l.functions.load(Ordering::Relaxed)).sum();
+
+            let found = if index < self.main_programs { found } else { self.loading[index].functions.load(Ordering::Relaxed) };
+            let name = self.program_suffix(index);
+
+            return match self.loading[index].stage.load(Ordering::Relaxed) {
+                ANALYSIS => format!("{} 1/3 analysis{}: {} functions found", spinner[frame], name, count(found)),
+                _ => format!("{} 2/3 project{}: modules and cache of {} functions", spinner[frame], name, count(found)),
+            };
         }
 
         let functions: usize = self.analyses.iter().flatten().map(|a| a.functions.len()).sum();
@@ -2839,11 +3068,24 @@ impl App {
         let llm: usize = self.projects.iter().flatten().map(|p| p.llm_running()).sum();
         let dirty = self.projects.iter().flatten().any(|p| p.is_dirty());
 
-        let mut text = format!("{} functions", functions);
+        let mut text = format!("{} functions", count(functions));
 
         if decompiled < decompilable {
-            text.push_str(&format!("  {} decompiled {}/{}", spinner[frame], decompiled, decompilable));
+            let (start, at_start) = *self.decompile_start.get_or_insert((std::time::Instant::now(), decompiled));
+            let ratio = decompiled as f64 / decompilable as f64;
+            let bar: String = (0..16).map(|i| if (i as f64 + 0.5) / 16.0 < ratio { '█' } else { '░' }).collect();
+            text.push_str(&format!("  {} 3/3 decompiling {} {:>3}% {}/{}", spinner[frame], bar, (ratio * 100.0) as usize, count(decompiled), count(decompilable)));
+
+            // Remaining time, from the rate since the decompilation started
+            let elapsed = start.elapsed().as_secs_f64();
+            let done = decompiled.saturating_sub(at_start);
+
+            if elapsed > 5.0 && done > 0 {
+                let left = (decompilable - decompiled) as f64 * elapsed / done as f64;
+                text.push_str(&format!(" ~{}", duration(left)));
+            }
         } else if decompilable > 0 {
+            self.decompile_start = None;
             text.push_str("  all decompiled");
         }
 
@@ -2936,7 +3178,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let title = Line::from(vec![
         Span::styled(" execdump ", Style::default().fg(theme.bg).bg(theme.title).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {} ", app.exec_path.display()), Style::default().fg(theme.fg)),
+        Span::styled(format!(" {} ", app.exec_path.file_name().map_or(app.exec_path.display().to_string(), |n| n.to_string_lossy().to_string())), Style::default().fg(theme.fg)),
         Span::styled(format!(" {} ", program_names.join(", ")), Style::default().fg(theme.dim)),
         Span::styled(format!(" {}", app.status_text()), Style::default().fg(theme.comment)),
     ]);
@@ -3346,6 +3588,61 @@ mod tests {
         app.handle_key(key('q'));
         assert!(app.should_quit);
 
+        let _ = std::fs::remove_dir_all(&location);
+    }
+
+    #[test]
+    fn imports_open_in_their_library() {
+        // ls calls getenv, exported by the C library
+        let path = PathBuf::from("/bin/ls");
+
+        if !path.exists() {
+            return;
+        }
+
+        let location = std::env::temp_dir().join(format!("execdump-tui-libraries-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&location);
+        let mut app = App::new(Exec::ELF(parse_elf(&path).unwrap()), path.clone(), KeyBindings::default(), Some(location.clone()), 1);
+        let ready = |app: &mut App, program: usize| {
+            for _ in 0..3000 {
+                app.poll_analysis();
+                app.poll_projects();
+
+                if app.projects.get(program).is_some_and(|p| p.is_some()) {
+                    return;
+                }
+
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            panic!("{} did not load", program);
+        };
+
+        ready(&mut app, 0);
+        let libc = app.libraries.iter().position(|l| l.needed.name.starts_with("libc.so")).unwrap();
+        assert!(app.explorer_items.contains(&ExplorerItem::Library(libc)));
+
+        let getenv = app.analyses[0].as_ref().unwrap().functions.values().find(|f| f.thunk.as_deref() == Some("getenv")).unwrap().addr;
+        app.open_function(0, getenv, None);
+        let program = app.libraries[libc].program.unwrap();
+        ready(&mut app, program);
+
+        let View::Graph(graph) = app.view() else { panic!("Expected the graph of getenv") };
+        assert_eq!(graph.program, program);
+        assert!(graph.title.starts_with("getenv"), "{}", graph.title);
+        assert!(app.libraries.len() > 2);
+
+        // The library is loaded again with the session
+        app.run_command("w");
+        let mut reopened = App::new(Exec::ELF(parse_elf(&path).unwrap()), path.clone(), KeyBindings::default(), Some(location.clone()), 1);
+        ready(&mut reopened, 0);
+        ready(&mut reopened, program);
+
+        for _ in 0..10 {
+            reopened.poll_analysis();
+        }
+
+        assert!(matches!(reopened.view(), View::Graph(g) if g.program == program && g.title.starts_with("getenv")));
         let _ = std::fs::remove_dir_all(&location);
     }
 

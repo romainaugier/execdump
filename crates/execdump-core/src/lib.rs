@@ -7,6 +7,7 @@ pub mod eh_frame;
 pub mod elf;
 pub mod exec;
 pub mod format;
+pub mod libraries;
 pub mod macho;
 pub mod pe;
 pub mod program;
