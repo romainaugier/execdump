@@ -16,6 +16,7 @@ pub mod ir;
 mod naming;
 pub mod quality;
 mod reaching;
+mod scope;
 mod simplify;
 mod structure;
 mod typing;

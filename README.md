@@ -261,6 +261,11 @@ Decompiler:
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the
     end of the blocks they come from) share one variable, so the copies between them disappear (a parameter keeps
     its variable)
+  - :heavy_check_mark: Declarations in the narrowest block: a local variable is declared at the start of the
+    narrowest block that holds all its uses, when entering it always writes the variable before reading it (a
+    value carried from one iteration to the next stays declared around the loop; blocks with labels and the cases
+    of the switches are left out), and at its first assignment when that is a statement of the block that does
+    not read it (`int fd = open(file, 66);`)
   - :heavy_check_mark: Differential test of the C backend: random programs with branches and loops are built as LLVM
     IR, optimized like the lifted code, decompiled, and the C is run by an interpreter, it must return what the
     programs return

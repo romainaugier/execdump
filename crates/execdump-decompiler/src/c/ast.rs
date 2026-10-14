@@ -2,8 +2,10 @@
  * C abstract syntax tree and printer, every statement keeps the address it comes from
  */
 
+use super::scope::{self, list_id, ListId};
 use crate::types::{CType, FuncType, Param, Prototype};
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 pub type VarId = usize;
@@ -261,6 +263,8 @@ struct Printer<'a> {
     lines: Vec<Option<u64>>,
     /// Note of the statement being printed, at the end of its first line
     note: Option<String>,
+    /// Local variables declared at the start of the nested blocks
+    declared: HashMap<ListId, Vec<VarId>>,
 }
 
 const INDENT: &str = "    ";
@@ -416,9 +420,49 @@ impl Printer<'_> {
         return format!("{} = {}", target_text, self.expr(value));
     }
 
+    /// The statements of a block, after the declarations of its variables: a variable first written by a
+    /// statement of the block that does not read it is declared there (int v = ...;), the others at the start
     fn block(&mut self, stmts: &[Stmt], depth: usize) {
-        for stmt in stmts {
-            self.stmt(stmt, depth);
+        let vars = self.declared.get(&list_id(stmts)).cloned().unwrap_or_default();
+        let mut initialized: HashMap<usize, VarId> = HashMap::new();
+        let mut declared_first = Vec::new();
+
+        if !vars.is_empty() {
+            let mentions: Vec<Vec<VarId>> = stmts.iter().map(|s| mentioned(std::slice::from_ref(s))).collect();
+
+            for var in vars {
+                let first = mentions.iter().position(|m| m.contains(&var));
+
+                // A label is followed by a statement, not a declaration
+                let after_label = |i: usize| i > 0 && matches!(stmts[i - 1].kind, StmtKind::Label(_));
+
+                match first.map(|i| (i, &stmts[i].kind)) {
+                    Some((i, StmtKind::Assign(Expr::Var(v), value))) if *v == var && !value.uses(var) && !initialized.contains_key(&i) && !after_label(i) => {
+                        initialized.insert(i, var);
+                    }
+                    _ => declared_first.push(var),
+                }
+            }
+        }
+
+        for &var in declared_first.iter() {
+            let text = format!("{};", self.function.vars[var].ty.declare(&self.function.vars[var].name));
+            self.line(depth, &text, None);
+        }
+
+        if !declared_first.is_empty() && list_id(stmts) == list_id(&self.function.body) {
+            self.line(0, "", None);
+        }
+
+        for (i, stmt) in stmts.iter().enumerate() {
+            match (initialized.get(&i), &stmt.kind) {
+                (Some(&var), StmtKind::Assign(_, value)) => {
+                    self.note = stmt.note.clone();
+                    let text = format!("{} = {};", self.function.vars[var].ty.declare(&self.function.vars[var].name), self.expr(value));
+                    self.line(depth, &text, stmt.addr);
+                }
+                _ => self.stmt(stmt, depth),
+            }
         }
     }
 
@@ -439,7 +483,7 @@ impl Printer<'_> {
                 // else if chains
                 let mut otherwise = otherwise;
 
-                while let [Stmt { kind: StmtKind::If(cond, then, rest), addr, .. }] = otherwise.as_slice() {
+                while let ([Stmt { kind: StmtKind::If(cond, then, rest), addr, .. }], false) = (otherwise.as_slice(), self.declared.contains_key(&list_id(otherwise))) {
                     let text = format!("}} else if ({}) {{", self.expr(cond));
                     self.line(depth, &text, *addr);
                     self.block(then, depth + 1);
@@ -577,7 +621,7 @@ impl CFunction {
     }
 
     pub fn print(&self) -> Printed {
-        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None };
+        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
 
         let signature = self.signature();
 
@@ -594,30 +638,64 @@ impl CFunction {
         printer.line(0, &signature, Some(self.addr));
         printer.line(0, "{", None);
 
-        // Local variables (the parameters are declared by the signature)
-        let mut locals: Vec<(String, String)> = Vec::new();
+        // Local variables (the parameters are declared by the signature), in the narrowest block they can be
         let mut used = vec![false; self.vars.len()];
         mark_used(&self.body, &mut used);
 
-        for (id, var) in self.vars.iter().enumerate() {
-            if used[id] && !self.params.contains(&id) {
-                locals.push((var.ty.declare(&var.name), var.name.clone()));
-            }
-        }
-
-        for (declaration, _) in locals.iter() {
-            printer.line(1, &format!("{};", declaration), None);
-        }
-
-        if !locals.is_empty() {
-            printer.line(0, "", None);
-        }
-
+        let locals: Vec<VarId> = (0..self.vars.len()).filter(|id| used[*id] && !self.params.contains(id)).collect();
+        printer.declared = scope::declarations(self, &locals);
         printer.block(&self.body, 1);
         printer.line(0, "}", None);
 
         return Printed { text: printer.out, lines: printer.lines };
     }
+}
+
+/// The variables statements use, once each
+fn mentioned(stmts: &[Stmt]) -> Vec<VarId> {
+    let mut vars = Vec::new();
+    let expr = |e: &Expr, vars: &mut Vec<VarId>| {
+        e.visit(&mut |e| {
+            if let Expr::Var(v) = e {
+                if !vars.contains(v) {
+                    vars.push(*v);
+                }
+            }
+        })
+    };
+
+    let mut stack: Vec<&Stmt> = stmts.iter().collect();
+
+    while let Some(stmt) = stack.pop() {
+        match &stmt.kind {
+            StmtKind::Expr(e) | StmtKind::NoReturn(e) | StmtKind::Return(Some(e)) => expr(e, &mut vars),
+            StmtKind::Assign(a, b) => {
+                expr(a, &mut vars);
+                expr(b, &mut vars);
+            }
+            StmtKind::If(c, a, b) => {
+                expr(c, &mut vars);
+                stack.extend(a.iter().chain(b.iter()));
+            }
+            StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
+                expr(c, &mut vars);
+                stack.extend(body.iter());
+            }
+            StmtKind::For(init, c, step, body) => {
+                expr(c, &mut vars);
+                stack.push(init);
+                stack.push(step);
+                stack.extend(body.iter());
+            }
+            StmtKind::Switch(c, cases, default) => {
+                expr(c, &mut vars);
+                stack.extend(cases.iter().flat_map(|case| case.body.iter()).chain(default.iter()));
+            }
+            _ => {}
+        }
+    }
+
+    return vars;
 }
 
 /// Marks the variables used by statements
@@ -680,7 +758,7 @@ mod tests {
             globals: Vec::new(),
             inlined: false,
         };
-        let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None };
+        let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
 
         let sum = Expr::binary(BinaryOp::Add, a.clone(), b.clone());
@@ -693,6 +771,35 @@ mod tests {
         assert_eq!(printer.expr(&Expr::Str("hi\n".to_string())), "\"hi\\n\"");
         assert_eq!(printer.expr(&Expr::Str(crate::lift::literal("T3\u{c7}8x\u{c0}z".as_bytes()))), "\"T3\\xc3\\x87\" \"8x\\xc3\\x80z\"");
         assert_eq!(printer.expr(&Expr::Int(0x401000)), "0x401000");
+    }
+
+    #[test]
+    fn narrowest_declarations() {
+        let int = CType::int(32);
+        let var = |name: &str| Var { name: name.to_string(), ty: int.clone() };
+        let assign = |v: VarId, e: Expr| Stmt::new(StmtKind::Assign(Expr::Var(v), e), None);
+        let call = |v: VarId| Stmt::new(StmtKind::Expr(Expr::Call(Box::new(Expr::Name("g".to_string())), vec![Expr::Var(v)])), None);
+
+        // t is written then read in each iteration: in the loop; s is carried from one to the next: before it;
+        // u is written in one branch only, then read after the if: declared first, at the start
+        let body = vec![
+            assign(2, Expr::Int(0)),
+            Stmt::new(
+                StmtKind::While(
+                    Expr::Var(0),
+                    vec![assign(1, Expr::binary(BinaryOp::Add, Expr::Var(0), Expr::Int(1))), call(1), assign(2, Expr::binary(BinaryOp::Add, Expr::Var(2), Expr::Var(1)))],
+                ),
+                None,
+            ),
+            Stmt::new(StmtKind::If(Expr::Var(0), vec![assign(3, Expr::Int(1))], Vec::new()), None),
+            call(3),
+            Stmt::new(StmtKind::Return(Some(Expr::Var(2))), None),
+        ];
+
+        let function = CFunction { name: "f".to_string(), ret: int.clone(), params: vec![0], variadic: false, vars: vec![var("n"), var("t"), var("s"), var("u")], body, addr: 0, globals: Vec::new(), inlined: false };
+        let text = function.print().text;
+
+        assert!(text.starts_with("int f(int n)\n{\n    int u;\n\n    int s = 0;\n    while (n) {\n        int t = n + 1;\n"), "{}", text);
     }
 
     #[test]
@@ -720,13 +827,14 @@ mod tests {
         };
 
         let printed = function.print();
-        assert_eq!(printed.text, "int f(int n)\n{\n    int i;\n\n    i = 0;\n    while (i < n) {\n        i++;\n    }\n    return i;\n}\n");
+        assert_eq!(printed.text, "int f(int n)\n{\n    int i = 0;\n    while (i < n) {\n        i++;\n    }\n    return i;\n}\n");
 
         // Consecutive case values are a range
         let switch = Stmt::new(StmtKind::Switch(Expr::Var(0), vec![Case { values: vec![5, 1, 2, 3, 7], body: vec![Stmt::new(StmtKind::Return(Some(Expr::Int(1))), None)] }], Vec::new()), None);
         let function = CFunction { body: vec![switch], ..function };
         assert!(function.print().text.contains("case 1 ... 3:\n        case 5:\n        case 7:\n"), "{}", function.print().text);
         assert_eq!(printed.lines[0], Some(0x1000));
-        assert_eq!(printed.lines[6], Some(3));
+        assert_eq!(printed.lines[2], Some(1));
+        assert_eq!(printed.lines[4], Some(3));
     }
 }
