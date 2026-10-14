@@ -227,7 +227,7 @@ Disassembly:
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
   - :heavy_check_mark: Shared libraries a binary needs, found where the loader looks for them (ELF: RPATH, LD_LIBRARY_PATH, RUNPATH, ld.so.conf, default directories; PE: next to the binary, PATH; Mach-O: @rpath, @loader_path, @executable_path)
-  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64)
+  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...)
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
@@ -246,7 +246,12 @@ Decompiler:
   - :heavy_check_mark: CFG recovery
   - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
   - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
-  - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
+  - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths).
+    After a call the registers the callee does not preserve hold nothing known, so a register the function received
+    is not passed through it: what the callee may write is found from its instructions and its callees (compilers
+    keep values in the other registers across calls to the functions they know, gcc's `-fipa-ra`), the imports
+    and the indirect calls may write any. A call whose arguments are guessed passes the registers written on every
+    path to it, and a register only left as it was on some paths to a return is not a parameter
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of

@@ -892,3 +892,26 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
 
     return if writes && !partial { Some(false) } else if writes { Some(true) } else { None };
 }
+
+/// Full registers an instruction may write, besides the flags (a call writes what its callee writes)
+pub fn written(insn: &Insn) -> u128 {
+    let mnemonic = insn.mnemonic.as_str();
+    let reg = |op: Option<&Op>| -> u128 { op.and_then(|op| op.reg()).map_or(0, |r| 1u128 << r.reg) };
+    let base = match insn.ops.iter().find(|op| matches!(op, Op::Mem { .. })) {
+        Some(Op::Mem { base, .. }) if insn.writeback => 1u128 << base.reg,
+        _ => 0,
+    };
+
+    let stores = mnemonic.starts_with("st") && !mnemonic.starts_with("stx") && !mnemonic.starts_with("stlx");
+
+    let written = match mnemonic {
+        _ if stores => 0,
+        "cmp" | "cmn" | "tst" | "fcmp" | "fcmpe" | "ccmp" | "ccmn" | "fccmp" | "fccmpe" => 0,
+        "b" | "bl" | "blr" | "br" | "ret" | "cbz" | "cbnz" | "tbz" | "tbnz" | "nop" | "prfm" | "dmb" | "dsb" | "isb" | "hint" | "bti" | "brk" | "svc" => 0,
+        _ if mnemonic.starts_with("b.") => 0,
+        "ldp" | "ldnp" | "ldpsw" | "ldxp" | "ldaxp" => reg(insn.ops.first()) | reg(insn.ops.get(1)),
+        _ => reg(insn.ops.first()),
+    };
+
+    return written | base;
+}

@@ -209,7 +209,7 @@ impl Abi {
                 stack_args: 40,
                 slot_size: 8,
                 return_address: 8,
-                callee_saved: r(&["rbx", "rbp", "rdi", "rsi", "r12", "r13", "r14", "r15"]),
+                callee_saved: r(&["rbx", "rbp", "rdi", "rsi", "r12", "r13", "r14", "r15", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"]),
             },
             Architecture::X86_64 => Abi {
                 int_args: r(&["rdi", "rsi", "rdx", "rcx", "r8", "r9"]),
@@ -245,7 +245,8 @@ impl Abi {
                 stack_args: 0,
                 slot_size: 8,
                 return_address: 0,
-                callee_saved: r(&["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30"]),
+                // x30 holds the return address of the function, v8 to v15 keep their low 64 bits
+                callee_saved: r(&["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
             },
         }
     }

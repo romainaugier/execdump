@@ -167,6 +167,10 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Op
             }
             // The low bits of these results only depend on the low bits of their operands
             InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, memo),
+            // A value joined with others is used where the join is (a register left as it was on some paths
+            // only reaching the return sinks is not a parameter)
+            InstructionOpcode::Phi => user_demanded(user, depth, memo),
+            InstructionOpcode::Select if operand(user, 0) != Some(value) => user_demanded(user, depth, memo),
             _ => Some(width),
         };
 

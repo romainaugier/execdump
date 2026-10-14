@@ -120,6 +120,8 @@ pub struct Decompiler<'a> {
     trivial: RefCell<HashMap<u64, Option<Rc<Trivial>>>>,
     /// Functions whose calls are being inlined (a trivial function calling itself stays a call)
     inlining: RefCell<HashSet<u64>>,
+    /// Registers each function may write, for its callers
+    clobbered: RefCell<HashMap<u64, u128>>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -164,6 +166,7 @@ impl<'a> Decompiler<'a> {
             epoch: Cell::new(0),
             trivial: RefCell::new(HashMap::new()),
             inlining: RefCell::new(HashSet::new()),
+            clobbered: RefCell::new(HashMap::new()),
         });
     }
 
@@ -596,6 +599,46 @@ impl<'a> Decompiler<'a> {
     }
 
     fn compute_signature(&self, addr: u64) -> Signature {
+        let sig = self.compute_signature_without_clobbers(addr);
+        return Signature { clobbers: self.clobbers(addr), ..sig };
+    }
+
+    /// Registers a function of the program may write: its instructions and its callees (the ones that are
+    /// not known may write anything)
+    fn clobbers(&self, addr: u64) -> u128 {
+        if let Some(&known) = self.clobbered.borrow().get(&addr) {
+            return known;
+        }
+
+        // In a cycle of calls, the callers seen first may write anything (as the compiler assumes for the
+        // functions it did not compile yet)
+        self.clobbered.borrow_mut().insert(addr, lift::CLOBBERS_ALL);
+
+        let mut mask = 0u128;
+
+        match self.analysis.functions.get(&addr).filter(|f| f.thunk.is_none()) {
+            None => mask = lift::CLOBBERS_ALL,
+            Some(function) => {
+                for insn in function.blocks.values().flat_map(|b| b.insns.iter()) {
+                    let written = self.program.read(insn.addr, insn.size as usize).and_then(|bytes| lift::written_registers(&self.regs, &self.cs, bytes, insn.addr));
+                    mask |= written.unwrap_or(lift::CLOBBERS_ALL);
+                }
+
+                for call in function.calls.iter() {
+                    mask |= match call.target {
+                        CallTarget::Function(callee) if callee != addr => self.clobbers(callee),
+                        CallTarget::Function(_) => 0,
+                        _ => lift::CLOBBERS_ALL,
+                    };
+                }
+            }
+        }
+
+        self.clobbered.borrow_mut().insert(addr, mask);
+        return mask;
+    }
+
+    fn compute_signature_without_clobbers(&self, addr: u64) -> Signature {
         let name = self.function_name(addr);
         let function = self.analysis.functions.get(&addr);
         let noreturn = function.is_some_and(|f| f.noreturn);
@@ -761,7 +804,7 @@ impl<'a> Decompiler<'a> {
             self.add_prototype(Prototype { name: name.to_string(), ty: prototype.ty.clone() });
         }
 
-        return Signature { name: name.to_string(), params, ret, variadic: prototype.ty.variadic, noreturn: false, guessed: false };
+        return Signature { name: name.to_string(), params, ret, variadic: prototype.ty.variadic, noreturn: false, guessed: false, clobbers: lift::CLOBBERS_ALL };
     }
 
     /// Machine level type of a C type, None for void

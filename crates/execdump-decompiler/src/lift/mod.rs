@@ -97,6 +97,22 @@ pub struct Signature {
     pub noreturn: bool,
     /// Unknown parameters: a call passes the argument registers written before it
     pub guessed: bool,
+    /// Registers the function may write (one bit per full register of the register file): after a call,
+    /// the ones the callee does not preserve hold nothing known (compilers keep values in the others
+    /// across calls to the functions they know)
+    pub clobbers: u128,
+}
+
+/// The callee may write any register
+pub const CLOBBERS_ALL: u128 = u128::MAX;
+
+/// Full registers a machine instruction may write besides the flags, None when it cannot be decoded (a
+/// call writes what its callee writes, the caller adds it)
+pub fn written_registers(regs: &RegisterFile, cs: &capstone::Capstone, bytes: &[u8], addr: u64) -> Option<u128> {
+    return match Insn::decode(regs.arch, regs, cs, bytes, addr)? {
+        Insn::X86(insn) => Some(x86::written(&insn, regs)),
+        Insn::Aarch64(insn) => Some(aarch64::written(&insn)),
+    };
 }
 
 /// What the lifter needs to know about the program
@@ -124,13 +140,13 @@ pub fn discovery_signature(name: &str, abi: &Abi, regs: &RegisterFile, stack_par
     params.extend(float);
     params.extend(stack_params.iter().map(|&offset| Value { loc: Loc::Stack(offset), ty: LType::Int(abi.slot_size as u32 * 8), name: None }));
 
-    return Signature { name: name.to_string(), params, ret: None, variadic: false, noreturn: false, guessed: false };
+    return Signature { name: name.to_string(), params, ret: None, variadic: false, noreturn: false, guessed: false, clobbers: CLOBBERS_ALL };
 }
 
 /// Signature of a function nothing is known about: int f(...), with the arguments of each call guessed
 pub fn guessed_signature(name: &str, abi: &Abi) -> Signature {
     let ret = Value { loc: Loc::Reg(abi.int_ret), ty: LType::Int(32), name: None };
-    return Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: true, noreturn: false, guessed: true };
+    return Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: true, noreturn: false, guessed: true, clobbers: CLOBBERS_ALL };
 }
 
 /// Printable text: ASCII, UTF-8 characters or a few other bytes
@@ -771,13 +787,18 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.produced_flags.set(false);
         self.reads_flags.set(false);
 
-        let mut written = BTreeMap::new();
+        // The registers written on every path to the block are call argument candidates (on some paths
+        // only, a register can be the value the function received)
+        let mut written: Option<BTreeMap<Reg, u32>> = None;
 
         for pred in block.preds.iter().filter_map(|p| self.written_out.get(p)) {
-            written.extend(pred.iter().map(|(&r, &b)| (r, b)));
+            written = Some(match written {
+                None => pred.clone(),
+                Some(known) => known.into_iter().filter_map(|(r, b)| pred.get(&r).map(|&other| (r, b.max(other)))).collect(),
+            });
         }
 
-        *self.written.borrow_mut() = written;
+        *self.written.borrow_mut() = written.unwrap_or_default();
 
         for insn in insns.iter() {
             self.addr = match insn {
@@ -1354,6 +1375,19 @@ impl<'ctx> Lifter<'ctx, '_> {
                 }
             }
         };
+
+        // The registers the callee does not have to preserve hold nothing known after the call: a value
+        // the function received in one is not passed through the call
+        let result = match (&sig.ret, call.try_as_basic_value().basic()) {
+            (Some(Value { loc: Loc::Reg(reg), .. }), Some(_)) => Some(*reg),
+            _ => None,
+        };
+
+        for (reg, info) in self.env.regs.regs.iter().enumerate() {
+            if sig.clobbers >> reg & 1 == 1 && reg != self.env.abi.stack_pointer && Some(reg) != result && !self.env.abi.callee_saved.contains(&reg) {
+                llvm!(self.builder.build_store(self.regs[reg], self.int(info.bits).get_undef()));
+            }
+        }
 
         if let (Some(ret), Some(value)) = (&sig.ret, call.try_as_basic_value().basic()) {
             if let Loc::Reg(reg) = ret.loc {

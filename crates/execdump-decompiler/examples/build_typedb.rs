@@ -20,7 +20,10 @@ const UNIX_HEADERS: &[&str] = &[
     "sys/socket.h", "sys/stat.h", "sys/types.h", "sys/mman.h", "sys/wait.h", "sys/time.h", "sys/times.h",
     "sys/resource.h", "sys/select.h", "sys/ioctl.h", "sys/uio.h", "sys/utsname.h", "sys/epoll.h", "sys/ptrace.h",
     "sys/random.h", "sys/sendfile.h", "sys/prctl.h", "iconv.h", "langinfo.h", "libgen.h", "search.h", "fnmatch.h",
-    "regex.h", "err.h", "execinfo.h", "malloc.h", "ucontext.h",
+    "regex.h", "err.h", "execinfo.h", "malloc.h", "ucontext.h", "libintl.h", "error.h", "stdio_ext.h", "sys/statfs.h",
+    "sys/statvfs.h", "mntent.h", "sys/xattr.h", "uchar.h", "sys/file.h", "sys/inotify.h", "sys/sysinfo.h", "sys/eventfd.h",
+    "sys/timerfd.h", "sys/signalfd.h", "sys/un.h", "netinet/tcp.h", "pty.h", "utmp.h", "shadow.h", "fts.h", "obstack.h",
+    "argp.h", "wordexp.h",
 ];
 
 const WINDOWS_HEADERS: &[&str] = &[

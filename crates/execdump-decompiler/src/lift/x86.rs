@@ -943,3 +943,51 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         None
     };
 }
+
+/// Full registers an instruction may write, besides the flags (a call writes what its callee writes)
+pub fn written(insn: &Insn, regs: &RegisterFile) -> u128 {
+    let named = |names: &[&str]| -> u128 { names.iter().filter_map(|n| regs.index(n)).fold(0, |mask, r| mask | 1 << r) };
+    let wide = regs.arch == execdump_core::disasm::Architecture::X86_64;
+    let (ax, cx, dx, bx, sp, bp, si, di) = if wide { ("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi") } else { ("eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi") };
+    let operands = |ops: &[Op]| -> u128 { ops.iter().filter_map(|op| if let Op::Reg(r) = op { Some(1u128 << r.reg) } else { None }).fold(0, |a, b| a | b) };
+    let first = insn.ops.first().map_or(0, |op| operands(std::slice::from_ref(op)));
+    let mnemonic = insn.mnemonic.as_str();
+
+    // String instructions: their operands are memory (movsd xmm0, xmm1 is not one)
+    let string = matches!(mnemonic.trim_end_matches(['b', 'w', 'd', 'q']), "movs" | "stos" | "lods" | "scas" | "cmps") && insn.ops.iter().all(|op| matches!(op, Op::Mem(_)));
+
+    if string {
+        let counter = if insn.rep { named(&[cx]) } else { 0 };
+        let accumulator = if mnemonic.starts_with("lods") { named(&[ax]) } else { 0 };
+        let pointers = match &mnemonic[..4] {
+            "movs" | "cmps" => named(&[si, di]),
+            "lods" => named(&[si]),
+            _ => named(&[di]),
+        };
+
+        return counter | accumulator | pointers;
+    }
+
+    return match mnemonic {
+        "call" | "jmp" | "ret" | "retn" | "nop" | "endbr64" | "endbr32" | "hlt" | "ud2" | "int3" | "pause" | "lfence" | "sfence" | "mfence" | "jrcxz" | "jecxz" => 0,
+        "cmp" | "test" | "bt" | "ucomisd" | "ucomiss" | "comisd" | "comiss" | "ptest" | "vptest" | "vucomisd" | "vucomiss" | "vcomisd" | "vcomiss" => 0,
+        _ if mnemonic.starts_with('j') || mnemonic.starts_with("prefetch") => 0,
+        "push" | "pushf" | "pushfq" => named(&[sp]),
+        "pop" | "popf" | "popfq" => named(&[sp]) | first,
+        "leave" => named(&[sp, bp]),
+        "mul" | "div" | "idiv" => named(&[ax, dx]),
+        "imul" if insn.ops.len() == 1 => named(&[ax, dx]),
+        "cdq" | "cqo" | "cwd" => named(&[dx]),
+        "cdqe" | "cwde" | "cbw" => named(&[ax]),
+        "cpuid" => named(&[ax, bx, cx, dx]),
+        "rdtsc" => named(&[ax, dx]),
+        "rdtscp" => named(&[ax, cx, dx]),
+        "syscall" => named(&[ax, cx, "r11"]),
+        "int" | "sysenter" => named(&[ax, cx, dx]),
+        "xchg" | "xadd" => operands(&insn.ops),
+        "cmpxchg" => named(&[ax]) | first,
+        "cmpxchg8b" | "cmpxchg16b" => named(&[ax, dx]),
+        "loop" | "loope" | "loopne" => named(&[cx]),
+        _ => first,
+    };
+}
