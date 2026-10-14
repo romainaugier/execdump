@@ -122,6 +122,8 @@ pub struct Decompiler<'a> {
     inlining: RefCell<HashSet<u64>>,
     /// Registers each function may write, for its callers
     clobbered: RefCell<HashMap<u64, u128>>,
+    /// Prototypes of the functions passed to known ones as callbacks (qsort, signal, atexit...)
+    callbacks: std::cell::OnceCell<HashMap<u64, FuncType>>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -167,6 +169,7 @@ impl<'a> Decompiler<'a> {
             trivial: RefCell::new(HashMap::new()),
             inlining: RefCell::new(HashSet::new()),
             clobbered: RefCell::new(HashMap::new()),
+            callbacks: std::cell::OnceCell::new(),
         });
     }
 
@@ -660,6 +663,10 @@ impl<'a> Decompiler<'a> {
             return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
         }
 
+        if let Some(ty) = self.callbacks().get(&addr) {
+            return Signature { noreturn, ..self.signature_from_prototype(&Prototype { name: name.clone(), ty: ty.clone() }, &name) };
+        }
+
         let mut discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
 
         // A result nobody reads is a leftover in the return register
@@ -674,6 +681,69 @@ impl<'a> Decompiler<'a> {
         }
 
         return Signature { name, noreturn, ..discovered };
+    }
+
+    /// The functions of the program whose address is passed to a parameter of a known function that is a
+    /// pointer to a function, with its type (the ones passed to parameters of different types are left out)
+    fn callbacks(&self) -> &HashMap<u64, FuncType> {
+        return self.callbacks.get_or_init(|| {
+            let signature = |target: &CallTarget| self.call_signature(target);
+            let global_name = |addr: u64| self.global_name(addr);
+            let env = self.env(&signature, &global_name);
+            let mut found: HashMap<u64, Option<FuncType>> = HashMap::new();
+
+            for caller in self.analysis.functions.values() {
+                for call in caller.calls.iter() {
+                    let import = match &call.target {
+                        CallTarget::Import(name) => Some(name.as_str()),
+                        CallTarget::Function(addr) => self.analysis.functions.get(addr).and_then(|f| f.thunk.as_deref()),
+                        CallTarget::Indirect => None,
+                    };
+
+                    let Some(prototype) = import.and_then(|name| self.typedb.function(name)) else {
+                        continue;
+                    };
+
+                    let callbacks: Vec<(usize, FuncType)> = prototype
+                        .ty
+                        .params
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, p)| match self.typedb.resolve(&p.ty) {
+                            CType::Pointer(to) => match self.typedb.resolve(to) {
+                                CType::Function(ty) => Some((i, (**ty).clone())),
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect();
+
+                    if callbacks.is_empty() {
+                        continue;
+                    }
+
+                    let params = self.signature_from_prototype(&prototype, &prototype.name).params;
+
+                    for (index, ty) in callbacks {
+                        let Some(Loc::Reg(reg)) = params.get(index).map(|p| p.loc) else {
+                            continue;
+                        };
+
+                        let Some(target) = lift::argument_address(&env, &self.cs, caller, call.addr, reg).filter(|t| self.analysis.functions.contains_key(t)) else {
+                            continue;
+                        };
+
+                        let known = found.entry(target).or_insert_with(|| Some(ty.clone()));
+
+                        if known.as_ref() != Some(&ty) {
+                            *known = None;
+                        }
+                    }
+                }
+            }
+
+            found.into_iter().filter_map(|(addr, ty)| Some((addr, ty?))).collect()
+        });
     }
 
     /// Whether one of the direct callers reads the return register (true when there is none)
@@ -1117,6 +1187,19 @@ mod tests {
 
             let code = decompiler.c_code(skip_spaces).unwrap();
             assert!(code.starts_with("char *skip_spaces(char *a1)"), "{}: {}", name, code);
+        }
+    }
+
+    #[test]
+    fn callback_prototypes() {
+        // A function passed to qsort has the prototype of its parameter (the arguments in registers only)
+        for name in ["elf_x86_64_quality", "elf_aarch64_quality"] {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+
+            let code = decompiler.c_code(function(&analysis, "by_value")).unwrap();
+            assert!(code.starts_with("int by_value(const void *a1, const void *a2)"), "{}: {}", name, code);
         }
     }
 

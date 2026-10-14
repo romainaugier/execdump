@@ -401,6 +401,42 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
     return true;
 }
 
+/// Address a register holds at a call, when the instruction that last writes it before the call computes
+/// or loads it as a constant (lea, adrp+add, mov): in the block of the call or the ones only reaching it,
+/// without a call between
+pub fn argument_address(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg) -> Option<u64> {
+    let mut block = caller.block_containing(call)?;
+    let mut end = call;
+
+    for _ in 0..4 {
+        for insn in block.insns.iter().rev().filter(|i| i.addr < end) {
+            if matches!(insn.flow, Flow::Call(_) | Flow::IndirectCall) {
+                return None;
+            }
+
+            let bytes = env.program.read(insn.addr, insn.size as usize)?;
+            let decoded = Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr)?;
+            let written = match &decoded {
+                Insn::X86(insn) => x86::written(insn, env.regs),
+                Insn::Aarch64(insn) => aarch64::written(insn),
+            };
+
+            if written >> reg & 1 == 1 || decoded.register_access(reg) == Some(false) {
+                return insn.imm_ref;
+            }
+        }
+
+        let [pred] = block.preds.as_slice() else {
+            return None;
+        };
+
+        block = caller.blocks.get(pred)?;
+        end = block.end;
+    }
+
+    return None;
+}
+
 pub fn reverse_post_order(function: &Function) -> Vec<u64> {
     let mut visited = BTreeSet::new();
     let mut order = Vec::new();

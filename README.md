@@ -254,7 +254,11 @@ Decompiler:
     path to it, and a register only left as it was on some paths to a return is not a parameter. A register used
     as an address (after adding constants to it, or joined with others that are) is a pointer, and so is a result
     that is always one (a pointer, such a parameter, an offset from them, or null), what they point to comes from
-    the accesses of the function
+    the accesses of the function. A function whose address is passed to a parameter of a known function that is
+    a pointer to a function (`qsort`, `bsearch`, `signal`, `atexit`, `pthread_create`, `__libc_start_main`...)
+    has the prototype of that parameter (`int compare(const void *a1, const void *a2)`), the address is the
+    constant the instruction that last writes the register of the argument before the call computes (the
+    arguments passed on the stack are not followed)
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of

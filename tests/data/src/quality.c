@@ -6,6 +6,7 @@ __SIZE_TYPE__ strlen(const char *s);
 int printf(const char *format, ...);
 int puts(const char *s);
 void abort(void);
+void qsort(void *base, __SIZE_TYPE__ count, __SIZE_TYPE__ size, int (*compare)(const void *, const void *));
 
 int state;
 
@@ -102,11 +103,18 @@ __attribute__((noinline)) char *skip_spaces(char *text)
     return text;
 }
 
+/* Passed to qsort, it gets the prototype of its parameter */
+__attribute__((noinline)) int by_value(const void *a, const void *b)
+{
+    return *(const int *)a - *(const int *)b;
+}
+
 int results;
 
 void _start(void)
 {
     results = parse_opt(state, skip_spaces("  abc")) + joined(state, 3);
+    qsort(&results, 1, sizeof(results), by_value);
     for (;;) {
     }
 }
