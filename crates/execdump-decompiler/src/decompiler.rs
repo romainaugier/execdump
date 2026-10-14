@@ -51,7 +51,7 @@ const MAX_TRIVIAL_INSNS: usize = 32;
 
 /// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
 /// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
-const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
+pub(crate) const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
 
 /// Signatures shared by the decompilers of a program (one per thread): a signature is discovered once
 #[derive(Clone, Default)]

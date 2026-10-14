@@ -8,6 +8,9 @@
 
 pub mod ast;
 mod build;
+mod coalesce;
+#[cfg(test)]
+mod differential;
 pub mod inline;
 pub mod ir;
 mod naming;

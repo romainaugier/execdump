@@ -46,6 +46,15 @@ struct Decision {
 const MAX_DECISION_BLOCKS: usize = 64;
 const MAX_CASES: usize = 4096;
 
+/// Type of a value of a smaller type in an operation of C: an int
+fn promoted(ty: CType) -> CType {
+    return match ty.unqualified() {
+        CType::Int { bits, .. } if *bits < 32 => CType::int(32),
+        CType::Bool | CType::Char => CType::int(32),
+        _ => ty,
+    };
+}
+
 pub struct Built {
     pub blocks: Vec<SBlock>,
     pub vars: Vec<Var>,
@@ -206,69 +215,6 @@ impl<'a> Builder<'a> {
 
         sizes[id] = Some(size);
         return size;
-    }
-
-    /// A value assigned to a phi on the back edge shares the phi variable when the phi is not
-    /// needed anymore once the value is computed (i = i + 1 instead of v = i + 1; i = v)
-    fn coalesce(&mut self) {
-        let f = self.f;
-
-        for phi in 0..f.values.len() {
-            let ValueKind::Inst { op: Op::Phi, operands, .. } = &f.values[phi].kind else {
-                continue;
-            };
-
-            let Some(var) = self.var_of[phi] else {
-                continue;
-            };
-
-            for &value in operands.iter() {
-                let Some(own) = self.var_of[value] else {
-                    continue;
-                };
-
-                if own == var || f.op(value) == Some(Op::Phi) || !self.dead_after(phi, value) {
-                    continue;
-                }
-
-                // The value must not feed another phi of the same block (both would share the variable)
-                let header = f.block_of(phi);
-                if f.values[value].uses.iter().filter(|&&u| f.op(u) == Some(Op::Phi) && f.block_of(u) == header).count() > 1 {
-                    continue;
-                }
-
-                self.var_of[value] = Some(var);
-            }
-        }
-    }
-
-    /// The phi is only used before the value, in the value's block (or by the value itself)
-    fn dead_after(&self, phi: ValueId, value: ValueId) -> bool {
-        let Some((block, position)) = self.position(value) else {
-            return false;
-        };
-
-        return self.f.values[phi].uses.iter().all(|&u| {
-            if self.f.op(u) == Some(Op::Phi) && self.f.block_of(u) == self.f.block_of(phi) {
-                return true;
-            }
-
-            // Inlined uses are evaluated where their expression is
-            let root = self.evaluated_at(u);
-            root == value || matches!(self.position(root), Some((b, p)) if b == block && p < position)
-        });
-    }
-
-    /// The statement an inlined value is evaluated in (the value itself when it is a variable)
-    fn evaluated_at(&self, mut id: ValueId) -> ValueId {
-        while self.var_of[id].is_none() {
-            match self.f.values[id].uses.first() {
-                Some(&user) if self.f.op(user) != Some(Op::Phi) => id = user,
-                _ => break,
-            }
-        }
-
-        return id;
     }
 
     /*
@@ -436,12 +382,42 @@ impl<'a> Builder<'a> {
     }
 
     /// Operand of an unsigned or signed operation, cast when its type has the other signedness
+    /// The operand is cast when the expression written for it has the other signedness in C (an inlined
+    /// expression has the type C gives it from its variables, not always the one inferred for the value)
     fn signed_operand(&self, id: ValueId, signed: bool) -> Expr {
         let expr = self.expr(id);
+        let written = self.written_type(&expr).map(promoted).unwrap_or_else(|| self.ty(id).clone());
 
-        return match self.ty(id) {
-            CType::Int { bits, signed: s } if *s != signed && !matches!(expr, Expr::Int(_)) => Expr::cast(CType::Int { bits: *bits, signed }, expr),
+        let bits = match self.ty(id) {
+            CType::Int { bits, .. } => *bits,
+            _ => self.f.values[id].ty.bits() as u16,
+        };
+
+        return match written {
+            CType::Int { signed: s, .. } if s != signed && !matches!(expr, Expr::Int(_)) && bits > 0 => Expr::cast(CType::Int { bits, signed }, expr),
             _ => expr,
+        };
+    }
+
+    /// C type of an expression as written: from its variables and casts, with the conversions of C (None
+    /// for literals and what is not known)
+    fn written_type(&self, e: &Expr) -> Option<CType> {
+        return match e {
+            Expr::Var(v) => Some(self.vars[*v].ty.clone()),
+            Expr::Cast(ty, _) => Some(ty.clone()),
+            Expr::Unary(UnaryOp::Neg | UnaryOp::Not, inner) => self.written_type(inner).map(promoted),
+            Expr::Unary(UnaryOp::LogicalNot, _) => Some(CType::int(32)),
+            Expr::Binary(op, ..) if op.is_comparison() || matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) => Some(CType::int(32)),
+            Expr::Binary(BinaryOp::Shl | BinaryOp::Shr, a, _) => self.written_type(a).map(promoted),
+            Expr::Binary(_, a, b) | Expr::Ternary(_, a, b) => match (self.written_type(a).map(promoted), self.written_type(b).map(promoted)) {
+                (Some(CType::Int { bits: x, signed: s }), Some(CType::Int { bits: y, signed: t })) => {
+                    let signed = if x == y { s && t } else if x > y { s } else { t };
+                    Some(CType::Int { bits: x.max(y), signed })
+                }
+                (Some(ty), None) | (None, Some(ty)) => Some(ty),
+                _ => None,
+            },
+            _ => None,
         };
     }
 
@@ -969,8 +945,15 @@ impl<'a> Builder<'a> {
                 "memset" => call("memset", vec![arg(0), arg(1), arg(2)]),
                 "memcpy" => call("memcpy", vec![arg(0), arg(1), arg(2)]),
                 "memmove" => call("memmove", vec![arg(0), arg(1), arg(2)]),
-                "smax" | "umax" | "maxnum" => Expr::Ternary(Box::new(Expr::binary(BinaryOp::Gt, arg(0), arg(1))), Box::new(arg(0)), Box::new(arg(1))),
-                "smin" | "umin" | "minnum" => Expr::Ternary(Box::new(Expr::binary(BinaryOp::Lt, arg(0), arg(1))), Box::new(arg(0)), Box::new(arg(1))),
+                // The comparison has the signedness of the intrinsic
+                "smax" | "umax" | "smin" | "umin" => {
+                    let signed = family.starts_with('s');
+                    let op = if family.ends_with("max") { BinaryOp::Gt } else { BinaryOp::Lt };
+                    let condition = Expr::binary(op, self.signed_operand(args[0], signed), self.signed_operand(args[1], signed));
+                    Expr::Ternary(Box::new(condition), Box::new(arg(0)), Box::new(arg(1)))
+                }
+                "maxnum" => Expr::Ternary(Box::new(Expr::binary(BinaryOp::Gt, arg(0), arg(1))), Box::new(arg(0)), Box::new(arg(1))),
+                "minnum" => Expr::Ternary(Box::new(Expr::binary(BinaryOp::Lt, arg(0), arg(1))), Box::new(arg(0)), Box::new(arg(1))),
                 "abs" => call("abs", vec![arg(0)]),
                 "fabs" => call(if bits == 32 { "fabsf" } else { "fabs" }, vec![arg(0)]),
                 "sqrt" => call(if bits == 32 { "sqrtf" } else { "sqrt" }, vec![arg(0)]),
@@ -1297,6 +1280,27 @@ impl<'a> Builder<'a> {
         return decisions;
     }
 
+    /// Case values of the type of the switched expression: negative for a signed one, not for an unsigned
+    /// one (the values are its bits, and stay what they are once promoted to int)
+    fn case_values(&self, switched: &Expr, mut cases: Vec<(Vec<i128>, usize)>) -> Vec<(Vec<i128>, usize)> {
+        let (bits, signed) = match self.written_type(switched).as_ref().map(|t| t.unqualified()) {
+            Some(CType::Int { bits, signed }) => (*bits as u32, *signed),
+            Some(CType::Char) => (8, true),
+            _ => return cases,
+        };
+
+        let modulus = 1i128 << bits.clamp(1, 127);
+
+        for (values, _) in cases.iter_mut() {
+            for value in values.iter_mut() {
+                let wrapped = value.rem_euclid(modulus);
+                *value = if signed && wrapped >= modulus / 2 { wrapped - modulus } else { wrapped };
+            }
+        }
+
+        return cases;
+    }
+
     /// The value without the constant added to it: (x, c) for x + c (its extensions and truncations too)
     fn linear(&self, mut id: ValueId) -> (ValueId, i128) {
         let f = self.f;
@@ -1591,12 +1595,7 @@ impl<'a> Builder<'a> {
             }
         };
 
-        let signed = matches!(self.ty(value), CType::Int { signed: true, .. });
-        let cases: Vec<(i128, (usize, usize))> = edges
-            .into_iter()
-            .filter(|(_, edge)| *edge != default)
-            .map(|(x, edge)| (if signed && x >= modulus / 2 { x - modulus } else { x }, representatives[edge]))
-            .collect();
+        let cases: Vec<(i128, (usize, usize))> = edges.into_iter().filter(|(_, edge)| *edge != default).map(|(x, edge)| (x, representatives[edge])).collect();
 
         if cases.is_empty() || cases.len() > MAX_CASES {
             return None;
@@ -1763,7 +1762,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
 
     builder.decide();
     builder.share_constants();
-    builder.coalesce();
+    super::coalesce::coalesce(f, &mut builder.var_of, &builder.vars, &params);
 
     let count = f.blocks.len();
     let decisions = builder.decisions();
@@ -1807,7 +1806,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
                     }
                 }
 
-                Term::Switch(value, cases, default)
+                Term::Switch(value.clone(), builder.case_values(&value, cases), default)
             }
             Op::Ret => Term::Return(operands.first().map(|&v| builder.expr(v))),
             Op::Br if succs.len() == 1 => {
@@ -1839,7 +1838,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
                     }
                 }
 
-                Term::Switch(value, cases, default)
+                Term::Switch(value.clone(), builder.case_values(&value, cases), default)
             }
             Op::Switch => {
                 let value = builder.expr(operands[0]);
@@ -1856,7 +1855,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
                     }
                 }
 
-                Term::Switch(value, cases, default)
+                Term::Switch(value.clone(), builder.case_values(&value, cases), default)
             }
             _ => Term::Unreachable,
         };

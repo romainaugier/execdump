@@ -256,7 +256,14 @@ Decompiler:
     GNU case ranges (`case 72 ... 137:`)
   - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
-  - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)
+  - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
+    to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
+    variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the
+    end of the blocks they come from) share one variable, so the copies between them disappear (a parameter keeps
+    its variable)
+  - :heavy_check_mark: Differential test of the C backend: random programs with branches and loops are built as LLVM
+    IR, optimized like the lifted code, decompiled, and the C is run by an interpreter, it must return what the
+    programs return
   - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
     pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
     escaping address starts a buffer that extends to the next one (what it points to stays reachable from it, so the
