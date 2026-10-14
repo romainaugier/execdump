@@ -50,6 +50,19 @@ const FRAMES: usize = 64;
 /// Instructions of the functions looked at to be inlined in their callers (trivial ones are a few)
 const MAX_TRIVIAL_INSNS: usize = 32;
 
+/// Prototypes of the functions the C runtime links in the programs
+const CRT_PROTOTYPES: &[(&str, &str)] = &[
+    ("__libc_csu_init", "void __libc_csu_init(int argc, char **argv, char **envp)"),
+    ("__libc_csu_fini", "void __libc_csu_fini(void)"),
+    ("_init", "void _init(void)"),
+    ("_fini", "void _fini(void)"),
+    ("frame_dummy", "void frame_dummy(void)"),
+    ("register_tm_clones", "void register_tm_clones(void)"),
+    ("deregister_tm_clones", "void deregister_tm_clones(void)"),
+    ("__do_global_dtors_aux", "void __do_global_dtors_aux(void)"),
+    ("__do_global_ctors_aux", "void __do_global_ctors_aux(void)"),
+];
+
 /// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
 /// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
 pub(crate) const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
@@ -735,6 +748,14 @@ impl<'a> Decompiler<'a> {
             return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
         }
 
+        // The functions the C runtime links in return nothing (what is left in the return register is not a
+        // result, they have no caller in the program)
+        if let Some((_, text)) = CRT_PROTOTYPES.iter().find(|(n, _)| *n == name) {
+            if let Ok(prototype) = crate::notes::parse_prototype(text, &self.typedb) {
+                return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+            }
+        }
+
         if let Some(ty) = self.callbacks().get(&addr) {
             return Signature { noreturn, ..self.signature_from_prototype(&Prototype { name: name.clone(), ty: ty.clone() }, &name) };
         }
@@ -1227,11 +1248,25 @@ mod tests {
     }
 
     #[test]
+    fn crt_prototypes() {
+        let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86, false));
+
+        for (name, text) in CRT_PROTOTYPES {
+            let prototype = crate::notes::parse_prototype(text, &typedb).unwrap();
+            assert_eq!((prototype.name.as_str(), prototype.ty.ret.clone()), (*name, CType::Void));
+        }
+    }
+
+    #[test]
     fn calls_through_a_global_holding_one_function() {
         let program = fixture("elf_i386_pointer");
         let analysis = analyze(&program, None).unwrap();
         let decompiler = Decompiler::new(&program, &analysis).unwrap();
         let main = decompiler.c_code(function(&analysis, "main")).unwrap();
+
+        // verify returns nothing: main clears eax after calling it (xor eax, eax does not read it)
+        let verify = decompiler.c_code(function(&analysis, "verify")).unwrap();
+        assert!(verify.starts_with("void verify(const char *s1, const char *s2)") && !verify.contains("return"), "{}", verify);
 
         // The pointer is only ever set to verify: the call is a call to verify, with its arguments
         assert!(main.contains("main_check = verify;") && main.contains("verify(dest, \"secret\");"), "{}", main);

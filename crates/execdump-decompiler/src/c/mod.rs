@@ -140,6 +140,7 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
     simplify::simplify(&mut function);
     structure::loops_and_exits(&mut function.body);
     simplify::null_returns(&mut function);
+    simplify::void_returns(&mut function);
     naming::name(&mut function, ctx);
 
     return function;

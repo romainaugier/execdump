@@ -263,7 +263,9 @@ Decompiler:
     program writing it writes the address of that function, and its address is never taken) is called as that
     function, with its arguments: `static void (*check)(...); check = verify; check(a, b);` gives
     `verify(a, b)` (x86 and x86_64). `main` has its standard prototype (`int main(int argc, char **argv)`, as many
-    parameters as it reads). The format string of a variadic call passed on the stack is found through the
+    parameters as it reads), the functions the C runtime links in (`__libc_csu_init`, `frame_dummy`,
+    `__do_global_dtors_aux`...) return nothing. A result is not read by a caller that clears the register
+    (`xor eax, eax`), and a function returning nothing does not end with `return;` (nor its last branches). The format string of a variadic call passed on the stack is found through the
     register it was computed in (`lea ecx, [fmt]; mov [esp], ecx`), so `printf` gets its extra arguments
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
     The branches join where their paths meet, the paths that return early left out; a loop whose exits all

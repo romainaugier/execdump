@@ -918,6 +918,13 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         return Some(true);
     }
 
+    // xor eax, eax and sub eax, eax write the register without reading it
+    if let (true, [Op::Reg(a), Op::Reg(b)]) = (matches!(mnemonic, "xor" | "sub"), insn.ops.as_slice()) {
+        if a.reg == b.reg && a.reg == reg {
+            return Some(false);
+        }
+    }
+
     if insn.ops.iter().skip(1).any(uses) || insn.ops.iter().any(|op| matches!(op, Op::Mem(_)) && uses(op)) {
         return Some(true);
     }

@@ -242,3 +242,42 @@ pub fn null_returns(function: &mut CFunction) {
         walk(&mut function.body);
     }
 }
+
+/// return; where the function ends anyway: the last statement of a function returning nothing, and of the
+/// branches of the ifs it ends with (a label before it keeps it, a label cannot end a block)
+pub fn void_returns(function: &mut CFunction) {
+    fn trim(stmts: &mut Vec<Stmt>) {
+        let labelled = stmts.len() >= 2 && matches!(stmts[stmts.len() - 2].kind, StmtKind::Label(_));
+
+        match stmts.last_mut().map(|s| &mut s.kind) {
+            Some(StmtKind::Return(None)) if !labelled => {
+                stmts.pop();
+            }
+            Some(StmtKind::If(c, a, b)) => {
+                trim(a);
+                trim(b);
+
+                // The branch left empty goes away: if (!c) { b }, or the condition alone when it calls
+                if a.is_empty() && !b.is_empty() {
+                    *c = c.clone().not();
+                    std::mem::swap(a, b);
+                } else if a.is_empty() && b.is_empty() {
+                    let condition = c.clone();
+                    let last = stmts.last_mut().expect("the if is the last statement");
+
+                    match has_call(&condition) {
+                        true => last.kind = StmtKind::Expr(condition),
+                        false => {
+                            stmts.pop();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if matches!(function.ret, crate::types::CType::Void) {
+        trim(&mut function.body);
+    }
+}
