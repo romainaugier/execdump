@@ -87,6 +87,8 @@ pub enum Target {
     CallGraph { program: usize, root: u64, depth: usize, imports: bool, select: u64 },
     /// C code of a module
     Module(usize, String),
+    /// Text copied to the clipboard of the terminal
+    Copy(String),
 }
 
 /// Keeps a cursor visible in a scrolled list
@@ -182,6 +184,7 @@ impl App {
             Target::Address(program, addr) => self.goto_address(program, addr),
             Target::CallGraph { program, root, depth, imports, select } => self.open_call_graph_at(program, root, depth, imports, select),
             Target::Module(program, module) => self.open_module(program, &module),
+            Target::Copy(text) => self.copy(&text),
         }
     }
 

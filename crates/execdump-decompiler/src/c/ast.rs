@@ -615,32 +615,55 @@ fn first_address(stmts: &[Stmt]) -> Option<u64> {
     return stmts.iter().find_map(|s| s.addr);
 }
 
-/// Text of a C literal (one character per byte, see lift::literal), the bytes that are not printable
-/// ASCII are hexadecimal escapes
+/// A string literal's text in C: the bytes that are UTF-8 are their characters ("Vérification"), the others and
+/// the control characters are escapes
 fn escape(text: &str) -> String {
     let mut out = String::new();
     let mut hex = false;
+    let mut octal = false;
 
-    for c in text.chars() {
-        // A hexadecimal escape takes every hexadecimal digit after it: the literal is split
-        if hex && c.is_ascii_hexdigit() {
-            out.push_str("\" \"");
+    // The literals hold one character per byte (see lift::literal)
+    let bytes: Vec<u8> = match text.chars().all(|c| (c as u32) <= 0xff) {
+        true => text.chars().map(|c| c as u8).collect(),
+        false => text.as_bytes().to_vec(),
+    };
+
+    let push_hex = |out: &mut String, hex: &mut bool, bytes: &[u8]| {
+        for b in bytes {
+            let _ = write!(out, "\\x{:02x}", b);
         }
 
-        hex = false;
+        *hex = true;
+    };
 
-        match c {
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\0' => out.push_str("\\0"),
-            c if c.is_control() || ('\u{80}'..='\u{ff}').contains(&c) => {
-                let _ = write!(out, "\\x{:02x}", c as u32);
-                hex = true;
+    for chunk in bytes.utf8_chunks() {
+        for c in chunk.valid().chars() {
+            // A hexadecimal escape takes every hexadecimal digit after it, \0 the octal ones: the literal is split
+            if hex && c.is_ascii_hexdigit() || octal && ('0'..='7').contains(&c) {
+                out.push_str("\" \"");
             }
-            c => out.push(c),
+
+            hex = false;
+            octal = c == '\0';
+
+            match c {
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\0' => out.push_str("\\0"),
+                c if c.is_control() => {
+                    push_hex(&mut out, &mut hex, c.encode_utf8(&mut [0; 4]).as_bytes());
+                    octal = false;
+                }
+                c => out.push(c),
+            }
+        }
+
+        if !chunk.invalid().is_empty() {
+            push_hex(&mut out, &mut hex, chunk.invalid());
+            octal = false;
         }
     }
 
@@ -834,7 +857,9 @@ mod tests {
         assert_eq!(printer.expr(&Expr::binary(BinaryOp::Lt, a.clone(), b.clone()).not()), "a >= b");
         assert_eq!(printer.expr(&Expr::cast(CType::ptr(CType::Char), a.clone())), "(char *)a");
         assert_eq!(printer.expr(&Expr::Str("hi\n".to_string())), "\"hi\\n\"");
-        assert_eq!(printer.expr(&Expr::Str(crate::lift::literal("T3\u{c7}8x\u{c0}z".as_bytes()))), "\"T3\\xc3\\x87\" \"8x\\xc3\\x80z\"");
+        // UTF-8 is text, the other bytes are escapes (split before a hexadecimal or octal digit)
+        assert_eq!(printer.expr(&Expr::Str(crate::lift::literal("T3\u{c7}8x\u{c0}z".as_bytes()))), "\"T3\u{c7}8x\u{c0}z\"");
+        assert_eq!(printer.expr(&Expr::Str(crate::lift::literal(b"a\xc3b\xff1\x0012\x07"))), "\"a\\xc3\" \"b\\xff\" \"1\\0\" \"12\\x07\"");
         assert_eq!(printer.expr(&Expr::Int(0x401000)), "0x401000");
     }
 

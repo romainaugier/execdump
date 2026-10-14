@@ -232,6 +232,8 @@ pub(crate) enum Command {
     Signature(String),
     Summary(String),
     Comment(String),
+    /// The string literal under the cursor in its forms (text, C, bytes, shell, Python)
+    StringForms,
     Revert,
     Resolve { edited: bool, decompiled: bool },
     MoveFunction(String, Option<String>),
@@ -382,6 +384,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("sig", &["signature", "prototype"], "<prototype>", "prototype of the current function (its callers follow)", CODE, C::Nothing),
     spec("summary", &[], "[text]", "summary of the function, a comment at the top of its code", CODE, C::Nothing),
     spec("comment", &[], "<text>", "comment above the line", CODE, C::Nothing),
+    spec("string", &["str"], "", "the string literal under the cursor as text, C, bytes, shell and Python (Enter copies one)", CODE, C::Nothing),
     spec("revert", &[], "", "drop the edits of the current function", CODE, C::Nothing),
     spec("ours", &["edited"], "", "resolve the conflict: keep the edited code", CODE, C::Nothing),
     spec("theirs", &["decompiled"], "", "resolve the conflict: keep the decompiled code", CODE, C::Nothing),
@@ -580,6 +583,7 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "sig" => Command::Signature(rest.to_string()),
         "summary" => Command::Summary(rest.to_string()),
         "comment" => Command::Comment(rest.to_string()),
+        "string" => Command::StringForms,
         "revert" => Command::Revert,
         "ours" => Command::Resolve { edited: true, decompiled: false },
         "theirs" => Command::Resolve { edited: false, decompiled: true },
@@ -793,6 +797,7 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Source, &[s("0")], "line-start");
     bind(Source, &[s("^")], "line-first");
     bind(Source, &[s("$")], "line-end");
+    bind(Source, &[s("gs")], "string");
     bind(Source, &[s("i")], "insert");
     bind(Source, &[s("a")], "insert after");
     bind(Source, &[s("A")], "insert end");
@@ -1100,7 +1105,7 @@ impl App {
                 project.revert(addr);
                 Ok(())
             }),
-            Command::Comment(_) | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } => {
+            Command::Comment(_) | Command::StringForms | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } => {
                 self.error("Only in the C code (:source)".to_string());
             }
             Command::MoveFunction(module, function) => self.move_function(Some(module), function),

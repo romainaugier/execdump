@@ -1355,6 +1355,10 @@ impl App {
                 self.with_source(|source, project| source.comment(project, text));
                 return true;
             }
+            Command::StringForms => {
+                self.string_forms();
+                return true;
+            }
             Command::Resolve { edited, decompiled } => {
                 let (edited, decompiled) = (*edited, *decompiled);
                 self.with_source(|source, project| source.resolve(project, edited, decompiled));

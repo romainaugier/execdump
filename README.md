@@ -362,9 +362,11 @@ Decompiler:
   - :heavy_check_mark: Strings and constants: addresses of strings are string literals (the ones passed to functions even when they end
     another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
     floating point numbers, strings, functions), constants that are the address of a function are its name. Literals
-    are exact: the bytes that are not printable ASCII are escapes (`"V\xc3\xa9rification"`), so the offsets in a
-    string are the ones the code uses; the strings view shows them decoded. Printable characters stored in chars are
-    character literals
+    are exact: the UTF-8 text is its characters (`"Vérification"`), the control characters and the bytes that are not
+    UTF-8 are escapes (a literal is split after an escape followed by a digit, `"\xff" "1"`). In the TUI, `gs` on a
+    literal (`:string`) shows it as text, as a C literal of ASCII characters (`"V\xc3\xa9rification"`, the offsets the
+    code uses), as bytes, as a shell argument (`$'...'`) and as Python bytes, `Enter` copies one (OSC 52). Printable
+    characters stored in chars are character literals
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
   - :heavy_check_mark: LLM rewrite (`W` or `:llm rewrite` in the TUI): the function rewritten as clear C (structured control flow, no needless temporaries, meaningful names) with the same behavior, as an edit to review; the proposal says when the rewrite lost the function name, a call or the balance of its braces
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
@@ -500,6 +502,7 @@ In the C code (a module, every function of it one after the other; functions not
 | `ct` | Retype the variable under the cursor (`:retype`) |
 | `cs` | Give a prototype to the function (`:sig`, prefilled with its current one) |
 | `;` | Comment above the line |
+| `gs` | The string literal under the cursor as text, C literal, bytes, shell argument and Python bytes, `Enter` copies one (`:string`) |
 | `M` | Move the function to a module (`:mv`) |
 | `]c` / `[c` | Next / previous conflict between the edits and the decompiled code |
 | `x` / `C` | Cross references / call graph of the function |

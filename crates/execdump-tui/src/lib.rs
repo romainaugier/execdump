@@ -16,6 +16,7 @@ mod actions;
 mod commands;
 mod explorer;
 mod layout;
+mod literal;
 mod libraries;
 mod loading;
 mod popup;

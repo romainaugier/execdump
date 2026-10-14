@@ -72,6 +72,37 @@ impl App {
         self.show_popup(format!("Cross references to {}", name), items);
     }
 
+    /// The forms of the string literal under the cursor of the C code, Enter copies one
+    pub(crate) fn string_forms(&mut self) {
+        let App { workspace, projects, .. } = self;
+
+        let found = match workspace.view_mut() {
+            View::Source(view) => projects[view.program].as_mut().map(|project| (view.cursor_line(project), view.col)),
+            _ => None,
+        };
+
+        let Some(bytes) = found.and_then(|(line, col)| crate::literal::literal_at(&line, col)) else {
+            return self.info("No string literal on the line".to_string());
+        };
+
+        let items = crate::literal::forms(&bytes).into_iter().map(|(label, text)| (format!("{:<8}{}", label, text), Target::Copy(text))).collect();
+        self.popup = Some(Popup { title: "String (Enter copies)".to_string(), items, cursor: 0 });
+    }
+
+    /// Copies text to the clipboard of the terminal (OSC 52, most terminals and tmux with set-clipboard)
+    pub(crate) fn copy(&mut self, text: &str) {
+        use std::io::{IsTerminal, Write};
+
+        let mut stdout = std::io::stdout();
+
+        if stdout.is_terminal() {
+            let _ = write!(stdout, "\x1b]52;c;{}\x07", crate::literal::base64(text.as_bytes()));
+            let _ = stdout.flush();
+        }
+
+        self.info(format!("Copied {}", text));
+    }
+
     pub(crate) fn show_popup(&mut self, title: String, items: Vec<(String, Target)>) {
         match items.len() {
             0 => self.info(format!("{}: nothing found", title)),

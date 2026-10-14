@@ -365,6 +365,30 @@ fn code_editing_and_annotations() {
     let _ = std::fs::remove_dir_all(&location);
 }
 
+#[test]
+fn string_literal_forms() {
+    let (mut app, location) = app("string");
+    let mut terminal = Terminal::new(TestBackend::new(140, 45)).unwrap();
+    wait_decompiled(&mut app);
+
+    app.run_command("c main");
+    app.run_search("hello from");
+    keys(&mut app, "gs");
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+    let popup = app.popup.take().expect("the forms of the string");
+    let labels: Vec<&str> = popup.items.iter().map(|(label, _)| label.split_whitespace().next().unwrap()).collect();
+    assert_eq!(labels, ["text", "C", "bytes", "shell", "python", "length"]);
+    assert_eq!(popup.items[0].1, Target::Copy("hello from the analysis fixture".to_string()));
+    assert_eq!(popup.items[3].1, Target::Copy("$'hello from the analysis fixture'".to_string()));
+
+    // Enter copies the selected form
+    app.open_target(popup.items[2].1.clone());
+    assert!(app.message.as_ref().is_some_and(|(text, _)| text.starts_with("Copied 68 65 6c 6c 6f")), "{:?}", app.message);
+
+    let _ = std::fs::remove_dir_all(&location);
+}
+
 fn esc(app: &mut App) {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 }
