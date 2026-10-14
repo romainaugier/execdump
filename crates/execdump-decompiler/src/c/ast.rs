@@ -424,6 +424,27 @@ impl Printer<'_> {
         return format!("{} = {}", target_text, self.expr(value));
     }
 
+    /// A case of a switch, in braces when it declares variables
+    fn case(&mut self, mut labels: Vec<String>, body: &[Stmt], depth: usize) {
+        let braces = !body.is_empty() && self.declared.get(&list_id(body)).is_some_and(|vars| !vars.is_empty());
+
+        if braces {
+            if let Some(last) = labels.last_mut() {
+                last.push_str(" {");
+            }
+        }
+
+        for label in labels {
+            self.line(depth + 1, &label, None);
+        }
+
+        self.block(body, depth + 2);
+
+        if braces {
+            self.line(depth + 1, "}", None);
+        }
+    }
+
     /// The statements of a block, after the declarations of its variables: a variable first written by a
     /// statement of the block that does not read it is declared there (int v = ...;), the others at the start
     fn block(&mut self, stmts: &[Stmt], depth: usize) {
@@ -529,6 +550,7 @@ impl Printer<'_> {
                     let mut values = case.values.clone();
                     values.sort();
                     values.dedup();
+                    let mut labels = Vec::new();
                     let mut start = 0;
 
                     while start < values.len() {
@@ -541,21 +563,19 @@ impl Printer<'_> {
                         let first = self.expr(&Expr::Int(values[start]));
 
                         if end - start >= 2 {
-                            let text = format!("case {} ... {}:", first, self.expr(&Expr::Int(values[end])));
-                            self.line(depth + 1, &text, None);
+                            labels.push(format!("case {} ... {}:", first, self.expr(&Expr::Int(values[end]))));
                             start = end + 1;
                         } else {
-                            self.line(depth + 1, &format!("case {}:", first), None);
+                            labels.push(format!("case {}:", first));
                             start += 1;
                         }
                     }
 
-                    self.block(&case.body, depth + 2);
+                    self.case(labels, &case.body, depth);
                 }
 
                 if !default.is_empty() {
-                    self.line(depth + 1, "default:", None);
-                    self.block(default, depth + 2);
+                    self.case(vec!["default:".to_string()], default, depth);
                 }
 
                 self.line(depth, "}", None);

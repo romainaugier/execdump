@@ -266,8 +266,9 @@ Decompiler:
     `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
     counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
     (`for (i = 0;; i++)`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
-    two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the cases of the
-    switches and the blocks with labels, their declarations would move out of them)
+    two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the blocks with labels,
+    their declarations would move out of them). The statements both branches of an if end
+    with follow it, an if whose body is an if without else is one with both conditions (`if (a && b)`)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of
     comparisons LLVM makes) are taken for every value of interest (the boundaries of the comparisons, the cases,
@@ -289,9 +290,9 @@ Decompiler:
     its variable)
   - :heavy_check_mark: Declarations in the narrowest block: a local variable is declared at the start of the
     narrowest block that holds all its uses, when entering it always writes the variable before reading it (a
-    value carried from one iteration to the next stays declared around the loop; blocks with labels and the cases
-    of the switches are left out), and at its first assignment when that is a statement of the block that does
-    not read it (`int fd = open(file, 66);`)
+    value carried from one iteration to the next stays declared around the loop; blocks with labels are left
+    out), and at its first assignment when that is a statement of the block that does
+    not read it (`int fd = open(file, 66);`). A case of a switch that declares variables is a block (`case 3: {`)
   - :heavy_check_mark: Differential test of the C backend: random programs with branches and loops are built as LLVM
     IR, optimized like the lifted code, decompiled, and the C is run by an interpreter, it must return what the
     programs return

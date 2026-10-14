@@ -2,8 +2,7 @@
  * Scope of the local variables: each one is declared at the start of the narrowest block that holds
  * all its uses, when entering that block always writes it before reading it (a value kept from one
  * entry to the next, a loop variable, needs the block around). Blocks with labels are left out (a goto
- * enters them past their start), and so are the cases of the switches (a declaration cannot follow a
- * case label).
+ * enters them past their start). A case of a switch that declares variables is printed as a block.
  */
 
 use super::ast::{CFunction, Expr, Stmt, StmtKind, VarId};
@@ -83,10 +82,11 @@ impl<'a> Walk<'a> {
                 self.stmt(step);
                 self.list(body);
             }
-            // The cases belong to the list of the switch
+            // A case declaring variables is a block of its own
             StmtKind::Switch(c, cases, default) => {
                 self.uses(c);
-                cases.iter().flat_map(|case| case.body.iter()).chain(default.iter()).for_each(|s| self.stmt(s));
+                cases.iter().for_each(|case| self.list(&case.body));
+                self.list(default);
             }
             _ => {}
         }

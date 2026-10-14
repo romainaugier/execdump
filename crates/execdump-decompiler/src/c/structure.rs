@@ -1176,19 +1176,8 @@ fn jumps_first(stmts: &mut Vec<Stmt>) {
 }
 
 /// The shorter exit first: if (c) { long; return a; } return b; -> if (!c) { return b; } long; return a;
-/// (not in the cases of the switches and the lists with labels: the declarations would move out of them)
+/// (not in the lists with labels: the declarations would move out of them)
 fn shorter_exits_first(stmts: &mut Vec<Stmt>) {
-    for stmt in stmts.iter_mut() {
-        match &mut stmt.kind {
-            StmtKind::If(_, a, b) => {
-                shorter_exits_first(a);
-                shorter_exits_first(b);
-            }
-            StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => shorter_exits_first(body),
-            _ => {}
-        }
-    }
-
     if let [.., Stmt { kind: StmtKind::If(_, then, otherwise), .. }, last] = stmts.as_slice() {
         let length = |list: &[Stmt]| list.iter().map(size).sum::<usize>();
 
@@ -1201,6 +1190,74 @@ fn shorter_exits_first(stmts: &mut Vec<Stmt>) {
             *c = c.clone().not();
             let rest = std::mem::replace(then, vec![last]);
             stmts.extend(rest);
+        }
+    }
+}
+
+/// The statements both branches of an if end with follow it: if (c) { x; s; } else { y; s; } -> if (c) { x; }
+/// else { y; } s;
+fn common_tails(stmts: &mut Vec<Stmt>) {
+    let mut i = 0;
+
+    while i < stmts.len() {
+        let mut moved = Vec::new();
+
+        if let StmtKind::If(_, then, otherwise) = &mut stmts[i].kind {
+            while let (Some(a), Some(b)) = (then.last(), otherwise.last()) {
+                if has_label(a) || has_label(b) || without_addresses(std::slice::from_ref(a)) != without_addresses(std::slice::from_ref(b)) {
+                    break;
+                }
+
+                otherwise.pop();
+                moved.push(then.pop().unwrap());
+            }
+        }
+
+        if moved.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // What is left of the if
+        if let StmtKind::If(c, then, otherwise) = &mut stmts[i].kind {
+            if then.is_empty() && otherwise.is_empty() {
+                let mut calls = false;
+                c.visit(&mut |e| calls |= matches!(e, Expr::Call(..)));
+                stmts[i].kind = if calls { StmtKind::Expr(c.clone()) } else { StmtKind::Comment(String::new()) };
+            } else if then.is_empty() {
+                *c = c.clone().not();
+                std::mem::swap(then, otherwise);
+            }
+        }
+
+        moved.reverse();
+        let count = moved.len();
+        stmts.splice(i + 1..i + 1, moved);
+
+        if matches!(&stmts[i].kind, StmtKind::Comment(text) if text.is_empty()) {
+            stmts.remove(i);
+            i += count;
+        } else {
+            i += count + 1;
+        }
+    }
+}
+
+/// if (a) { if (b) { x } } -> if (a && b) { x }
+fn nested_conditions(stmts: &mut Vec<Stmt>) {
+    for stmt in stmts.iter_mut() {
+        while let StmtKind::If(a, then, otherwise) = &mut stmt.kind {
+            let [Stmt { kind: StmtKind::If(b, inner, inner_else), .. }] = then.as_mut_slice() else {
+                break;
+            };
+
+            if !otherwise.is_empty() || !inner_else.is_empty() {
+                break;
+            }
+
+            let inner = std::mem::take(inner);
+            *a = Expr::binary(BinaryOp::LogicalAnd, a.clone(), b.clone());
+            *then = inner;
         }
     }
 }
@@ -1399,7 +1456,9 @@ pub fn loops_and_exits(stmts: &mut Vec<Stmt>) {
     walk(stmts, &mut jumps_first);
     walk(stmts, &mut loop_conditions);
     walk(stmts, &mut for_loops);
-    shorter_exits_first(stmts);
+    walk(stmts, &mut shorter_exits_first);
+    walk(stmts, &mut common_tails);
+    walk(stmts, &mut nested_conditions);
 }
 
 /// Structured statements of the blocks (block 0 is the entry)
@@ -1999,6 +2058,16 @@ mod tests {
         loops_and_exits(&mut stmts);
         assert_eq!(stmts.len(), 5, "{:?}", stmts);
         assert!(matches!(&stmts[0].kind, StmtKind::If(c, then, _) if *c == test.clone().not() && then[..] == [returns(0)]), "{:?}", stmts);
+
+        // if (c) { b(); d(); } else { e(); d(); } -> if (c) { b(); } else { e(); } d();
+        let mut stmts = vec![stmt(StmtKind::If(test.clone(), vec![call("b"), call("d")], vec![call("e"), call("d")]))];
+        loops_and_exits(&mut stmts);
+        assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::If(_, a, b), .. }, d] if a[..] == [call("b")] && b[..] == [call("e")] && *d == call("d")), "{:?}", stmts);
+
+        // if (c) { if (v0 > 3) { b(); } } -> if (c && v0 > 3) { b(); }
+        let mut stmts = vec![stmt(StmtKind::If(Expr::Var(1), vec![stmt(StmtKind::If(test.clone(), vec![call("b")], Vec::new()))], Vec::new()))];
+        loops_and_exits(&mut stmts);
+        assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::If(Expr::Binary(BinaryOp::LogicalAnd, ..), a, _), .. }] if a[..] == [call("b")]), "{:?}", stmts);
     }
 
     fn assign(var: VarId) -> Stmt {
