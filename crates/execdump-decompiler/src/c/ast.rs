@@ -128,8 +128,12 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// *&x is x, &*p is p
     pub fn unary(op: UnaryOp, e: Expr) -> Expr {
-        return Expr::Unary(op, Box::new(e));
+        return match (op, e) {
+            (UnaryOp::Deref, Expr::Unary(UnaryOp::AddrOf, inner)) | (UnaryOp::AddrOf, Expr::Unary(UnaryOp::Deref, inner)) => *inner,
+            (op, e) => Expr::Unary(op, Box::new(e)),
+        };
     }
 
     pub fn binary(op: BinaryOp, a: Expr, b: Expr) -> Expr {

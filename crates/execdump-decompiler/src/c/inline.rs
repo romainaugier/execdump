@@ -5,12 +5,15 @@
  */
 
 use super::ast::{CFunction, Expr, Stmt, StmtKind, UnaryOp, VarId};
+use crate::types::CType;
 
 /// The statement of a trivial function, on its parameters
 #[derive(Clone, Debug, PartialEq)]
 pub struct Trivial {
     params: Vec<VarId>,
     body: Expr,
+    /// Globals of the statement and the types they are accessed with, the callers access them too
+    globals: Vec<(String, Option<CType>)>,
 }
 
 /// An expression that can be repeated or dropped: a variable, a constant, a global
@@ -59,7 +62,7 @@ impl Trivial {
             _ => matches!(stmt.kind, StmtKind::Return(_)) && is_simple(body),
         };
 
-        return (shape && only_params(body)).then(|| Trivial { params: function.params.clone(), body: body.clone() });
+        return (shape && only_params(body)).then(|| Trivial { params: function.params.clone(), body: body.clone(), globals: function.globals.clone() });
     }
 
     /// Whether the statement is a call (it has an effect, a function only returning a value does not)
@@ -106,7 +109,13 @@ fn substitute(e: &Expr, params: &[VarId], args: &[Expr]) -> Expr {
 /// Trivial function called by name, with the note its call sites get (its name, when it has a symbol)
 pub type Lookup<'a> = dyn Fn(&str) -> Option<(std::rc::Rc<Trivial>, Option<String>)> + 'a;
 
-fn inline_expr(e: &mut Expr, lookup: &Lookup, notes: &mut Vec<String>) {
+/// Notes of the inlined calls of a statement, and the globals they bring
+struct Inlined {
+    notes: Vec<String>,
+    globals: Vec<(String, Option<CType>)>,
+}
+
+fn inline_expr(e: &mut Expr, lookup: &Lookup, notes: &mut Inlined) {
     match e {
         Expr::Unary(_, a) | Expr::Cast(_, a) | Expr::Member(a, ..) => inline_expr(a, lookup, notes),
         Expr::Binary(_, a, b) | Expr::Index(a, b) => {
@@ -123,7 +132,8 @@ fn inline_expr(e: &mut Expr, lookup: &Lookup, notes: &mut Vec<String>) {
             if let Some((trivial, note)) = lookup(name) {
                 if let Some(inlined) = trivial.apply(args) {
                     *e = inlined;
-                    notes.extend(note);
+                    notes.notes.extend(note);
+                    notes.globals.extend(trivial.globals.iter().cloned());
                 }
             }
         }
@@ -142,9 +152,9 @@ fn has_call(e: &Expr) -> bool {
     return found;
 }
 
-fn inline_stmts(stmts: &mut Vec<Stmt>, lookup: &Lookup) {
+fn inline_stmts(stmts: &mut Vec<Stmt>, lookup: &Lookup, globals: &mut Vec<(String, Option<CType>)>) {
     for stmt in stmts.iter_mut() {
-        let mut notes = Vec::new();
+        let mut notes = Inlined { notes: Vec::new(), globals: Vec::new() };
 
         match &mut stmt.kind {
             StmtKind::Expr(e) | StmtKind::NoReturn(e) | StmtKind::Return(Some(e)) => inline_expr(e, lookup, &mut notes),
@@ -154,12 +164,12 @@ fn inline_stmts(stmts: &mut Vec<Stmt>, lookup: &Lookup) {
             }
             StmtKind::If(c, a, b) => {
                 inline_expr(c, lookup, &mut notes);
-                inline_stmts(a, lookup);
-                inline_stmts(b, lookup);
+                inline_stmts(a, lookup, globals);
+                inline_stmts(b, lookup, globals);
             }
             StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
                 inline_expr(c, lookup, &mut notes);
-                inline_stmts(body, lookup);
+                inline_stmts(body, lookup, globals);
             }
             StmtKind::For(init, c, step, body) => {
                 for part in [&mut **init, &mut **step] {
@@ -174,19 +184,25 @@ fn inline_stmts(stmts: &mut Vec<Stmt>, lookup: &Lookup) {
                 }
 
                 inline_expr(c, lookup, &mut notes);
-                inline_stmts(body, lookup);
+                inline_stmts(body, lookup, globals);
             }
             StmtKind::Switch(c, cases, default) => {
                 inline_expr(c, lookup, &mut notes);
-                cases.iter_mut().for_each(|case| inline_stmts(&mut case.body, lookup));
-                inline_stmts(default, lookup);
+                cases.iter_mut().for_each(|case| inline_stmts(&mut case.body, lookup, globals));
+                inline_stmts(default, lookup, globals);
             }
             _ => {}
         }
 
-        if !notes.is_empty() {
-            notes.dedup();
-            stmt.note = Some(notes.join(", "));
+        if !notes.notes.is_empty() {
+            notes.notes.dedup();
+            stmt.note = Some(notes.notes.join(", "));
+        }
+
+        for (name, ty) in notes.globals {
+            if !globals.iter().any(|(known, _)| *known == name) {
+                globals.push((name, ty));
+            }
         }
     }
 
@@ -196,5 +212,5 @@ fn inline_stmts(stmts: &mut Vec<Stmt>, lookup: &Lookup) {
 
 /// The calls to trivial functions become their statement
 pub fn inline(function: &mut CFunction, lookup: &Lookup) {
-    inline_stmts(&mut function.body, lookup);
+    inline_stmts(&mut function.body, lookup, &mut function.globals);
 }

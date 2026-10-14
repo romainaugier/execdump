@@ -885,7 +885,8 @@ impl<'a> Builder<'a> {
             });
         }
 
-        let mut pointer = if is_pointer(self.ty(base)) && pointee(self.ty(base)) == Some(&CType::Char) { base_expr } else { Expr::cast(CType::ptr(CType::Char), base_expr) };
+        let bytes_of = |e: Expr| if is_pointer(self.ty(base)) && pointee(self.ty(base)) == Some(&CType::Char) { e } else { Expr::cast(CType::ptr(CType::Char), e) };
+        let mut pointer = if bytes.is_none() && offset == 0 && *ty != CType::Char { base_expr } else { bytes_of(base_expr) };
 
         // A char is an element of the bytes: ((char *)p)[5]
         if *ty == CType::Char {
