@@ -319,8 +319,13 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
         found.dedup_by(|a, b| a.offset == b.offset && a.bytes == b.bytes && a.ty(types) == b.ty(types));
 
         let offsets: HashSet<i64> = found.iter().map(|a| a.offset).collect();
+        // The elements of an array have one type: the pointers to the same data (const or not) or to anything are one
         let first = found[0].ty(types);
-        let array = found.iter().all(|a| a.ty(types) == first && a.bytes == found[0].bytes && a.offset % a.bytes as i64 == 0);
+        let element = |ty: &CType| match (pointee(ty), pointee(&first)) {
+            (Some(a), Some(b)) => a.unqualified() == b.unqualified() || [a, b].iter().any(|p| matches!(p.unqualified(), CType::Void) || p.is_unknown()),
+            _ => *ty == first,
+        };
+        let array = found.iter().all(|a| element(&a.ty(types)) && a.bytes == found[0].bytes && a.offset % a.bytes as i64 == 0);
 
         if excluded || offsets.len() < 2 || array || found.iter().any(|a| a.offset < 0) {
             continue;

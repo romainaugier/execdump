@@ -2052,7 +2052,12 @@ impl<'ctx> Lifter<'ctx, '_> {
 
 /// Conversions of a printf format string, true for the floating point ones
 fn format_conversions(format: &str) -> Vec<bool> {
-    let mut conversions = Vec::new();
+    return format_specifiers(format).into_iter().map(|c| matches!(c, 'f' | 'F' | 'e' | 'E' | 'g' | 'G' | 'a' | 'A')).collect();
+}
+
+/// The conversion of each argument a printf format string reads (a * width or precision reads an int: 'd')
+pub(crate) fn format_specifiers(format: &str) -> Vec<char> {
+    let mut specifiers = Vec::new();
     let mut chars = format.chars().peekable();
 
     while let Some(c) = chars.next() {
@@ -2060,10 +2065,10 @@ fn format_conversions(format: &str) -> Vec<bool> {
             continue;
         }
 
-        // Flags, width, precision and length modifiers, a * consumes an int argument
+        // Flags, width, precision and length modifiers
         while let Some(&next) = chars.peek() {
             if next == '*' {
-                conversions.push(false);
+                specifiers.push('d');
             }
 
             if "-+ #0123456789.*hlLqjzt'".contains(next) {
@@ -2075,12 +2080,11 @@ fn format_conversions(format: &str) -> Vec<bool> {
 
         match chars.next() {
             Some('%') | None => {}
-            Some('f' | 'F' | 'e' | 'E' | 'g' | 'G' | 'a' | 'A') => conversions.push(true),
-            Some(_) => conversions.push(false),
+            Some(conversion) => specifiers.push(conversion),
         }
     }
 
-    return conversions;
+    return specifiers;
 }
 
 #[cfg(test)]

@@ -257,6 +257,49 @@ mod tests {
     }
 
     #[test]
+    fn pointers_to_pointers_are_not_structs() {
+        // argv: its elements are strings, the first one only passed to printf (a variadic argument, a number in the
+        // IR) for a %s. A pointer to pointers stays one, not a struct of a number and a pointer.
+        let code = c_of_ir(
+            "define i32 @usage(ptr %0) {
+            entry:
+              %first = load i64, ptr %0
+              %sp = getelementptr i8, ptr %0, i64 8
+              %second = load ptr, ptr %sp
+              %r = call i32 (ptr, ...) @printf(ptr @fmt, i64 %first)
+              %s = call i32 @puts(ptr %second)
+              ret i32 %s
+            }
+            @fmt = private constant [11 x i8] c\"usage: %s\\0A\\00\"
+            declare i32 @printf(ptr, ...)
+            declare i32 @puts(ptr)",
+        );
+
+        assert!(!code.contains("struct") && !code.contains(" *)"), "{}", code);
+        assert!(code.starts_with("int usage(const char **a1)") && code.contains("printf(\"usage: %s\\n\", *a1);") && code.contains("= a1[1];"), "{}", code);
+    }
+
+    #[test]
+    fn pointers_of_several_types_are_an_array() {
+        // A string read as const char *, another one freed (void *): still the elements of one array
+        let code = c_of_ir(
+            "define i64 @lengths(ptr %0) {
+            entry:
+              %first = load ptr, ptr %0
+              %sp = getelementptr i8, ptr %0, i64 8
+              %second = load ptr, ptr %sp
+              %n = call i64 @strlen(ptr %first)
+              call void @free(ptr %second)
+              ret i64 %n
+            }
+            declare i64 @strlen(ptr)
+            declare void @free(ptr)",
+        );
+
+        assert!(!code.contains("struct") && !code.contains(" *)") && code.contains("a1[1]"), "{}", code);
+    }
+
+    #[test]
     fn structs_of_the_accesses() {
         // A pointer accessed at several offsets and a buffer of the frame accessed with several types are
         // structs, the address of a field is passed on

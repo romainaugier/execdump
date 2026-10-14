@@ -55,6 +55,16 @@ struct Inference<'a> {
 
 impl Inference<'_> {
     /// Pointer types replace integers, a known pointee replaces void
+    /// Text of a constant string (a format string passed to printf)
+    fn format(&self, value: ValueId) -> Option<String> {
+        return match (&self.f.values[value].kind, self.f.inst(value)) {
+            (ValueKind::Global(name), _) => self.ctx.string(name).or_else(|| self.f.data.get(name).map(|b| crate::lift::literal(b.strip_suffix(&[0]).unwrap_or(b)))),
+            (ValueKind::Int(addr), _) => self.ctx.string_at(u64::try_from(*addr).ok()?, true),
+            (_, Some((Op::IntToPtr | Op::PtrToInt | Op::BitCast, [x]))) => self.format(*x),
+            _ => None,
+        };
+    }
+
     fn set_pointer(&mut self, id: ValueId, to: CType) {
         if self.f.is_constant(id) && !matches!(self.f.values[id].kind, ValueKind::Inst { .. }) {
             return;
@@ -64,6 +74,8 @@ impl Inference<'_> {
             None => true,
             Some(CType::Void) | Some(CType::Unknown(_)) => !matches!(to, CType::Void | CType::Unknown(_)),
             Some(current) if is_pointer(&to) && !is_pointer(current) && matches!(current, CType::Int { bits: 64, .. }) => true,
+            // A pointer to anything becomes a pointer to something (void ** to const char **)
+            Some(CType::Pointer(inner)) if matches!(**inner, CType::Void) => pointee(&to).is_some_and(|p| !matches!(p.unqualified(), CType::Void) && !p.is_unknown()),
             _ => false,
         };
 
@@ -293,6 +305,22 @@ impl Inference<'_> {
 
                         if let Some(to) = pointee(&ty) {
                             self.set_pointer(*arg, to.clone());
+                        }
+                    }
+
+                    // The variadic arguments of a printf format string: %s are strings, %p pointers
+                    let format = match (prototype.ty.variadic, prototype.ty.params.last()) {
+                        (true, Some(last)) if pointee(&self.ctx.resolve(&last.ty)).is_some_and(|p| matches!(p.unqualified(), CType::Char)) => args.get(prototype.ty.params.len() - 1).and_then(|&a| self.format(a)),
+                        _ => None,
+                    };
+
+                    let scanf = callee.as_deref().is_some_and(|c| c.contains("scanf"));
+
+                    for (&arg, conversion) in args.iter().skip(prototype.ty.params.len()).zip(format.iter().flat_map(|f| crate::lift::format_specifiers(f))) {
+                        match conversion {
+                            's' if !scanf => self.set_pointer(arg, CType::Const(Box::new(CType::Char))),
+                            'p' if !scanf => self.set_pointer(arg, CType::Void),
+                            _ => {}
                         }
                     }
 
