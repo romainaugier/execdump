@@ -275,7 +275,8 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
             continue;
         }
 
-        // A buffer of the frame, alone in its group
+        // A buffer of the frame, alone in its group. Its first bytes never accessed and passed as text, it is a
+        // string followed by other variables (char copy[32] then an int), not a struct
         let aggregate = |v: ValueId| pointee(&types[v]).is_some_and(|p| matches!(ctx.resolve(p).unqualified(), CType::Struct(_) | CType::Union(_)));
 
         let frame = match (group.as_slice(), group.iter().find_map(|v| f.allocated.get(v))) {
@@ -297,7 +298,7 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
 
             if let (Some(field), true) = (whole, found.iter().all(|a| a.offset == 0)) {
                 types[v] = CType::ptr(field.ty);
-            } else if inside && typed {
+            } else if inside && typed && (found.iter().any(|a| a.offset == 0) || !passed_as_text(f, ctx, v)) {
                 structs.push(Recovered { name: format!("st_{:x}_{}", addr, structs.len()), group: group.clone(), found, frame });
             }
 
@@ -413,6 +414,24 @@ impl Recovered {
         aggregate.size = size;
         return aggregate;
     }
+}
+
+/// A value passed to parameters of known functions that point to chars (strcpy(buffer, ...)), never to structs
+fn passed_as_text(f: &Func, ctx: &Context, v: ValueId) -> bool {
+    let mut values = vec![v];
+    values.extend(f.values[v].uses.iter().copied().filter(|&u| matches!(f.op(u), Some(Op::PtrToInt | Op::IntToPtr | Op::BitCast))));
+
+    let pointees: Vec<CType> = values
+        .iter()
+        .flat_map(|&value| f.values[value].uses.iter().map(move |&u| (value, u)))
+        .filter_map(|(value, user)| match &f.values[user].kind {
+            ValueKind::Inst { op: Op::Call, operands, callee: Some(callee), .. } => Some((value, operands, ctx.prototypes.get(callee)?)),
+            _ => None,
+        })
+        .flat_map(|(value, operands, prototype)| operands.iter().zip(prototype.ty.params.iter()).filter(move |(arg, _)| **arg == value).filter_map(|(_, param)| pointee(&ctx.resolve(&param.ty)).map(|p| ctx.resolve(p).unqualified().clone())))
+        .collect();
+
+    return pointees.iter().any(|p| matches!(p, CType::Char)) && !pointees.iter().any(|p| matches!(p, CType::Struct(_) | CType::Union(_)));
 }
 
 /// A type with a struct replaced by another

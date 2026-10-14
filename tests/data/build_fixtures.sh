@@ -30,6 +30,8 @@ clang --target=x86_64-linux-gnu -O2 -nostdlib -fPIE -pie -fuse-ld=lld -Wl,--dyna
 clang --target=i386-linux-gnu -nostdlib -fPIC -shared -fuse-ld=lld -Wl,-soname,libc.so.6 src/libc_stub.c -o "$TMP"/libc.so.6
 clang --target=i386-linux-gnu -O0 -fno-pie -no-pie -nostdlib -fno-stack-protector -fuse-ld=lld -Wl,--dynamic-linker,/lib/ld-linux.so.2 \
     -Wl,--build-id=none src/frame_i386.c "$TMP"/libc.so.6 -o elf_i386_frame
+clang --target=i386-linux-gnu -O0 -fno-pie -no-pie -nostdlib -fno-stack-protector -fuse-ld=lld -Wl,--dynamic-linker,/lib/ld-linux.so.2 \
+    -Wl,--build-id=none src/pointer_i386.c "$TMP"/libc.so.6 -o elf_i386_pointer
 
 # Optimized code with the stack protector (thread canary on x86, __stack_chk_guard on aarch64), a switch split
 # by the compiler and small functions, built by gcc on x86_64 (its own patterns: hot and cold parts)

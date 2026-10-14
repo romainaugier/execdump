@@ -746,6 +746,15 @@ impl<'a> Decompiler<'a> {
             discovered.ret = None;
         }
 
+        // main has its standard parameters, as many as it reads
+        if name == "main" && discovered.params.len() <= 3 {
+            let names = ["argc", "argv", "envp"];
+            let types = [CType::int(32), CType::ptr(CType::ptr(CType::Char)), CType::ptr(CType::ptr(CType::Char))];
+            let params = names.iter().zip(types).take(discovered.params.len()).map(|(n, ty)| Param { name: Some(n.to_string()), ty }).collect();
+            let prototype = Prototype { name: name.clone(), ty: FuncType { ret: CType::int(32), params, variadic: false } };
+            return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+        }
+
         // Itanium encodes the parameters but not the return type
         if let Some(prototype) = demangled {
             let sig = self.signature_from_prototype(&prototype, &name);
@@ -1188,7 +1197,7 @@ mod tests {
         assert!(classify.contains("return lib_add(0, 1);"), "{}", classify);
 
         let main = code("main");
-        assert!(main.contains("messages[a1 % 3]"), "{}", main);
+        assert!(main.starts_with("int main(int argc)") && main.contains("messages[argc % 3]"), "{}", main);
         assert!(main.contains("do {") && main.contains("classify("), "{}", main);
         assert!(main.contains("fatal();\n    }\n    return lib_add("), "{}", main);
 
@@ -1203,8 +1212,9 @@ mod tests {
         let decompiler = Decompiler::new(&program, &analysis).unwrap();
         let check = decompiler.c_code(function(&analysis, "check")).unwrap();
 
-        // The buffers are arrays, the scalars below them are values
-        assert!(check.contains("char dest[44];") && check.contains("strcpy(dest, src);"), "{}", check);
+        // The buffers are arrays (up to the return address, the arguments are above it), the scalars below them
+        // are values
+        assert!(check.contains("char dest[36];") && check.contains("strcpy(dest, src);") && !check.contains("dest[40]"), "{}", check);
         assert!(check.contains("for (i = 0; i <= 3; i++) {") && check.contains("+= dest[i];"), "{}", check);
 
         // The buffer is read after the call that wrote it
@@ -1214,6 +1224,21 @@ mod tests {
         // A string written four bytes at a time, stack arguments after a double
         assert!(check.contains("memcpy(v2, \"libsrty ko!\", 12);"), "{}", check);
         assert!(check.contains("printf(\"%s %d %f\\n\", v2, v1, 2.5);"), "{}", check);
+    }
+
+    #[test]
+    fn calls_through_a_global_holding_one_function() {
+        let program = fixture("elf_i386_pointer");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let main = decompiler.c_code(function(&analysis, "main")).unwrap();
+
+        // The pointer is only ever set to verify: the call is a call to verify, with its arguments
+        assert!(main.contains("main_check = verify;") && main.contains("verify(dest, \"secret\");"), "{}", main);
+
+        // main has its standard prototype, the format string is in a register before it is passed
+        assert!(main.starts_with("int main(int argc, char **argv)"), "{}", main);
+        assert!(main.contains("strcpy(dest, argv[1]);") && main.contains("printf(\"usage: %s password\\n\", *argv);"), "{}", main);
     }
 
     #[test]

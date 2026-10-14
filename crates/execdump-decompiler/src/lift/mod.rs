@@ -50,6 +50,9 @@ use std::num::NonZeroU32;
 pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
 
+/// Values followed back to the constant stored as a format string (casts, registers)
+const MAX_STORED_TEXT_STEPS: usize = 8;
+
 /// Metadata kind of the address of the machine instruction an LLVM instruction comes from
 /// Address of a machine instruction as a debug location (line, column), see Lifter::locate
 pub fn encode_location(addr: u64) -> (u32, u32) {
@@ -1287,7 +1290,65 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Constant last stored at [sp + delta] in the current block (an argument written before a call)
-    fn stored_constant(&self, delta: i64) -> Option<u64> {
+    /// Text of the constant string whose address was stored at [sp + delta]: a number, or the address of a string
+    /// global (lea of an absolute address), directly or through the register it was computed in
+    fn stored_text(&self, delta: i64) -> Option<String> {
+        let mut value = self.stored_value(delta)?.as_value_ref();
+
+        unsafe {
+            use inkwell::llvm_sys::core::*;
+            use inkwell::llvm_sys::LLVMOpcode;
+
+            for _ in 0..MAX_STORED_TEXT_STEPS {
+                if !LLVMIsAConstantInt(value).is_null() {
+                    return self.env.program.read_c_string(LLVMConstIntGetZExtValue(value), 4096);
+                }
+
+                if !LLVMIsAGlobalVariable(value).is_null() {
+                    let init = LLVMGetInitializer(value);
+
+                    if init.is_null() || LLVMIsConstantString(init) == 0 {
+                        return None;
+                    }
+
+                    let mut length = 0usize;
+                    let text = LLVMGetAsString(init, &mut length);
+                    let bytes = std::slice::from_raw_parts(text as *const u8, length);
+                    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+                    return Some(String::from_utf8_lossy(&bytes[..end]).into_owned());
+                }
+
+                let cast = |opcode| matches!(opcode, LLVMOpcode::LLVMPtrToInt | LLVMOpcode::LLVMTrunc | LLVMOpcode::LLVMZExt | LLVMOpcode::LLVMIntToPtr);
+
+                value = if !LLVMIsAConstantExpr(value).is_null() && cast(LLVMGetConstOpcode(value)) {
+                    LLVMGetOperand(value, 0)
+                } else if !LLVMIsAInstruction(value).is_null() && cast(LLVMGetInstructionOpcode(value)) {
+                    LLVMGetOperand(value, 0)
+                } else if !LLVMIsALoadInst(value).is_null() {
+                    // A register: the value last written to it before
+                    let register = LLVMGetOperand(value, 0);
+                    let mut previous = LLVMGetPreviousInstruction(value);
+
+                    while !previous.is_null() && (LLVMIsAStoreInst(previous).is_null() || LLVMGetOperand(previous, 1) != register) {
+                        previous = LLVMGetPreviousInstruction(previous);
+                    }
+
+                    if previous.is_null() || !self.regs.iter().any(|r| r.as_value_ref() == register) {
+                        return None;
+                    }
+
+                    LLVMGetOperand(previous, 0)
+                } else {
+                    return None;
+                };
+            }
+        }
+
+        return None;
+    }
+
+    /// Value last stored at [sp + delta] in the current block
+    fn stored_value(&self, delta: i64) -> Option<BasicValueEnum<'ctx>> {
         let Some(Known::Stack(offset)) = self.tracker.offset(self.env.abi.stack_pointer, delta) else {
             return None;
         };
@@ -1313,10 +1374,7 @@ impl<'ctx> Lifter<'ctx, '_> {
                 continue;
             }
 
-            return match current.get_operand(0).and_then(|o| o.value()) {
-                Some(BasicValueEnum::IntValue(value)) => value.get_zero_extended_constant(),
-                _ => None,
-            };
+            return current.get_operand(0).and_then(|o| o.value());
         }
 
         return None;
@@ -1644,7 +1702,7 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Some(Known::Const(addr)) => self.env.program.read_c_string(addr, 4096),
                 _ => None,
             },
-            Loc::Stack(offset) if param.ty == LType::Ptr => self.stored_constant(offset - self.env.abi.return_address).and_then(|addr| self.env.program.read_c_string(addr, 4096)),
+            Loc::Stack(offset) if param.ty == LType::Ptr => self.stored_text(offset - self.env.abi.return_address),
             _ => None,
         });
 

@@ -575,7 +575,9 @@ impl<'a> Builder<'a> {
             (Op::Load, [address]) => {
                 let loaded = self.constant_load(*address, id).unwrap_or_else(|| self.deref(*address, &self.types[id].clone()));
                 let ty = self.ty(id);
-                let converted = |written: &CType| !pointee(ty).is_some_and(|p| matches!(p.unqualified(), CType::Void)) && written.unqualified() != ty.unqualified();
+                // char * converts to const char * without a cast
+                let qualified = |written: &CType| pointee(written).zip(pointee(ty)).is_some_and(|(w, t)| w.unqualified() == t.unqualified() && (!matches!(w, CType::Const(_)) || matches!(t, CType::Const(_))));
+                let converted = |written: &CType| !pointee(ty).is_some_and(|p| matches!(p.unqualified(), CType::Void)) && written.unqualified() != ty.unqualified() && !qualified(written);
 
                 let address = f.values[id].uses.iter().any(|&u| matches!(f.op(u), Some(Op::IntToPtr | Op::Gep | Op::Load | Op::Store | Op::Add | Op::Sub)));
 

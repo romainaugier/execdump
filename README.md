@@ -259,7 +259,12 @@ Decompiler:
     a pointer to a function (`qsort`, `bsearch`, `signal`, `atexit`, `pthread_create`, `__libc_start_main`...)
     has the prototype of that parameter (`int compare(const void *a1, const void *a2)`), the address is the
     constant the instruction that last writes the register of the argument before the call computes (the
-    arguments passed on the stack are not followed)
+    arguments passed on the stack are not followed). A global holding one function (every instruction of the
+    program writing it writes the address of that function, and its address is never taken) is called as that
+    function, with its arguments: `static void (*check)(...); check = verify; check(a, b);` gives
+    `verify(a, b)` (x86 and x86_64). `main` has its standard prototype (`int main(int argc, char **argv)`, as many
+    parameters as it reads). The format string of a variadic call passed on the stack is found through the
+    register it was computed in (`lea ecx, [fmt]; mov [esp], ecx`), so `printf` gets its extra arguments
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
     The branches join where their paths meet, the paths that return early left out; a loop whose exits all
     return is left from the block of its innermost loop the most paths reach, so the branches before it still
@@ -316,8 +321,9 @@ Decompiler:
     programs return
   - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
     pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
-    escaping address starts a buffer that extends to the next one (what it points to stays reachable from it, so the
-    code stays correct), the scalars below the buffers become values. The addresses computed from a copy of the
+    escaping address starts a buffer that extends to the next one or to the return address (what it points to stays
+    reachable from it, so the code stays correct, the arguments are above the return address), the scalars below
+    the buffers become values. The addresses computed from a copy of the
     stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of
     constants (`mov dword [ebp-0x25], 0x4763305f`...) are one `memcpy` of the string literal
   - :heavy_check_mark: Trivial functions inlined: a function whose body is one statement with no effect of its own

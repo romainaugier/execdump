@@ -9,7 +9,8 @@
  * - an address that escapes (taken, passed, indexed by a variable) is the start of an object that
  *   extends to the next escaping address, or to the end of the frame: what it points to may be
  *   reached from it, the slot keeps it whole. The slot of the stack protector canary (removed
- *   before, see protector.rs) ends the objects below it too: the buffers it protects end there
+ *   before, see protector.rs) ends the objects below it too: the buffers it protects end there, and
+ *   the return address ends the locals (the arguments are above it)
  * - below the first escaping address, the loads and stores make the slots (overlapping accesses
  *   share one)
  *
@@ -64,7 +65,13 @@ pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValu
         let module = module.as_mut_ptr();
 
         for frame in frames(function) {
-            let ends: BTreeSet<u64> = bounds.iter().filter(|(f, _)| *f == frame).map(|(_, offset)| *offset).collect();
+            let mut ends: BTreeSet<u64> = bounds.iter().filter(|(f, _)| *f == frame).map(|(_, offset)| *offset).collect();
+
+            // The objects of the frame end at the return address, the arguments are above it
+            if let Some(start) = stack_offset(frame).filter(|&start| start < 0) {
+                ends.insert(start.unsigned_abs());
+            }
+
             split |= split_one(module, frame, &ends);
         }
     }

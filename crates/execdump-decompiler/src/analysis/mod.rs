@@ -5,6 +5,7 @@
 pub mod dot;
 pub mod function;
 pub mod insn;
+mod pointers;
 pub mod strings;
 
 use crate::analysis::function::{recover_function, CallTarget, Function, FunctionSource, RecoveryContext};
@@ -128,6 +129,7 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
         }
     }
 
+    pointers::resolve(program, &decoder, &mut analysis);
     analysis.build_callers();
 
     return Ok(analysis);
