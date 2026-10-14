@@ -18,13 +18,14 @@ mod refine;
 mod x86;
 mod aarch64;
 
-pub use frame::{fold_frame_addresses, split_frame};
+pub use frame::{declare_slots, fold_frame_addresses, split_frame, stack_offset};
 pub use protector::{remove_stack_protector, Protector};
 pub use refine::refine;
 
 use crate::analysis::function::{CallTarget, EdgeKind, Function};
 use crate::analysis::insn::Flow;
 use crate::analysis::Analysis;
+use crate::storage;
 
 use regs::{Abi, Reg, RegRef, RegisterFile};
 
@@ -34,7 +35,7 @@ use execdump_core::program::Program;
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::debug_info::{AsDIScope, DIFlags, DIFlagsConstants, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
+use inkwell::debug_info::{AsDIScope, DIFile, DIFlags, DIFlagsConstants, DILocalVariable, DIScope, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
 use inkwell::module::{FlagBehavior, Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
 use inkwell::types::IntType;
@@ -109,10 +110,31 @@ pub const CLOBBERS_ALL: u128 = u128::MAX;
 /// Full registers a machine instruction may write besides the flags, None when it cannot be decoded (a
 /// call writes what its callee writes, the caller adds it)
 pub fn written_registers(regs: &RegisterFile, cs: &capstone::Capstone, bytes: &[u8], addr: u64) -> Option<u128> {
-    return match Insn::decode(regs.arch, regs, cs, bytes, addr)? {
-        Insn::X86(insn) => Some(x86::written(&insn, regs)),
-        Insn::Aarch64(insn) => Some(aarch64::written(&insn)),
-    };
+    return Insn::decode(regs.arch, regs, cs, bytes, addr).map(|insn| insn.written(regs));
+}
+
+/// The line of the debug variable of a storage note: its location, and whether it is the value at the
+/// start of a block (the locations of registers and stack slots leave the high bit free)
+pub const ENTRY_NOTE: u32 = 1 << 31;
+
+/// A stack slot written by an instruction (an offset from the stack pointer at the entry), at the end of it
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotWrite {
+    pub at: u64,
+    pub offset: i64,
+    pub bytes: u32,
+}
+
+/// What the final lift notes of the storage: the debug variable of each location (llvm.dbg.value of the
+/// values written to the registers and the stack slots, the passes keep them), the registers tracked
+/// (declared as debug variables, mem2reg notes their phis), and the stack slots written
+struct Notes<'ctx> {
+    file: DIFile<'ctx>,
+    /// Type of the variables, of the size of the values (mem2reg drops the values smaller than their variable)
+    types: RefCell<HashMap<u32, DIType<'ctx>>>,
+    vars: RefCell<HashMap<u32, DILocalVariable<'ctx>>>,
+    tracked: Vec<Reg>,
+    slot_writes: RefCell<Vec<SlotWrite>>,
 }
 
 /// What the lifter needs to know about the program
@@ -245,6 +267,29 @@ impl Insn {
             Insn::X86(insn) => x86::track(insn, regs, tracker),
             Insn::Aarch64(insn) => aarch64::track(insn, regs, tracker),
         }
+    }
+
+    pub fn addr(&self) -> u64 {
+        return match self {
+            Insn::X86(insn) => insn.addr,
+            Insn::Aarch64(insn) => insn.addr,
+        };
+    }
+
+    /// Address of the next instruction
+    pub fn end(&self) -> u64 {
+        return match self {
+            Insn::X86(insn) => insn.addr + insn.size as u64,
+            Insn::Aarch64(insn) => insn.addr + 4,
+        };
+    }
+
+    /// Full registers the instruction writes (not the ones a call clobbers)
+    pub fn written(&self, regs: &RegisterFile) -> u128 {
+        return match self {
+            Insn::X86(insn) => x86::written(insn, regs),
+            Insn::Aarch64(insn) => aarch64::written(insn),
+        };
     }
 
     /// Whether the instruction reads (Some(true)) or overwrites (Some(false)) a register
@@ -599,6 +644,9 @@ pub struct Lifter<'ctx, 'a> {
     written: RefCell<BTreeMap<Reg, u32>>,
     /// Written registers at the end of the lifted blocks, merged at the start of their successors
     written_out: HashMap<u64, BTreeMap<Reg, u32>>,
+    /// Storage notes of the final lift, and the end of the instruction being lifted
+    notes: Option<Notes<'ctx>>,
+    next: u64,
     /// Instructions of the last flag producer whose flags have not been read yet: dead when the
     /// next producer of the same block overwrites them (keeps the IR to optimize small)
     unread_flags: RefCell<Vec<InstructionValue<'ctx>>>,
@@ -619,8 +667,10 @@ struct BlockFlags<'ctx> {
     tail: Vec<InstructionValue<'ctx>>,
 }
 
-/// Lifts a function into a module, with its signature or the discovery one
-pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function: &Function, frame: &Frame, sig: Signature, discovery: bool) -> Result<FunctionValue<'ctx>, String> {
+/// Lifts a function into a module, with its signature or the discovery one. With the storage, the values
+/// written to the registers and the stack slots are noted with their location, returns the stack slots
+/// written.
+pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function: &Function, frame: &Frame, sig: Signature, discovery: bool, storage: bool) -> Result<(FunctionValue<'ctx>, Vec<SlotWrite>), String> {
     let fn_type = function_type(cx, &sig, discovery);
     let llvm = module.get_function(&sig.name).unwrap_or_else(|| module.add_function(&sig.name, fn_type, None));
 
@@ -630,6 +680,11 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
     // The discovery of a signature does not need the addresses
     let debug = (!discovery).then(|| debug_info(cx, module, llvm, &sig.name));
     builder.position_at_end(entry);
+
+    let notes = match debug.as_ref() {
+        Some((debug, _)) if storage => Some(notes(env, frame, &sig, debug)?),
+        _ => None,
+    };
 
     // The stack frame belongs to the first instruction
     if let Some((debug, scope)) = debug.as_ref() {
@@ -641,6 +696,10 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
 
     let frame_size = (frame.high - frame.low).max(1) as u32;
     let frame_ptr = builder.build_alloca(cx.i8_type().array_type(frame_size), "frame").map_err(|e| e.to_string())?;
+
+    if storage {
+        frame::set_stack_offset(frame_ptr.as_value_ref(), frame.low);
+    }
 
     let mut lifter = Lifter {
         cx,
@@ -661,6 +720,8 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         addr: function.addr,
         discovery,
         debug,
+        notes,
+        next: function.addr,
         written: RefCell::new(BTreeMap::new()),
         written_out: HashMap::new(),
         unread_flags: RefCell::new(Vec::new()),
@@ -670,7 +731,9 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         block_flags: HashMap::new(),
     };
 
+    lifter.declare_registers();
     lifter.lift_entry()?;
+    lifter.note_entry(function.addr);
 
     let blocks: HashMap<u64, LlvmBlock> = function.blocks.keys().map(|&a| (a, cx.append_basic_block(llvm, &format!("bb_{:x}", a)))).collect();
 
@@ -695,6 +758,8 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         builder.finalize();
     }
 
+    let slot_writes = lifter.notes.as_ref().map(|n| n.slot_writes.take()).unwrap_or_default();
+
     // Blocks the reverse post order did not reach (only reachable through unresolved jumps)
     for block in blocks.values() {
         if block.get_terminator().is_none() {
@@ -703,7 +768,29 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         }
     }
 
-    return Ok(llvm);
+    return Ok((llvm, slot_writes));
+}
+
+impl<'ctx> Notes<'ctx> {
+    fn ty(&self, builder: &DebugInfoBuilder<'ctx>, bits: u32) -> DIType<'ctx> {
+        return *self.types.borrow_mut().entry(bits).or_insert_with(|| builder.create_basic_type("value", bits as u64, 0x07, DIFlags::ZERO).expect("a basic type").as_type());
+    }
+}
+
+/// The storage notes of a function: its registers written or received (not the stack pointer and the flags)
+fn notes<'ctx>(env: &Env, frame: &Frame, sig: &Signature, debug: &DebugInfoBuilder<'ctx>) -> Result<Notes<'ctx>, String> {
+    let mut mask = frame.blocks.values().flatten().fold(0u128, |mask, insn| mask | insn.written(env.regs));
+
+    for param in sig.params.iter() {
+        if let Loc::Reg(reg) = param.loc {
+            mask |= 1 << reg;
+        }
+    }
+
+    let tracked = (0..env.regs.regs.len()).filter(|&r| mask >> r & 1 == 1 && env.regs.regs[r].bits >= 8 && r != env.abi.stack_pointer).collect();
+    let file = debug.create_file("binary", ".");
+
+    return Ok(Notes { file, types: RefCell::new(HashMap::new()), vars: RefCell::new(HashMap::new()), tracked, slot_writes: RefCell::new(Vec::new()) });
 }
 
 /// Debug information of a lifted function: a compile unit and a subprogram, the scope of the locations
@@ -807,11 +894,69 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Loc::Stack(offset) => {
                     let ptr = self.frame_ptr(offset)?;
                     llvm!(self.builder.build_store(ptr, value));
+
+                    if let Some(loc) = storage::Loc::stack(offset) {
+                        self.note(loc, value, self.function.addr, true);
+                    }
                 }
             }
         }
 
         return Ok(());
+    }
+
+    /// Notes that a location holds a value from an address on (at the start of a block, or after the
+    /// instruction that writes it)
+    fn note(&self, loc: storage::Loc, value: impl AsValueRef, start: u64, entry: bool) {
+        let (Some(notes), Some((builder, scope)), Some(block)) = (self.notes.as_ref(), self.debug.as_ref(), self.builder.get_insert_block()) else {
+            return;
+        };
+
+        let key = if entry { loc.0 | ENTRY_NOTE } else { loc.0 };
+        let var = *notes.vars.borrow_mut().entry(key).or_insert_with(|| builder.create_auto_variable(*scope, &format!("loc_{:x}", key), notes.file, key, notes.ty(builder, 8), true, DIFlags::ZERO, 0));
+        let (line, column) = encode_location(start);
+        let location = builder.create_debug_location(self.cx, line, column, *scope, None);
+        let expression = builder.create_expression(Vec::new());
+
+        unsafe {
+            inkwell::llvm_sys::debuginfo::LLVMDIBuilderInsertDbgValueAtEnd(builder.as_mut_ptr(), value.as_value_ref(), var.as_mut_ptr(), expression.as_mut_ptr(), location.as_mut_ptr(), block.as_mut_ptr());
+        }
+    }
+
+    /// Notes a value written to a register, at the end of the instruction
+    fn note_register(&self, r: RegRef, value: IntValue<'ctx>) {
+        let tracked = self.notes.as_ref().is_some_and(|n| n.tracked.contains(&r.reg));
+
+        if let Some(loc) = storage::Loc::register(r.reg, r.bits, r.offset / 8).filter(|_| tracked && r.offset % 8 == 0) {
+            self.note(loc, value, self.next, false);
+        }
+    }
+
+    /// The start of a machine block: the notes mem2reg makes of the phis of the registers before it are at
+    /// its address (its value is the address: identical notes would be merged)
+    fn note_entry(&self, addr: u64) {
+        self.note(storage::Loc::NONE, self.int(64).const_int(addr, false), addr, true);
+    }
+
+    /// The tracked registers are debug variables: mem2reg notes their phis
+    fn declare_registers(&self) {
+        let (Some(notes), Some((builder, scope)), Some(block)) = (self.notes.as_ref(), self.debug.as_ref(), self.builder.get_insert_block()) else {
+            return;
+        };
+
+        let (line, column) = encode_location(self.function.addr);
+        let location = builder.create_debug_location(self.cx, line, column, *scope, None);
+
+        for &reg in notes.tracked.iter() {
+            let Some(loc) = storage::Loc::register(reg, self.env.regs.regs[reg].bits, 0) else {
+                continue;
+            };
+
+            let key = loc.0 | ENTRY_NOTE;
+            let ty = notes.ty(builder, self.env.regs.regs[reg].bits);
+            let var = builder.create_auto_variable(*scope, &format!("loc_{:x}", key), notes.file, key, ty, true, DIFlags::ZERO, 0);
+            builder.insert_declare_at_end(self.regs[reg], Some(var), None, location, block);
+        }
     }
 
     fn lift_block(&mut self, addr: u64, insns: &[Insn], blocks: &HashMap<u64, LlvmBlock<'ctx>>) -> Result<(), String> {
@@ -836,12 +981,12 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         *self.written.borrow_mut() = written.unwrap_or_default();
 
-        for insn in insns.iter() {
-            self.addr = match insn {
-                Insn::X86(i) => i.addr,
-                Insn::Aarch64(i) => i.addr,
-            };
+        self.locate(addr);
+        self.note_entry(addr);
 
+        for insn in insns.iter() {
+            self.addr = insn.addr();
+            self.next = insn.end();
             self.locate(self.addr);
 
             match insn {
@@ -1016,6 +1161,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         let value = self.resize(value, r.bits, false)?;
 
         self.written.borrow_mut().insert(r.reg, r.bits);
+        self.note_register(r, value);
 
         if r.bits == full_bits {
             llvm!(self.builder.build_store(self.regs[r.reg], value));
@@ -1043,6 +1189,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     pub fn write_zext(&self, r: RegRef, value: IntValue<'ctx>) -> Result<(), String> {
         let full_bits = self.env.regs.regs[r.reg].bits;
         self.written.borrow_mut().insert(r.reg, value.get_type().get_bit_width());
+        self.note_register(RegRef { bits: value.get_type().get_bit_width(), ..r }, value);
 
         let value = self.resize(value, full_bits, false)?;
         llvm!(self.builder.build_store(self.regs[r.reg], value));
@@ -1249,7 +1396,33 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     pub fn store(&self, ptr: PointerValue<'ctx>, value: IntValue<'ctx>) -> Result<(), String> {
         llvm!(self.builder.build_store(ptr, value));
+
+        if let Some(notes) = self.notes.as_ref() {
+            let slot = self.frame_index(ptr).map(|index| index - self.frame_base);
+            let bits = value.get_type().get_bit_width();
+
+            if let Some(offset) = slot {
+                notes.slot_writes.borrow_mut().push(SlotWrite { at: self.next, offset, bytes: bits.div_ceil(8) });
+
+                if let Some(loc) = storage::Loc::stack(offset) {
+                    self.note(loc, value, self.next, false);
+                }
+            }
+        }
+
         return Ok(());
+    }
+
+    /// Index in the frame of a pointer to a constant offset of it
+    fn frame_index(&self, ptr: PointerValue<'ctx>) -> Option<i64> {
+        let gep = ptr.as_instruction_value().filter(|i| i.get_opcode() == InstructionOpcode::GetElementPtr)?;
+        let base = gep.get_operand(0)?.value()?;
+
+        if base.as_value_ref() != self.frame.as_value_ref() || gep.get_num_operands() != 2 {
+            return None;
+        }
+
+        return gep.get_operand(1)?.value()?.into_int_value().get_sign_extended_constant();
     }
 
     /// Pointer to a global (data, string, function or import slot) at an address
@@ -1635,7 +1808,10 @@ impl<'ctx> Lifter<'ctx, '_> {
         let mut unread = self.unread_flags.borrow_mut();
 
         while let Some(instruction) = next {
-            unread.push(instruction);
+            if unsafe { inkwell::llvm_sys::core::LLVMIsADbgInfoIntrinsic(instruction.as_value_ref()) }.is_null() {
+                unread.push(instruction);
+            }
+
             next = instruction.get_next_instruction();
         }
 

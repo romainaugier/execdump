@@ -18,14 +18,15 @@
  */
 
 use super::text_bytes;
+use crate::storage::Loc;
 
 use inkwell::llvm_sys::core::*;
 use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMContextRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
-use inkwell::llvm_sys::target::{LLVMGetModuleDataLayout, LLVMStoreSizeOfType, LLVMTargetDataRef};
+use inkwell::llvm_sys::target::{LLVMGetModuleDataLayout, LLVMSizeOfTypeInBits, LLVMStoreSizeOfType, LLVMTargetDataRef};
 use inkwell::llvm_sys::{LLVMLinkage, LLVMOpcode, LLVMTypeKind, LLVMUnnamedAddr};
 use inkwell::module::Module;
-use inkwell::llvm_sys::debuginfo::{LLVMInstructionGetDebugLoc, LLVMInstructionSetDebugLoc};
-use inkwell::values::FunctionValue;
+use inkwell::llvm_sys::debuginfo::*;
+use inkwell::values::{AsValueRef, FunctionValue};
 
 use std::collections::BTreeSet;
 
@@ -69,6 +70,83 @@ pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValu
     }
 
     return split;
+}
+
+const STACK_OFFSET: &str = "execdump.stack";
+
+/// Offset of a part of the stack frame (an alloca) from the stack pointer at the entry, kept in metadata
+pub fn set_stack_offset(alloca: LLVMValueRef, offset: i64) {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, STACK_OFFSET.as_ptr() as *const _, STACK_OFFSET.len() as u32);
+        let mut value = [LLVMValueAsMetadata(LLVMConstInt(LLVMInt64TypeInContext(context), offset as u64, 1))];
+        let node = LLVMMDNodeInContext2(context, value.as_mut_ptr(), 1);
+        LLVMSetMetadata(alloca, kind, LLVMMetadataAsValue(context, node));
+    }
+}
+
+pub fn stack_offset(alloca: LLVMValueRef) -> Option<i64> {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, STACK_OFFSET.as_ptr() as *const _, STACK_OFFSET.len() as u32);
+        let node = LLVMGetMetadata(alloca, kind);
+
+        if node.is_null() || LLVMGetMDNodeNumOperands(node) != 1 {
+            return None;
+        }
+
+        let mut value = std::ptr::null_mut();
+        LLVMGetMDNodeOperands(node, &mut value);
+
+        return (!value.is_null() && !LLVMIsAConstantInt(value).is_null()).then(|| LLVMConstIntGetSExtValue(value));
+    }
+}
+
+/// The parts of the stack frame split into scalars are debug variables of their stack slot: mem2reg notes
+/// the values stored to them and their phis
+pub fn declare_slots(module: &Module, function: FunctionValue) {
+    unsafe {
+        let raw = function.as_value_ref();
+        let subprogram = LLVMGetSubprogram(raw);
+
+        let Some(entry) = function.get_first_basic_block().filter(|_| !subprogram.is_null()) else {
+            return;
+        };
+
+        let mut slots: Vec<(LLVMValueRef, i64)> = Vec::new();
+        let mut instruction = LLVMGetFirstInstruction(entry.as_mut_ptr());
+
+        while !instruction.is_null() {
+            if LLVMGetInstructionOpcode(instruction) == LLVMOpcode::LLVMAlloca && byte_array(LLVMGetAllocatedType(instruction)).is_none() {
+                if let Some(offset) = stack_offset(instruction) {
+                    slots.push((instruction, offset));
+                }
+            }
+
+            instruction = LLVMGetNextInstruction(instruction);
+        }
+
+        if slots.is_empty() {
+            return;
+        }
+
+        let debug = LLVMCreateDIBuilderDisallowUnresolved(module.as_mut_ptr());
+        let file = LLVMDIScopeGetFile(subprogram);
+        let layout = LLVMGetModuleDataLayout(module.as_mut_ptr());
+        let expression = LLVMDIBuilderCreateExpression(debug, std::ptr::null_mut(), 0);
+        let location = LLVMDIBuilderCreateDebugLocation(LLVMGetTypeContext(LLVMTypeOf(raw)), 0, 0, subprogram, std::ptr::null_mut());
+
+        for (alloca, offset) in slots {
+            let line = Loc::stack(offset).map_or(0, |l| l.0) | super::ENTRY_NOTE;
+            let name = format!("loc_{:x}", line);
+            let ty = LLVMDIBuilderCreateBasicType(debug, c"value".as_ptr(), 5, LLVMSizeOfTypeInBits(layout, LLVMGetAllocatedType(alloca)), 0x07, 0);
+            let variable = LLVMDIBuilderCreateAutoVariable(debug, subprogram, name.as_ptr() as *const _, name.len(), file, line, ty, 1, 0, 0);
+            LLVMDIBuilderInsertDeclareBefore(debug, alloca, variable, expression, location, LLVMGetBasicBlockTerminator(entry.as_mut_ptr()));
+        }
+
+        LLVMDIBuilderFinalize(debug);
+        LLVMDisposeDIBuilder(debug);
+    }
 }
 
 /// Byte array allocas of the entry block
@@ -414,6 +492,11 @@ unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSe
 
                 let alloca = LLVMBuildAlloca(builder, ty, c"".as_ptr());
                 LLVMSetAlignment(alloca, LLVMGetAlignment(frame).max(1));
+
+                if let Some(offset) = stack_offset(frame) {
+                    set_stack_offset(alloca, offset + slot.start as i64);
+                }
+
                 alloca
             })
             .collect();
@@ -517,7 +600,7 @@ unsafe fn write_strings(module: LLVMModuleRef, context: LLVMContextRef, builder:
                         run = vec![(instruction, offset, bytes)];
                     }
                     // Address computations do not end a run, anything that touches memory does
-                    None if matches!(LLVMGetInstructionOpcode(instruction), LLVMOpcode::LLVMGetElementPtr | LLVMOpcode::LLVMPtrToInt) => {}
+                    None if matches!(LLVMGetInstructionOpcode(instruction), LLVMOpcode::LLVMGetElementPtr | LLVMOpcode::LLVMPtrToInt) || !LLVMIsADbgInfoIntrinsic(instruction).is_null() => {}
                     None => {
                         replace_run(module, context, builder, alloca, &run);
                         run.clear();

@@ -15,6 +15,7 @@ use crate::typedb::{Platform, TypeDb};
 use crate::analysis::insn::{Decoder, Flow};
 use crate::c::{self, ast::CFunction, inline::Trivial};
 use crate::llm::{self, Assistant, LlmConfig, Renames};
+use crate::storage;
 use crate::types::{CType, DataModel, FuncType, Param, Prototype};
 
 use execdump_core::demangle::demangle_symbol;
@@ -259,7 +260,7 @@ impl<'a> Decompiler<'a> {
     /// The C function of a function, with the address of each statement
     pub fn c_function(&self, addr: u64) -> Result<CFunction, String> {
         let cx = anonymous_context();
-        let module = self.lift_function(&cx, addr)?;
+        let (module, lifted) = self.lift(&cx, addr, true)?;
         let sig = self.signature(addr);
         let function = module.get_function(&sig.name).ok_or("the lifted function is missing")?;
         let prototype = self.prototypes.borrow().get(&sig.name).cloned();
@@ -280,6 +281,8 @@ impl<'a> Decompiler<'a> {
 
             c::decompile(&module, function, &ctx, prototype.as_ref(), addr)
         };
+
+        self.storage(addr, &mut function, &lifted);
 
         let first = self.inlining.borrow_mut().insert(addr);
         self.inline_trivial(&mut function);
@@ -345,6 +348,11 @@ impl<'a> Decompiler<'a> {
 
     /// Lifts a function with its final signature into a new module and optimizes it
     pub fn lift_function<'ctx>(&self, cx: &'ctx Context, addr: u64) -> Result<Module<'ctx>, String> {
+        return self.lift(cx, addr, false).map(|(module, _)| module);
+    }
+
+    /// Lifts and optimizes a function, with the notes of the storage of its values for the C code
+    fn lift<'ctx>(&self, cx: &'ctx Context, addr: u64, storage: bool) -> Result<(Module<'ctx>, Lifted), String> {
         let function = self.analysis.functions.get(&addr).ok_or_else(|| format!("no function at {:#x}", addr))?;
         let sig = self.signature(addr);
 
@@ -354,11 +362,63 @@ impl<'a> Decompiler<'a> {
         let env = self.env(&signature, &global_name);
 
         let frame = self.frame(&env, function)?;
-        lift::lift(cx, &module, &env, function, &frame, sig, false)?;
+        let (_, slot_writes) = lift::lift(cx, &module, &env, function, &frame, sig, false, storage)?;
 
-        self.optimize(&module)?;
+        let canaries = self.optimize(&module, storage)?.into_iter().map(|index| index as i64 + frame.low).collect();
 
-        return Ok(module);
+        return Ok((module, Lifted { frame, slot_writes, canaries }));
+    }
+
+    /// Ranges of the locations of the variables of a C function, from the notes of the backend and the
+    /// instructions of the function (what they write, what the calls clobber)
+    fn storage(&self, addr: u64, function: &mut CFunction, lifted: &Lifted) {
+        let Some(analysis) = self.analysis.functions.get(&addr) else {
+            return;
+        };
+
+        let callee_saved = self.abi.callee_saved.iter().fold(0u128, |mask, &r| mask | 1 << r);
+        let results = 1u128 << self.abi.int_ret | 1u128 << self.abi.float_ret;
+        let index: HashMap<u64, usize> = analysis.blocks.keys().enumerate().map(|(i, &a)| (a, i)).collect();
+
+        let blocks: Vec<storage::Block> = analysis
+            .blocks
+            .values()
+            .map(|block| {
+                let insns = lifted.frame.blocks.get(&block.start).map_or(&[][..], |i| i.as_slice());
+                let steps = insns
+                    .iter()
+                    .map(|insn| {
+                        let call = analysis.calls.iter().find(|c| c.addr == insn.addr() && !c.tail);
+                        let clobbered = call.map_or(0, |c| (self.call_signature(&c.target).clobbers & !callee_saved) | results);
+                        storage::Step { end: insn.end(), kills: insn.written(&self.regs) | clobbered }
+                    })
+                    .collect();
+
+                storage::Block { start: block.start, end: block.end, preds: block.preds.iter().filter_map(|p| index.get(p).copied()).collect(), steps }
+            })
+            .collect();
+
+        let mut used = vec![false; function.vars.len()];
+        c::ast::mark_used(&function.body, &mut used);
+        function.params.iter().for_each(|&p| used[p] = true);
+
+        let notes = std::mem::take(&mut function.storage.notes);
+        let mut vars = storage::ranges(addr, &blocks, &notes, &lifted.slot_writes);
+
+        // The variables of the frame are in their slot from the start to the end of the function
+        let start = blocks.iter().map(|b| b.start.wrapping_sub(addr) as u32).min().unwrap_or(0);
+        let end = blocks.iter().map(|b| b.end.wrapping_sub(addr) as u32).max().unwrap_or(0);
+
+        for (var, loc) in std::mem::take(&mut function.storage.frame_vars) {
+            vars.retain(|(v, _)| *v != var);
+            vars.push((var, vec![storage::Range { start, end, loc }]));
+        }
+
+        vars.sort_by_key(|(var, _)| *var);
+        vars.retain(|(var, _)| used.get(*var).copied().unwrap_or(false));
+
+        function.storage.vars = vars;
+        function.storage.canaries = lifted.canaries.iter().filter_map(|&offset| storage::Loc::stack(offset)).map(|l| l.canary()).collect();
     }
 
     fn env<'e>(&'e self, signature: &'e dyn Fn(&CallTarget) -> Signature, global_name: &'e dyn Fn(u64) -> String) -> Env<'e> {
@@ -373,7 +433,8 @@ impl<'a> Decompiler<'a> {
         return Ok(module);
     }
 
-    fn optimize(&self, module: &Module) -> Result<(), String> {
+    /// Optimizes a lifted module, returns the frame offsets the stack canary was stored at
+    fn optimize(&self, module: &Module, storage: bool) -> Result<Vec<u64>, String> {
         module.verify().map_err(|e| format!("invalid IR: {}", e.to_string()))?;
 
         module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
@@ -381,12 +442,19 @@ impl<'a> Decompiler<'a> {
         // Stack protector checks removed, frames kept whole by an escaping address split into variables,
         // then optimized again
         let mut again = false;
+        let mut canaries = Vec::new();
 
         for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
             lift::fold_frame_addresses(function);
             let protector = lift::remove_stack_protector(function);
             again |= protector.changed;
-            again |= lift::split_frame(module, function, &protector.slots);
+            let split = lift::split_frame(module, function, &protector.slots);
+            again |= split;
+            canaries.extend(protector.slots.iter().map(|(_, offset)| *offset));
+
+            if split && storage {
+                lift::declare_slots(module, function);
+            }
         }
 
         if again {
@@ -403,7 +471,10 @@ impl<'a> Decompiler<'a> {
             unsafe { global.delete() };
         }
 
-        return Ok(());
+        canaries.sort();
+        canaries.dedup();
+
+        return Ok(canaries);
     }
 
     /*
@@ -782,9 +853,9 @@ impl<'a> Decompiler<'a> {
 
         let frame = self.frame(&env, function)?;
         let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params);
-        let llvm = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true)?;
+        let (llvm, _) = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true, false)?;
 
-        self.optimize(&module)?;
+        self.optimize(&module, false)?;
 
         return Ok(refine(&module, llvm, &discovery, &self.abi));
     }
@@ -899,6 +970,14 @@ impl<'a> Decompiler<'a> {
             CType::Unknown(bits) => LType::Int(*bits as u32),
         });
     }
+}
+
+/// A lifted function: its frame, the stack slots its instructions write, the offsets of the slots of
+/// the stack canary
+struct Lifted {
+    frame: Rc<Frame>,
+    slot_writes: Vec<lift::SlotWrite>,
+    canaries: Vec<i64>,
 }
 
 /// Line of LLVM IR without its debug attachments (", !dbg !12" on instructions, " !dbg !4" on definitions)
@@ -1201,6 +1280,41 @@ mod tests {
             let code = decompiler.c_code(function(&analysis, "by_value")).unwrap();
             assert!(code.starts_with("int by_value(const void *a1, const void *a2)"), "{}: {}", name, code);
         }
+    }
+
+    #[test]
+    fn storage_of_the_variables() {
+        let location = |name: &str, function_name: &str, var: &str, at: u64| -> Option<storage::Loc> {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+            let addr = function(&analysis, function_name);
+            let c = decompiler.c_function(addr).unwrap();
+            let var = c.vars.iter().position(|v| v.name == var).unwrap_or_else(|| panic!("{}: no {} in {:?}", name, var, c.vars));
+            let (_, ranges) = c.storage.vars.iter().find(|(v, _)| *v == var)?;
+            storage::location_at(ranges, (at - addr) as u32)
+        };
+
+        let regs = RegisterFile::new(Architecture::X86_64);
+
+        // The parameter in its register at the entry, the buffer in its slot
+        assert_eq!(location("elf_x86_64_quality", "length_of", "src", 0x4010a0), storage::Loc::register(regs.reg("rdi"), 64, 0));
+        assert_eq!(location("elf_x86_64_quality", "length_of", "dest", 0x4010d4), storage::Loc::stack(-0x58));
+        assert_eq!(location("elf_x86_64_quality", "parse_opt", "a1", 0x401120), storage::Loc::register(regs.reg("rdi"), 32, 0));
+
+        // Unoptimized code: the variables are in their stack slot, the loop counter at the start of the loop too
+        assert_eq!(location("elf_i386_frame", "check", "i", 0x401319), storage::Loc::stack(-0x38));
+        assert_eq!(location("elf_i386_frame", "check", "src", 0x401300), storage::Loc::stack(4));
+
+        let regs = RegisterFile::new(Architecture::Aarch64);
+        assert_eq!(location("elf_aarch64_quality", "length_of", "src", 0x10640), storage::Loc::register(regs.reg("x0"), 64, 0));
+
+        // The slot of the canary is known
+        let program = fixture("elf_x86_64_quality");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let c = decompiler.c_function(function(&analysis, "length_of")).unwrap();
+        assert_eq!(c.storage.canaries, vec![storage::Loc::stack(-0x10).unwrap().canary()]);
     }
 
     #[test]

@@ -329,6 +329,8 @@ pub fn render_function(decompiler: &Decompiler, mut function: CFunction, notes: 
 
     meta.calls = used.calls.into_iter().collect();
     meta.others = used.others.into_iter().collect();
+    meta.storage = std::mem::take(&mut function.storage.vars);
+    meta.canaries = std::mem::take(&mut function.storage.canaries);
 
     return Rendered { ok: true, text: printed.text, lines: printed.lines, meta };
 }

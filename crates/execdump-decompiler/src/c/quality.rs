@@ -141,6 +141,7 @@ mod tests {
             addr: 0,
             globals: Vec::new(),
             inlined: false,
+            storage: Default::default(),
         };
 
         let quality = function.quality(12);

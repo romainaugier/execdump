@@ -118,8 +118,9 @@ Options:
       --decompile <DECOMPILE>
           Analyze the code and output the requested decompilation stages (comma separated):
           functions (recovered functions list), cfg (control flow graphs as Graphviz dot),
-          callgraph (call graph as Graphviz dot), llvm (optimized LLVM IR), c (decompiled C code)
-          [possible values: functions, cfg, callgraph, llvm, c]
+          callgraph (call graph as Graphviz dot), llvm (optimized LLVM IR), c (decompiled C code),
+          storage (where the variables are while the functions run)
+          [possible values: functions, cfg, callgraph, llvm, c, storage]
       --functions-filter <FUNCTIONS_FILTER>
           Regular expression to filter the functions (by name or hexadecimal address) used by --decompile [default: .*]
       --llm
@@ -327,6 +328,20 @@ Decompiler:
   - :heavy_check_mark: Address of the statements: each machine instruction is the debug location of the LLVM instructions
     lifted from it, which the passes keep, so nearly every line of C has the address it comes from (the gutter of the C
     views, and the synchronization of the C code with the disassembly and the graph)
+  - :heavy_check_mark: Storage of the variables (`--decompile storage`, kept with the C code in the cache of the
+    projects, for a debugger): where each variable is while the function runs, a register or a stack slot over
+    ranges of addresses. A location is one u32 (2 bits of kind, then a register: 8 bits of id, 2 of width, 2 of
+    byte offset; a stack slot: a 28-bit offset from the stack pointer at the entry, and a bit for the slot of the
+    stack canary; or a constant), a range 12 bytes (start and end as offsets from the start of the function, the
+    location); the ranges of a variable are sorted and do not overlap, the location at an address is a binary
+    search. The final lift notes the values with `llvm.dbg.value`, which the passes keep without changing the code:
+    the values written to the registers and the stack slots after each instruction, and the registers and the
+    split stack slots are debug variables, so mem2reg notes their phis at the start of the blocks (a marker gives
+    the address of each machine block). The C backend reads the notes of the values that are variables (or that
+    an extension, a conversion or a phi of a variable comes from), then the ranges follow the machine code: a
+    location holds a variable from a note until an instruction writes it (the registers it writes, the ones a call
+    clobbers, the stack slots it stores to), a block starts with what all the blocks before it agree on. The
+    variables of the stack frame (buffers) are in their slot for the whole function
   - :heavy_check_mark: Strings and constants: addresses of strings are string literals (the ones passed to functions even when they end
     another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
     floating point numbers, strings, functions), constants that are the address of a function are its name. Literals

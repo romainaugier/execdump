@@ -253,6 +253,8 @@ pub struct CFunction {
     pub globals: Vec<(String, Option<CType>)>,
     /// Its callers show its only statement instead of calling it, it is printed on one line
     pub inlined: bool,
+    /// Where its variables are while it runs
+    pub storage: crate::storage::Storage,
 }
 
 /// Printed C code with the address of each line
@@ -782,6 +784,7 @@ mod tests {
             addr: 0,
             globals: Vec::new(),
             inlined: false,
+            storage: Default::default(),
         };
         let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
@@ -821,7 +824,7 @@ mod tests {
             Stmt::new(StmtKind::Return(Some(Expr::Var(2))), None),
         ];
 
-        let function = CFunction { name: "f".to_string(), ret: int.clone(), params: vec![0], variadic: false, vars: vec![var("n"), var("t"), var("s"), var("u")], body, addr: 0, globals: Vec::new(), inlined: false };
+        let function = CFunction { name: "f".to_string(), ret: int.clone(), params: vec![0], variadic: false, vars: vec![var("n"), var("t"), var("s"), var("u")], body, addr: 0, globals: Vec::new(), inlined: false, storage: Default::default() };
         let text = function.print().text;
 
         assert!(text.starts_with("int f(int n)\n{\n    int u;\n\n    int s = 0;\n    while (n) {\n        int t = n + 1;\n"), "{}", text);
@@ -849,6 +852,7 @@ mod tests {
             addr: 0x1000,
             globals: Vec::new(),
             inlined: false,
+            storage: Default::default(),
         };
 
         let printed = function.print();

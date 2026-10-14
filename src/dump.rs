@@ -315,6 +315,16 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                         println!("{}", text);
                     }
                 }
+                DecompileOutput::Storage => {
+                    let decompiler = Decompiler::new(&program, &analysis)?;
+
+                    for function in functions.iter().filter(|f| f.thunk.is_none()) {
+                        match crash::catch(|| decompiler.c_function(function.addr)).and_then(|r| r) {
+                            Ok(c) => println!("// {} ({:#x})\n{}", function.name, function.addr, storage_text(&c, &decompiler)),
+                            Err(error) => println!("// {} ({:#x}): {}\n", function.name, function.addr, error),
+                        }
+                    }
+                }
                 DecompileOutput::Llvm => {
                     let decompiler = Decompiler::new(&program, &analysis)?;
 
@@ -330,6 +340,26 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
     }
 
     return Ok(());
+}
+
+/// The locations of the variables of a function over its addresses, and the slots of the stack canary
+fn storage_text(function: &execdump_decompiler::c::ast::CFunction, decompiler: &Decompiler) -> String {
+    let mut out = String::new();
+
+    for (var, ranges) in function.storage.vars.iter() {
+        let places: Vec<String> = ranges
+            .iter()
+            .map(|r| format!("{} {:#x}..{:#x}", r.loc.describe(&decompiler.regs), function.addr.wrapping_add(r.start as u64), function.addr.wrapping_add(r.end as u64)))
+            .collect();
+
+        out.push_str(&format!("{}: {}\n", function.vars[*var].name, places.join(", ")));
+    }
+
+    for canary in function.storage.canaries.iter() {
+        out.push_str(&format!("stack canary: {}\n", canary.describe(&decompiler.regs)));
+    }
+
+    return out;
 }
 
 pub fn dump_exec(exec: &Exec, args: &Args, config: &Config) {

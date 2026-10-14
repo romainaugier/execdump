@@ -10,6 +10,7 @@
 use super::ast::{BinaryOp, Expr, Stmt, StmtKind, UnaryOp, Var, VarId};
 use super::ir::{Allocated, FloatCmp, Func, Op, Pred, Ty, ValueId, ValueKind};
 use super::typing::{base_type, is_pointer, pointee};
+use crate::storage::{Loc, Place, VarNote};
 use super::Context;
 
 use crate::types::CType;
@@ -60,6 +61,8 @@ pub struct Built {
     pub vars: Vec<Var>,
     pub params: Vec<VarId>,
     pub globals: Vec<(String, Option<CType>)>,
+    pub notes: Vec<VarNote>,
+    pub frame_vars: Vec<(VarId, Loc)>,
 }
 
 struct Builder<'a> {
@@ -1650,6 +1653,69 @@ impl<'a> Builder<'a> {
         return Some(Decision { value, cases, default: representatives[default], blocks: region.into_iter().collect() });
     }
 
+    /// Storage notes of the variables: a note on a value that is not a variable is for the variable it is
+    /// an extension or a conversion of, for the variable that is its low bits (the register holds it), or
+    /// for the variable of a phi it is assigned to
+    fn notes(&self, params: &[VarId]) -> Vec<VarNote> {
+        let f = self.f;
+        let var = |id: ValueId| match f.values[id].kind {
+            ValueKind::Param(index) => params.get(index).copied(),
+            _ => self.var_of[id],
+        };
+
+        // The variable it is the low bits of, or the variable of the phi it is assigned to
+        let low_bits = |id: ValueId| -> Option<ValueId> {
+            f.values[id].uses.iter().copied().find(|&u| matches!(f.inst(u), Some((Op::Trunc | Op::BitCast | Op::IntToPtr | Op::PtrToInt | Op::Phi, _))) && var(u).is_some())
+        };
+
+        let mut notes = Vec::new();
+
+        for note in f.notes.iter() {
+            let mut id = note.value;
+
+            for _ in 0..4 {
+                if var(id).is_some() {
+                    break;
+                }
+
+                id = match f.inst(id) {
+                    Some((Op::ZExt | Op::SExt | Op::Freeze | Op::BitCast | Op::IntToPtr | Op::PtrToInt, [x])) => *x,
+                    _ => match low_bits(id) {
+                        Some(u) => u,
+                        None => break,
+                    },
+                };
+            }
+
+            let Some(v) = var(id) else {
+                continue;
+            };
+
+            let bits = match f.values[id].ty {
+                Ty::Ptr => self.ctx.program.pointer_size.max(4) as u32 * 8,
+                ty => ty.bits(),
+            };
+
+            let loc = match note.loc.place() {
+                Place::Register { reg, bits: noted, offset } => Loc::register(reg, bits.min(noted), offset),
+                _ => Some(note.loc),
+            };
+
+            if let Some(loc) = loc.filter(|_| bits > 0) {
+                notes.push(VarNote { var: v, loc, start: note.start, entry: note.entry, bits });
+            }
+        }
+
+        return notes;
+    }
+
+    /// Variables of the stack frame at a known place of it: they are there while the function runs
+    fn frame_vars(&self) -> Vec<(VarId, Loc)> {
+        let mut vars: Vec<(VarId, Loc)> = self.f.stack.iter().filter_map(|(&id, &offset)| Some((self.storage[id]?, Loc::stack(offset)?))).collect();
+        vars.sort();
+        return vars;
+    }
+
     /// Phi assignments of an edge, in an order that reads every value before it is overwritten. They
     /// execute with the jump of the edge, they get its address.
     fn copies(&mut self, from: usize, to: usize, jump: Option<u64>) -> Vec<Stmt> {
@@ -1915,8 +1981,10 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
     let edges = edges.blocks;
     blocks.extend(edges);
 
+    let notes = builder.notes(&params);
+    let frame_vars = builder.frame_vars();
     let vars = std::mem::take(&mut builder.vars);
     let globals = builder.globals.take().into_iter().collect();
 
-    return Built { blocks, vars, params, globals };
+    return Built { blocks, vars, params, globals, notes, frame_vars };
 }

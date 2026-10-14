@@ -116,7 +116,8 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
     let mut built = build::build(&f, ctx, types, &names);
     let body = structure::structure(built.blocks, &mut built.vars);
 
-    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false };
+    let storage = crate::storage::Storage { notes: built.notes, frame_vars: built.frame_vars, ..Default::default() };
+    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false, storage };
     simplify::simplify(&mut function);
     structure::loops_and_exits(&mut function.body);
     simplify::null_returns(&mut function);

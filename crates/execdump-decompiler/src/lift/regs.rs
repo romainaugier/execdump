@@ -78,6 +78,41 @@ impl RegisterFile {
         return self.index(name).unwrap_or_else(|| panic!("unknown register {}", name));
     }
 
+    /// Name of the low bits of a register, when the instructions name them (eax, r8w, al, w0)
+    pub fn view_name(&self, reg: Reg, bits: u32) -> Option<String> {
+        let name = self.regs.get(reg)?.name;
+
+        return match self.arch {
+            Architecture::X86 | Architecture::X86_64 => {
+                if let Some(number) = name.strip_prefix('r').filter(|n| n.parse::<u32>().is_ok()) {
+                    let suffix = match bits {
+                        32 => "d",
+                        16 => "w",
+                        8 => "b",
+                        _ => return None,
+                    };
+                    return Some(format!("r{}{}", number, suffix));
+                }
+
+                let base = name.trim_start_matches(['r', 'e']);
+                match bits {
+                    32 if self.arch == Architecture::X86_64 => Some(format!("e{}", base)),
+                    16 => Some(base.to_string()),
+                    8 if base.ends_with('x') => Some(format!("{}l", &base[..1])),
+                    8 => Some(format!("{}l", base)),
+                    _ => None,
+                }
+            }
+            Architecture::Aarch64 => match (name.as_bytes().first(), bits) {
+                (Some(b'x'), 32) => Some(format!("w{}", &name[1..])),
+                (Some(b'v'), 64) => Some(format!("d{}", &name[1..])),
+                (Some(b'v'), 32) => Some(format!("s{}", &name[1..])),
+                _ => None,
+            },
+            Architecture::Unsupported => None,
+        };
+    }
+
     pub fn full(&self, reg: Reg) -> RegRef {
         return RegRef { reg, offset: 0, bits: self.regs[reg].bits };
     }

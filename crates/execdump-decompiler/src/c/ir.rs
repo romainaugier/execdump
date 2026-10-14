@@ -3,7 +3,8 @@
  * (values in an arena, constant expressions like ptrtoint (ptr @g to i64) are values too)
  */
 
-use crate::lift::decode_location;
+use crate::lift::{decode_location, stack_offset, ENTRY_NOTE};
+use crate::storage::Loc;
 
 use inkwell::llvm_sys::core::*;
 use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
@@ -175,6 +176,20 @@ pub struct Func {
     pub allocated: HashMap<ValueId, Allocated>,
     /// Bytes of the constant globals made by the optimizations (strings written on the stack)
     pub data: HashMap<String, Vec<u8>>,
+    /// Where values are while the function runs
+    pub notes: Vec<Note>,
+    /// Offsets of the parts of the stack frame (allocas) from the stack pointer at the entry
+    pub stack: HashMap<ValueId, i64>,
+}
+
+/// A value is in a location from an address on: at the start of a block (entry), or after the instruction
+/// ending there
+#[derive(Clone, Copy, Debug)]
+pub struct Note {
+    pub value: ValueId,
+    pub loc: Loc,
+    pub start: u64,
+    pub entry: bool,
 }
 
 impl Func {
@@ -466,6 +481,7 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
         let params: Vec<LLVMValueRef> = (0..LLVMCountParams(raw)).map(|i| LLVMGetParam(raw, i)).collect();
         let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), data: HashMap::new() };
         let mut allocated = HashMap::new();
+        let mut stack = HashMap::new();
 
         let param_ids: Vec<ValueId> = params.iter().map(|&p| reader.value(p)).collect();
 
@@ -480,11 +496,20 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
 
         let mut blocks: Vec<Block> = vec![Block::default(); raw_blocks.len()];
 
-        // Instructions first (operands can refer to instructions defined later, like phis)
+        // Instructions first (operands can refer to instructions defined later, like phis), the debug
+        // intrinsics are the storage notes
+        let mut debug = Vec::new();
+
         for (index, &block) in raw_blocks.iter().enumerate() {
             let mut inst = LLVMGetFirstInstruction(block);
 
             while !inst.is_null() {
+                if !LLVMIsADbgInfoIntrinsic(inst).is_null() {
+                    debug.push(inst);
+                    inst = LLVMGetNextInstruction(inst);
+                    continue;
+                }
+
                 let ty = reader.ty(inst);
                 let id = reader.add(inst, Value { kind: ValueKind::Undef, ty, name: name(inst), uses: Vec::new() });
                 blocks[index].insts.push(id);
@@ -496,7 +521,10 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
             let mut inst = LLVMGetFirstInstruction(block);
 
             while !inst.is_null() {
-                let id = reader.ids[&inst];
+                let Some(&id) = reader.ids.get(&inst) else {
+                    inst = LLVMGetNextInstruction(inst);
+                    continue;
+                };
                 let op = opcode(LLVMGetInstructionOpcode(inst));
                 let mut operands = Vec::new();
                 let mut targets = Vec::new();
@@ -566,6 +594,10 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
                     };
 
                     allocated.insert(id, kind);
+
+                    if let Some(offset) = stack_offset(inst) {
+                        stack.insert(id, offset);
+                    }
                 }
 
                 let nsw = matches!(op, Op::Add | Op::Sub | Op::Mul | Op::Shl) && LLVMGetNSW(inst) != 0;
@@ -588,6 +620,7 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
             }
         }
 
+        let notes = notes(&reader, &debug);
         let mut values = reader.values;
 
         for id in 0..values.len() {
@@ -609,6 +642,90 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
             _ => Ty::Other,
         };
 
-        return Func { name: name(raw), params: param_ids, ret, variadic: LLVMIsFunctionVarArg(fn_type) != 0, values, blocks, allocated, data: reader.data };
+        return Func { name: name(raw), params: param_ids, ret, variadic: LLVMIsFunctionVarArg(fn_type) != 0, values, blocks, allocated, data: reader.data, notes, stack };
+    }
+}
+
+/// Storage notes of the llvm.dbg.value intrinsics: the value (an instruction or a parameter), its location
+/// (the line of the debug variable), and where it is there from: its debug location, or for the notes
+/// mem2reg makes of the phis and of the parameters (without location), the start of the block they lead,
+/// given by the first marker that follows them. Only the notes whose expression is empty or converts the value are kept: other
+/// expressions describe values computed from it.
+unsafe fn notes(reader: &Reader, debug: &[LLVMValueRef]) -> Vec<Note> {
+    use inkwell::llvm_sys::debuginfo::*;
+
+    unsafe {
+        let mut notes = Vec::new();
+        let builder = LLVMCreateDIBuilderDisallowUnresolved(reader.module);
+        let empty = LLVMDIBuilderCreateExpression(builder, std::ptr::null_mut(), 0);
+        LLVMDisposeDIBuilder(builder);
+
+        // Notes of phis waiting for the first marker of their block (the next ones are in the blocks
+        // merged into it, they have no phi)
+        let mut pending: Vec<(ValueId, Loc)> = Vec::new();
+        let mut marked = false;
+        let mut block = std::ptr::null_mut();
+
+        for &inst in debug.iter() {
+            if LLVMGetInstructionParent(inst) != block {
+                block = LLVMGetInstructionParent(inst);
+                pending.clear();
+                marked = false;
+            }
+
+            if LLVMIsADbgVariableIntrinsic(inst).is_null() || !LLVMIsADbgDeclareInst(inst).is_null() || LLVMGetNumArgOperands(inst) < 3 {
+                continue;
+            }
+
+            let (value, variable, expression) = (LLVMGetOperand(inst, 0), LLVMGetOperand(inst, 1), LLVMGetOperand(inst, 2));
+            let line = LLVMDIVariableGetLine(LLVMValueAsMetadata(variable));
+            let location = LLVMInstructionGetDebugLoc(inst);
+            let start = if location.is_null() { None } else { decode_location(LLVMDILocationGetLine(location), LLVMDILocationGetColumn(location)) };
+
+            // The marker of the start of a block
+            if line == ENTRY_NOTE {
+                if let Some(start) = start.filter(|_| !marked) {
+                    notes.extend(pending.drain(..).map(|(value, loc)| Note { value, loc, start, entry: true }));
+                    marked = true;
+                }
+
+                continue;
+            }
+
+            if !matches!(LLVMGetMetadataKind(LLVMValueAsMetadata(value)), LLVMMetadataKind::LLVMLocalAsMetadataMetadataKind) {
+                continue;
+            }
+
+            if LLVMValueAsMetadata(expression) != empty {
+                let text = LLVMPrintValueToString(expression);
+                let printed = std::ffi::CStr::from_ptr(text).to_string_lossy().into_owned();
+                LLVMDisposeMessage(text);
+
+                let ops = printed.split_once("DIExpression(").map_or("", |(_, rest)| rest.trim_end_matches(')'));
+                let ops = ops.trim_end_matches("DW_OP_stack_value").trim_end_matches(", ");
+                let conversions = ops.split(", ").collect::<Vec<_>>().chunks(3).all(|op| op.first() == Some(&"DW_OP_LLVM_convert") && op.len() == 3);
+
+                if !conversions {
+                    continue;
+                }
+            }
+
+            let mut wrapped = std::ptr::null_mut();
+            LLVMGetMDNodeOperands(value, &mut wrapped);
+
+            let Some(&id) = reader.ids.get(&wrapped) else {
+                continue;
+            };
+
+            let loc = Loc(line & !ENTRY_NOTE);
+
+            match start {
+                Some(start) => notes.push(Note { value: id, loc, start, entry: line & ENTRY_NOTE != 0 }),
+                None if !marked && line & ENTRY_NOTE != 0 => pending.push((id, loc)),
+                None => {}
+            }
+        }
+
+        return notes;
     }
 }

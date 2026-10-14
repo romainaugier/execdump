@@ -131,6 +131,7 @@ fn is_failure_block(block: LLVMBasicBlockRef) -> bool {
         while !instruction.is_null() {
             match LLVMGetInstructionOpcode(instruction) {
                 LLVMOpcode::LLVMPHI => return false,
+                LLVMOpcode::LLVMCall if !LLVMIsADbgInfoIntrinsic(instruction).is_null() => {}
                 LLVMOpcode::LLVMCall => return is_failure(&callee_name(instruction)),
                 LLVMOpcode::LLVMStore | LLVMOpcode::LLVMInvoke | LLVMOpcode::LLVMRet => return false,
                 _ => {}

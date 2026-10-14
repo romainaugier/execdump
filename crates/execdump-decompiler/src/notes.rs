@@ -223,6 +223,7 @@ mod tests {
             addr: 0x1000,
             globals: Vec::new(),
             inlined: false,
+            storage: Default::default(),
         };
     }
 

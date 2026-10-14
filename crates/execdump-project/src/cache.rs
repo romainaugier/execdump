@@ -1,12 +1,14 @@
 /*
- * Decompilation cache: the C code of every function with the address of each line, kept on disk so
- * that reopening a binary does not decompile it again.
+ * Decompilation cache: the C code of every function with the address of each line and where its
+ * variables are while it runs, kept on disk so that reopening a binary does not decompile it again.
  *
  * The file is an append-only log of records, the last record of a function wins. Only an index
  * (offset, fingerprint, line count) stays in memory, the texts are read back on demand and the most
  * recently used ones are kept. A record is reused when the fingerprint of the function (build of
  * execdump, annotations of the function and of what it calls) has not changed.
  */
+
+use execdump_decompiler::storage::{self, Loc, Range};
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -39,6 +41,9 @@ pub struct Meta {
     pub globals: Vec<(String, u64)>,
     /// Annotations that could not be applied
     pub errors: Vec<String>,
+    /// Where the variables are while the function runs (by index in vars), the slots of the stack canary
+    pub storage: Vec<(usize, Vec<Range>)>,
+    pub canaries: Vec<Loc>,
 }
 
 impl Meta {
@@ -58,6 +63,8 @@ impl Meta {
         self.decls.iter().for_each(|d| line('D', d));
         self.globals.iter().for_each(|(n, a)| line('G', &format!("{}\t{:x}", n, a)));
         self.errors.iter().for_each(|e| line('E', e));
+        self.storage.iter().for_each(|(var, ranges)| line('L', &format!("{}\t{}", var, storage::encode(ranges))));
+        self.canaries.iter().for_each(|loc| line('K', &format!("{:x}", loc.0)));
 
         return out;
     }
@@ -84,6 +91,12 @@ impl Meta {
                     }
                 }
                 "E " => meta.errors.push(value),
+                "L " => {
+                    if let Some((var, ranges)) = value.split_once('\t').and_then(|(v, r)| Some((v.parse().ok()?, storage::decode(r)))) {
+                        meta.storage.push((var, ranges));
+                    }
+                }
+                "K " => meta.canaries.extend(u32::from_str_radix(&value, 16).ok().map(Loc)),
                 _ => {}
             }
         }
@@ -365,6 +378,8 @@ mod tests {
             calls: vec!["g".to_string()],
             vars: vec![("v1".to_string(), "count".to_string())],
             globals: vec![("g_4000".to_string(), 0x4000)],
+            storage: vec![(0, vec![Range { start: 0, end: 8, loc: Loc(0x81d) }, Range { start: 12, end: 20, loc: Loc(0x3fffffa2) }])],
+            canaries: vec![Loc(0x7fffffc2)],
             ..Meta::default()
         };
 
@@ -397,6 +412,8 @@ mod tests {
         assert_eq!(f.meta.vars, vec![("v1".to_string(), "count".to_string())]);
         assert_eq!(f.meta.calls, vec!["g".to_string()]);
         assert_eq!(f.meta.globals, vec![("g_4000".to_string(), 0x4000)]);
+        assert_eq!(f.meta.storage, rendered("").meta.storage);
+        assert_eq!(f.meta.canaries, vec![Loc(0x7fffffc2)]);
 
         cache.put(0x3000, 3, rendered("x\n"));
         assert!(Cache::open(&dir).is_err());
