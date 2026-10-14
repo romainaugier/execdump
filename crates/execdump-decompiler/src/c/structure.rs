@@ -183,6 +183,10 @@ const MAX_GUARDED_REGION: usize = 48;
 /// Literals a guard can have (a longer one is less readable than a goto)
 const MAX_GUARD_LITERALS: usize = 4;
 
+/// Nodes given an exit when the left out tails cut them from it (each one costs a walk of the graph per
+/// candidate)
+const MAX_EXIT_LINKS: usize = 16;
+
 pub fn label(block: usize) -> String {
     return format!("label_{}", block);
 }
@@ -218,6 +222,47 @@ impl<'a> Structurer<'a> {
                 if sink {
                     reversed[exit].push(node);
                 }
+            }
+
+            // The nodes left without a path to the exit (a loop whose exits were all left out) leave from
+            // one that led to the left out nodes: the one most of them reach, until they all reach one
+            let mut reaches = vec![false; count + 1];
+
+            // Marks what reaches a node, returns how many were not marked yet
+            let mark = |reaches: &mut Vec<bool>, reversed: &[Vec<usize>], from: usize, apply: bool| -> usize {
+                let mut seen = reaches.clone();
+                let mut stack = vec![from];
+                let mut new = (!seen[from]) as usize;
+                seen[from] = true;
+
+                while let Some(n) = stack.pop() {
+                    for &p in reversed[n].iter() {
+                        if !std::mem::replace(&mut seen[p], true) {
+                            new += 1;
+                            stack.push(p);
+                        }
+                    }
+                }
+
+                if apply {
+                    *reaches = seen;
+                }
+
+                return new;
+            };
+
+            mark(&mut reaches, &reversed, exit, true);
+
+            for _ in 0..MAX_EXIT_LINKS {
+                let candidates: Vec<usize> = (0..count).filter(|&n| kept(n) && !reaches[n] && succs[n].iter().any(|&t| !kept(t))).collect();
+                let best = candidates.iter().copied().max_by_key(|&c| (mark(&mut reaches, &reversed, c, false), usize::MAX - c));
+
+                let Some(best) = best else {
+                    break;
+                };
+
+                reversed[exit].push(best);
+                mark(&mut reaches, &reversed, best, true);
             }
 
             return dominators(&reversed, exit).into_iter().take(count).map(|d| d.filter(|&d| d != exit)).collect();
@@ -1904,6 +1949,29 @@ mod tests {
         ];
 
         assert_eq!(gotos(blocks), 0);
+    }
+
+    #[test]
+    fn loop_whose_exits_all_return() {
+        // The paths of the outer loop (header b1) join at the inner loop (b2) before it, the exits of the
+        // inner loop all return or go back to b1: the inner loop follows the branches
+        let switch = |cases: Vec<(Vec<i128>, usize)>, default: usize| Term::Switch(Expr::Var(0), cases, default);
+        let blocks = vec![
+            block(0, 1, Term::Jump(1)),
+            block(1, 1, Term::Branch(cond(1), 3, 6)),
+            block(2, 1, switch(vec![(vec![47], 1), (vec![0], 8)], 7)),
+            block(3, 1, Term::Branch(cond(3), 4, 9)),
+            block(4, 1, switch(vec![(vec![0, 47], 5)], 10)),
+            block(5, 1, Term::Return(None)),
+            block(6, 1, Term::Jump(2)),
+            block(7, 1, Term::Jump(2)),
+            block(8, 1, Term::Return(None)),
+            block(9, 1, Term::Jump(2)),
+            block(10, 1, Term::Jump(2)),
+        ];
+
+        // The jump back to b1 from the switch of the inner loop
+        assert_eq!(gotos(blocks), 1);
     }
 
     #[test]

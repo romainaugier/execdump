@@ -260,6 +260,8 @@ Decompiler:
     constant the instruction that last writes the register of the argument before the call computes (the
     arguments passed on the stack are not followed)
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
+    The branches join where their paths meet, the paths that return early left out; a loop whose exits all
+    return is left from the block of the most paths into it, so the branches before it still join there.
     Once the copies are gone the loops get their shape: the loops whose test is first or last are `while (c)` and
     `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
     counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
