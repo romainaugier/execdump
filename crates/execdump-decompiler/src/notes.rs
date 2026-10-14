@@ -224,6 +224,7 @@ mod tests {
             globals: Vec::new(),
             inlined: false,
             storage: Default::default(),
+            structs: Vec::new(),
         };
     }
 

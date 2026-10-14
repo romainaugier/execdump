@@ -2,15 +2,28 @@
  * Statement level simplifications: temporaries used once in the next statement are inlined
  */
 
-use super::ast::{CFunction, Expr, Stmt, StmtKind, VarId};
+use super::ast::{CFunction, Expr, Stmt, StmtKind, UnaryOp, VarId};
 
+/// The variable whose address (or the address of a part) an expression takes: &v, &v.f8, &v[2]
+fn addressed(e: &Expr) -> Option<VarId> {
+    return match e {
+        Expr::Var(v) => Some(*v),
+        Expr::Member(base, _, false) | Expr::Index(base, _) => addressed(base),
+        _ => None,
+    };
+}
 
 fn count(stmts: &[Stmt], uses: &mut [usize], assigns: &mut [usize]) {
+    // A variable whose address is taken is read through it: it is never inlined
     let expr = |e: &Expr, uses: &mut [usize]| {
-        e.visit(&mut |e| {
-            if let Expr::Var(v) = e {
-                uses[*v] += 1;
+        e.visit(&mut |e| match e {
+            Expr::Var(v) => uses[*v] += 1,
+            Expr::Unary(UnaryOp::AddrOf, inner) => {
+                if let Some(v) = addressed(inner) {
+                    uses[v] += 1;
+                }
             }
+            _ => {}
         })
     };
 

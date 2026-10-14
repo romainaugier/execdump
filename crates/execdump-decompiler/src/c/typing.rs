@@ -429,7 +429,7 @@ fn writable(f: &Func, types: &mut [CType]) {
 }
 
 /// Groups of values joined by phis and selects (the constants among them are left out)
-fn webs(f: &Func) -> Vec<Vec<ValueId>> {
+pub(super) fn webs(f: &Func) -> Vec<Vec<ValueId>> {
     let mut parent: Vec<ValueId> = (0..f.values.len()).collect();
 
     fn find(parent: &mut [ValueId], mut v: ValueId) -> ValueId {

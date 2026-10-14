@@ -290,6 +290,17 @@ Decompiler:
     operation is converted to an integer, and a global accessed as a pointer and as an integer of that size is a
     pointer. In a byte access at the sum of two integers, the one that is not an index (extended from a narrower
     integer, scaled, a counter, a `size_t`...) is the pointer: `s[i]`, not `((char *)i)[s]`
+  - :heavy_check_mark: Structs from the access patterns: the offsets, sizes and types accessed through a pointer
+    (and the pointers joined with it by phis, or loaded from the same place of a global) make a struct when they
+    are not the elements of an array, so `p->f18` replaces `*(int64_t *)((char *)p + 24)`. A field has the type of
+    the values read and written there (a pointer to a struct, to something else, a number, then `void *`), the
+    bytes never accessed are padding, and an address passed to a function whose prototype says what it points to
+    is a field of that type (a `struct stat` at 0x58 passed to `fstat`, then read as `p->f58.st_size`). A wide
+    access over narrower ones (a copy of two fields at once) does not hide them. The structs of the same layout in a
+    function are one (the levels of a tree walked by unrolled code), they are named after the function
+    (`struct st_1aa40_0`) and printed before it. A buffer of the stack frame accessed at constant offsets is a struct
+    of its size (`v20.f8`), accessed whole only it is a variable of that type (`char *endptr`, not
+    `*(char **)&endptr[0]`)
   - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
     to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the

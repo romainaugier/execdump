@@ -313,6 +313,9 @@ fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rende
     let signatures: Vec<String> = texts.iter().map(|(_, r, _)| format!("{};", r.meta.signature)).collect();
     decls.extend(signatures.iter().map(|s| s.as_str()));
 
+    // The structs recovered by the functions appear in their prototypes before their definition
+    let tags: BTreeSet<String> = decls.iter().flat_map(|d| execdump_decompiler::c::ast::struct_tags(d)).collect();
+    tags.iter().for_each(|tag| source.push_str(&format!("struct {};\n", tag)));
     decls.iter().for_each(|d| source.push_str(&format!("{}\n", d)));
 
     // Lines of each function (1 based, end excluded)

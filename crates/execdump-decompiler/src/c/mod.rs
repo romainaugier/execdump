@@ -18,13 +18,14 @@ pub mod quality;
 mod reaching;
 mod scope;
 mod simplify;
+mod structs;
 mod structure;
 mod typing;
 
 use ast::CFunction;
 
 use crate::lift::text_at;
-use crate::typedb::TypeDb;
+use crate::typedb::{Aggregate, TypeDb};
 use crate::types::{CType, Prototype};
 
 use execdump_core::program::Program;
@@ -32,7 +33,8 @@ use execdump_core::program::Program;
 use inkwell::module::Module;
 use inkwell::values::FunctionValue;
 
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// What the C backend knows about the program
 pub struct Context<'a> {
@@ -50,6 +52,8 @@ pub struct Context<'a> {
     pub ret: Option<u64>,
     /// Name of the function starting at an address
     pub function: Box<dyn Fn(u64) -> Option<String> + 'a>,
+    /// Structs recovered from the accesses of the function
+    pub structs: RefCell<BTreeMap<String, Aggregate>>,
 }
 
 impl Context<'_> {
@@ -58,7 +62,18 @@ impl Context<'_> {
     }
 
     pub fn size_of(&self, ty: &CType) -> Option<u64> {
+        if let CType::Struct(name) = self.resolve(ty).unqualified() {
+            if let Some(aggregate) = self.structs.borrow().get(name) {
+                return Some(aggregate.size);
+            }
+        }
+
         return self.typedb.size_of(ty);
+    }
+
+    /// A struct or union of the headers or recovered from the accesses
+    pub fn aggregate(&self, name: &str) -> Option<Aggregate> {
+        return self.typedb.aggregates.get(name).or(self.structs.borrow().get(name)).cloned();
     }
 
     pub fn size_bits(&self, ty: &CType) -> u32 {
@@ -111,13 +126,17 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
         .map(|i| prototype.and_then(|p| p.ty.params.get(i)).and_then(|p| p.name.clone()).unwrap_or_default())
         .collect();
 
-    let types = typing::infer(&f, ctx, &declared);
+    let mut types = typing::infer(&f, ctx, &declared);
+    structs::recover(&f, ctx, &mut types, &declared, addr);
+
     let ret = return_type(&f, &types, prototype);
     let mut built = build::build(&f, ctx, types, &names);
     let body = structure::structure(built.blocks, &mut built.vars);
 
     let storage = crate::storage::Storage { notes: built.notes, frame_vars: built.frame_vars, ..Default::default() };
-    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false, storage };
+    let mut structs: Vec<(String, Aggregate)> = ctx.structs.borrow().iter().map(|(name, aggregate)| (name.clone(), aggregate.clone())).collect();
+    structs.sort_by(|(a, _), (b, _)| (a.len(), a).cmp(&(b.len(), b)));
+    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false, storage, structs };
     simplify::simplify(&mut function);
     structure::loops_and_exits(&mut function.body);
     simplify::null_returns(&mut function);
@@ -177,7 +196,7 @@ mod tests {
 
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None) };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
 
         assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
         assert_eq!(ctx.string_at(0x2003, false).as_deref(), Some("pi"));
@@ -188,20 +207,23 @@ mod tests {
         assert_eq!(ctx.string_at(0x3000, true), None);
     }
 
-    /// C of a function given as LLVM IR text, without prototypes
+    /// C of the first function given as LLVM IR text, the functions it declares have the prototypes of the
+    /// headers
     fn c_of_ir(ir: &str) -> String {
         let mut program = Program::default();
         program.arch = Some(Architecture::X86_64);
         program.pointer_size = 8;
 
-        let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
-        let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None) };
-
         let llvm = inkwell::context::Context::create();
         let buffer = inkwell::memory_buffer::MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "test");
         let module = llvm.create_module_from_ir(buffer).unwrap();
         let function = module.get_first_function().unwrap();
+
+        let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
+        let prototypes: HashMap<String, Prototype> =
+            module.get_functions().filter_map(|f| f.get_name().to_str().ok().and_then(|name| Some((name.to_string(), typedb.function(name)?)))).collect();
+        let (globals, noreturn) = (HashMap::new(), HashSet::new());
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
 
         return decompile(&module, function, &ctx, None, 0).print().text;
     }
@@ -231,5 +253,41 @@ mod tests {
 
         assert!(code.contains("a1[") && code.contains("a2["), "{}", code);
         assert!(!code.contains("(char *)"), "{}", code);
+    }
+
+    #[test]
+    fn structs_of_the_accesses() {
+        // A pointer accessed at several offsets and a buffer of the frame accessed with several types are
+        // structs, the address of a field is passed on
+        let code = c_of_ir(
+            "define i64 @walk(ptr %0) {
+            entry:
+              %buf = alloca [16 x i8]
+              %len = load i64, ptr %0
+              %fp = getelementptr i8, ptr %0, i64 8
+              %next = load ptr, ptr %fp
+              %cp = getelementptr i8, ptr %0, i64 16
+              %c = load i32, ptr %cp
+              store i64 %len, ptr %buf
+              %b8 = getelementptr i8, ptr %buf, i64 8
+              store i32 %c, ptr %b8
+              %r = call i32 @use(ptr %buf)
+              %sp = getelementptr i8, ptr %0, i64 24
+              %s = call i32 @fstat(i32 0, ptr %sp)
+              %zp = getelementptr i8, ptr %0, i64 72
+              %size = load i64, ptr %zp
+              %nx = ptrtoint ptr %next to i64
+              %sum = add i64 %size, %nx
+              ret i64 %sum
+            }
+            declare i32 @use(ptr)
+            declare i32 @fstat(i32, ptr)",
+        );
+
+        assert!(code.contains("struct st_0_0 {") && code.contains("struct st_0_1 {") && code.contains("struct stat f18;"), "{}", code);
+        assert!(code.contains("a1->f0") && code.contains("a1->f8") && code.contains("a1->f10"), "{}", code);
+        assert!(code.contains("fstat(0, &a1->f18)") && code.contains("a1->f18.st_size"), "{}", code);
+        assert!(code.contains(".f0 = ") && code.contains(".f8 = ") && code.contains("use(&v"), "{}", code);
+        assert!(!code.contains(" *)"), "{}", code);
     }
 }

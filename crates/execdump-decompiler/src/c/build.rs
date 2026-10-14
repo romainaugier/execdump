@@ -279,7 +279,12 @@ impl<'a> Builder<'a> {
                     _ => base_type(*ty),
                 }
             }
-            Some(Allocated::Bytes(size)) => CType::Array(Box::new(CType::Char), Some(*size)),
+            // A struct of the buffer's size (recovered from its accesses, or one of the headers) or the type of
+            // the whole buffer
+            Some(Allocated::Bytes(size)) => match pointee(&self.types[id]) {
+                Some(ty) if !matches!(ty, CType::Char) && !ty.is_unknown() && self.ctx.size_of(ty) == Some(*size) => ty.clone(),
+                _ => CType::Array(Box::new(CType::Char), Some(*size)),
+            },
             None => CType::Unknown(0),
         };
     }
@@ -312,7 +317,17 @@ impl<'a> Builder<'a> {
         let var_size = self.ctx.size_of(&self.vars[var].ty).unwrap_or(0) as i128;
 
         if !self.is_array(var) {
-            return (offset == 0 && terms.is_empty() && size == var_size).then(|| Expr::Var(var));
+            let whole = !matches!(self.ctx.resolve(&self.vars[var].ty).unqualified(), CType::Struct(_)) || self.ctx.resolve(ty).unqualified() == self.ctx.resolve(&self.vars[var].ty).unqualified();
+
+            return match (offset, terms.is_empty()) {
+                (0, true) if size == var_size && whole => Some(self.reinterpreted(Expr::Var(var), ty)),
+                (_, true) => match self.member(Expr::Var(var), &self.vars[var].ty, offset, size, false) {
+                    Some(member) => Some(self.reinterpreted(member, ty)),
+                    None if offset == 0 && size == var_size => Some(Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), Expr::unary(UnaryOp::AddrOf, Expr::Var(var))))),
+                    None => self.from_field(Expr::Var(var), &self.vars[var].ty, offset, ty, false),
+                },
+                _ => None,
+            };
         }
 
         let index = match terms {
@@ -429,6 +444,17 @@ impl<'a> Builder<'a> {
             Expr::Var(v) => Some(self.vars[*v].ty.clone()),
             Expr::Cast(ty, _) => Some(ty.clone()),
             Expr::Index(base, _) | Expr::Unary(UnaryOp::Deref, base) => self.written_type(base).and_then(|ty| pointee(&ty).cloned()),
+            Expr::Name(name) => self.globals.borrow().get(name).cloned().flatten(),
+            Expr::Member(base, field, arrow) => {
+                let base = self.written_type(base)?;
+                let aggregate = if *arrow { pointee(&base)?.clone() } else { base };
+
+                let (CType::Struct(name) | CType::Union(name)) = self.ctx.resolve(&aggregate).unqualified().clone() else {
+                    return None;
+                };
+
+                self.ctx.aggregate(&name)?.fields.into_iter().find(|f| f.name == *field).map(|f| f.ty)
+            }
             Expr::Unary(UnaryOp::Neg | UnaryOp::Not, inner) => self.written_type(inner).map(promoted),
             Expr::Unary(UnaryOp::LogicalNot, _) => Some(CType::int(32)),
             Expr::Binary(op, ..) if op.is_comparison() || matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) => Some(CType::int(32)),
@@ -719,9 +745,24 @@ impl<'a> Builder<'a> {
         let size = self.pointee_size(base);
         let base_expr = self.expr(base);
 
-        // Address in a buffer of the frame: &buf[i]
-        if let Some(var) = self.storage[base].filter(|&v| self.is_array(v)) {
-            return Expr::unary(UnaryOp::AddrOf, Expr::Index(Box::new(Expr::Var(var)), Box::new(offset)));
+        // Address in a buffer of the frame: &buf[i], &v.f8
+        if let Some(var) = self.storage[base] {
+            if self.is_array(var) {
+                return Expr::unary(UnaryOp::AddrOf, Expr::Index(Box::new(Expr::Var(var)), Box::new(offset)));
+            }
+
+            if let Expr::Int(c @ 1..) = offset {
+                if let Some(field) = self.field_at(Expr::Var(var), &self.vars[var].ty, c, false) {
+                    return Expr::unary(UnaryOp::AddrOf, field);
+                }
+            }
+        }
+
+        // Address of a field of a struct: &p->f58
+        if let (Expr::Int(c @ 1..), Some(pointee)) = (&offset, pointee(self.ty(base))) {
+            if let Some(field) = self.field_at(base_expr.clone(), pointee, *c, true) {
+                return Expr::unary(UnaryOp::AddrOf, field);
+            }
         }
 
         let elements = match &offset {
@@ -860,7 +901,11 @@ impl<'a> Builder<'a> {
         // Fields of known structs: p->field
         if let (Some(pointee), true) = (&base_pointee, terms.is_empty()) {
             if let Some(member) = self.member(self.expr(base), pointee, offset, size, true) {
-                return member;
+                return self.reinterpreted(member, ty);
+            }
+
+            if let Some(access) = self.from_field(self.expr(base), pointee, offset, ty, true) {
+                return access;
             }
         }
 
@@ -921,6 +966,43 @@ impl<'a> Builder<'a> {
         return Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), pointer));
     }
 
+    /// A field read as a float when it holds an integer or a pointer (or the reverse): *(double *)&p->f8
+    fn reinterpreted(&self, member: Expr, ty: &CType) -> Expr {
+        let float = |t: &CType| matches!(self.ctx.resolve(t).unqualified(), CType::Float { .. });
+
+        return match self.written_type(&member) {
+            Some(field) if float(&field) != float(ty) => Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), Expr::unary(UnaryOp::AddrOf, member))),
+            _ => member,
+        };
+    }
+
+    /// The field of a struct that starts at an offset
+    fn field_at(&self, base: Expr, ty: &CType, offset: i128, arrow: bool) -> Option<Expr> {
+        let (CType::Struct(name) | CType::Union(name)) = self.ctx.resolve(ty).unqualified().clone() else {
+            return None;
+        };
+
+        let aggregate = self.ctx.aggregate(&name)?;
+        let field = aggregate.fields.into_iter().filter(|f| f.bits.is_none() && !f.name.is_empty()).find(|f| {
+            let start = f.offset as i128;
+            start == offset || offset > start && offset < start + self.ctx.size_of(&f.ty).unwrap_or(0) as i128
+        })?;
+
+        let member = Expr::Member(Box::new(base), field.name, arrow);
+
+        // Inside a nested struct: its field there
+        return match field.offset as i128 {
+            start if start == offset => Some(member),
+            start => self.field_at(member, &field.ty, offset - start, false),
+        };
+    }
+
+    /// An access over several fields from the first one: *(int128_t *)&p->f8
+    fn from_field(&self, base: Expr, aggregate: &CType, offset: i128, ty: &CType, arrow: bool) -> Option<Expr> {
+        let field = self.field_at(base, aggregate, offset, arrow)?;
+        return Some(Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), Expr::unary(UnaryOp::AddrOf, field))));
+    }
+
     /// Access of a field at an offset of a struct (through nested structs and arrays)
     fn member(&self, base: Expr, ty: &CType, offset: i128, size: i128, arrow: bool) -> Option<Expr> {
         let resolved = self.ctx.resolve(ty);
@@ -928,7 +1010,7 @@ impl<'a> Builder<'a> {
             return None;
         };
 
-        let aggregate = self.ctx.typedb.aggregates.get(name)?;
+        let aggregate = self.ctx.aggregate(name)?;
 
         for field in aggregate.fields.iter().filter(|f| f.bits.is_none()) {
             let field_size = self.ctx.size_of(&field.ty).unwrap_or(0) as i128;
@@ -941,7 +1023,10 @@ impl<'a> Builder<'a> {
             let access = if field.name.is_empty() { base.clone() } else { Expr::Member(Box::new(base.clone()), field.name.clone(), arrow) };
             let inner = offset - start;
 
-            if inner == 0 && field_size == size {
+            // An array (the padding too) or a struct is not read or written whole as a number, its elements are
+            let whole = !matches!(self.ctx.resolve(&field.ty).unqualified(), CType::Array(..) | CType::Struct(_) | CType::Union(_));
+
+            if inner == 0 && field_size == size && whole {
                 return Some(access);
             }
 

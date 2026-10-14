@@ -112,6 +112,8 @@ pub fn export(project: &mut Project, dir: &Path) -> Result<Report, String> {
         let header = header_of(module);
 
         let mut text = format!("#pragma once\n\n#include \"{}\"\n\n", COMMON);
+        let tags: BTreeSet<String> = functions.iter().filter(|(_, _, ok)| *ok).flat_map(|(signature, _, _)| execdump_decompiler::c::ast::struct_tags(signature)).collect();
+        tags.iter().for_each(|tag| text.push_str(&format!("struct {};\n", tag)));
         functions.iter().filter(|(_, _, ok)| *ok).for_each(|(signature, _, _)| text.push_str(&format!("{};\n", signature)));
         write(dir, &format!("include/{}", header), &text, &mut report.files)?;
 

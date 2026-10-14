@@ -3,6 +3,7 @@
  */
 
 use super::scope::{self, list_id, ListId};
+use crate::typedb::Aggregate;
 use crate::types::{CType, FuncType, Param, Prototype};
 
 use std::collections::HashMap;
@@ -255,6 +256,8 @@ pub struct CFunction {
     pub inlined: bool,
     /// Where its variables are while it runs
     pub storage: crate::storage::Storage,
+    /// Structs recovered from its accesses, printed before it
+    pub structs: Vec<(String, Aggregate)>,
 }
 
 /// Printed C code with the address of each line
@@ -411,13 +414,16 @@ impl Printer<'_> {
     fn assignment(&self, target: &Expr, value: &Expr) -> String {
         let target_text = self.expr(target);
 
+        // ++ binds tighter than * and the casts
+        let postfix = if target.precedence() > 1 { format!("({})", target_text) } else { target_text.clone() };
+
         if let Expr::Binary(op, a, b) = value {
             let compound = matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem | BinaryOp::Shl | BinaryOp::Shr | BinaryOp::And | BinaryOp::Or | BinaryOp::Xor);
 
             if compound && **a == *target {
                 return match (op, &**b) {
-                    (BinaryOp::Add, Expr::Int(1)) => format!("{}++", target_text),
-                    (BinaryOp::Sub, Expr::Int(1)) => format!("{}--", target_text),
+                    (BinaryOp::Add, Expr::Int(1)) => format!("{}++", postfix),
+                    (BinaryOp::Sub, Expr::Int(1)) => format!("{}--", postfix),
                     _ => format!("{} {}= {}", target_text, op.symbol(), self.expr(b)),
                 };
             }
@@ -641,6 +647,28 @@ fn escape(text: &str) -> String {
     return out;
 }
 
+/// Tags of the structs a declaration names, to declare them before it (struct a; then f(struct a *p))
+pub fn struct_tags(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = text
+        .match_indices("struct ")
+        .filter(|(i, _)| *i == 0 || !text.as_bytes()[i - 1].is_ascii_alphanumeric() && text.as_bytes()[i - 1] != b'_')
+        .map(|(i, _)| text[i + 7..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect::<String>())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+
+    tags.sort();
+    tags.dedup();
+    return tags;
+}
+
+/// C definition of a recovered struct (its fields and paddings are at their offsets)
+pub fn struct_definition(name: &str, aggregate: &Aggregate) -> Vec<String> {
+    let mut lines = vec![format!("struct {} {{", name)];
+    lines.extend(aggregate.fields.iter().map(|f| format!("    {};", f.ty.declare(&f.name))));
+    lines.push(if aggregate.pack.is_some() { "} __attribute__((packed));".to_string() } else { "};".to_string() });
+    return lines;
+}
+
 impl CFunction {
     pub fn signature(&self) -> String {
         let params = self.params.iter().map(|&p| Param { name: Some(self.vars[p].name.clone()), ty: self.vars[p].ty.clone() }).collect();
@@ -651,6 +679,14 @@ impl CFunction {
         let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
 
         let signature = self.signature();
+
+        for (name, aggregate) in self.structs.iter() {
+            for line in struct_definition(name, aggregate) {
+                printer.line(0, &line, None);
+            }
+
+            printer.line(0, "", None);
+        }
 
         if let ([stmt], true) = (self.body.as_slice(), self.inlined) {
             let text = match &stmt.kind {
@@ -785,6 +821,7 @@ mod tests {
             globals: Vec::new(),
             inlined: false,
             storage: Default::default(),
+            structs: Vec::new(),
         };
         let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
@@ -824,7 +861,7 @@ mod tests {
             Stmt::new(StmtKind::Return(Some(Expr::Var(2))), None),
         ];
 
-        let function = CFunction { name: "f".to_string(), ret: int.clone(), params: vec![0], variadic: false, vars: vec![var("n"), var("t"), var("s"), var("u")], body, addr: 0, globals: Vec::new(), inlined: false, storage: Default::default() };
+        let function = CFunction { name: "f".to_string(), ret: int.clone(), params: vec![0], variadic: false, vars: vec![var("n"), var("t"), var("s"), var("u")], body, addr: 0, globals: Vec::new(), inlined: false, storage: Default::default(), structs: Vec::new() };
         let text = function.print().text;
 
         assert!(text.starts_with("int f(int n)\n{\n    int u;\n\n    int s = 0;\n    while (n) {\n        int t = n + 1;\n"), "{}", text);
@@ -853,6 +890,7 @@ mod tests {
             globals: Vec::new(),
             inlined: false,
             storage: Default::default(),
+            structs: Vec::new(),
         };
 
         let printed = function.print();
