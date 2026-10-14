@@ -137,12 +137,48 @@ impl Inference<'_> {
         };
     }
 
+    /// An integer that indexes rather than points: extended from a narrower one, scaled, a counter (a
+    /// phi of itself plus a constant), a size from a declared type (size_t...)
+    fn is_index(&self, id: ValueId) -> bool {
+        let f = self.f;
+
+        return match f.inst(id) {
+            Some((Op::SExt | Op::ZExt, _)) => true,
+            Some((Op::Shl | Op::Mul, [_, k])) => f.int(*k).is_some(),
+            Some((Op::Phi, operands)) => {
+                let counted = |o: &ValueId| matches!(f.inst(*o), Some((Op::Add | Op::Sub, [x, c])) if *x == id && f.int(*c).is_some());
+                operands.iter().any(counted)
+            }
+            _ => matches!(self.types[id], CType::Typedef(_)) && matches!(self.ctx.resolve(&self.types[id]), CType::Int { .. }),
+        };
+    }
+
+    /// Base of a byte access at the sum of two integers: the one that is not an index
+    fn byte_base(&self, address: ValueId) -> Option<ValueId> {
+        let f = self.f;
+        let Some((Op::Add, [x, y])) = f.inst(self.address_root(address)) else {
+            return None;
+        };
+
+        if f.int(*x).is_some() || f.int(*y).is_some() || is_pointer(&self.types[*x]) || is_pointer(&self.types[*y]) {
+            return None;
+        }
+
+        return match (self.is_index(*x), self.is_index(*y)) {
+            (false, true) => Some(*x),
+            (true, false) => Some(*y),
+            _ => None,
+        };
+    }
+
     /// A memory access types its address, and the base of an indexed address
     fn access(&mut self, address: ValueId, accessed: CType, bits: u32) {
         let root = self.address_root(address);
         self.set_pointer(root, accessed.clone());
 
         if let Some(base) = self.indexed_base(address, bits as i64 / 8) {
+            self.set_pointer(base, accessed);
+        } else if let Some(base) = (bits == 8).then(|| self.byte_base(address)).flatten() {
             self.set_pointer(base, accessed);
         }
     }

@@ -548,7 +548,7 @@ impl<'a> Builder<'a> {
                 let ty = self.ty(id);
                 let converted = |written: &CType| !pointee(ty).is_some_and(|p| matches!(p.unqualified(), CType::Void)) && written.unqualified() != ty.unqualified();
 
-                let address = f.values[id].uses.iter().any(|&u| matches!(f.op(u), Some(Op::IntToPtr | Op::Gep | Op::Load | Op::Store)));
+                let address = f.values[id].uses.iter().any(|&u| matches!(f.op(u), Some(Op::IntToPtr | Op::Gep | Op::Load | Op::Store | Op::Add | Op::Sub)));
 
                 match self.written_type(&loaded) {
                     Some(written) if self.var_of[id].is_none() && is_pointer(ty) && (is_pointer(&written) || address) && converted(&written) => Expr::cast(ty.clone(), loaded),

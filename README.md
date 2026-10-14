@@ -268,7 +268,8 @@ Decompiler:
     data points to the type of the first field accessed at a constant offset from it, a pointer written through is
     not const (a const comes from the prototype of a function it is passed to), a pointer used in an integer
     operation is converted to an integer, and a global accessed as a pointer and as an integer of that size is a
-    pointer
+    pointer. In a byte access at the sum of two integers, the one that is not an index (extended from a narrower
+    integer, scaled, a counter, a `size_t`...) is the pointer: `s[i]`, not `((char *)i)[s]`
   - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
     to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the

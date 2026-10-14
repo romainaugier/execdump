@@ -185,4 +185,49 @@ mod tests {
         assert_eq!(ctx.string_at(0x2006, true), None);
         assert_eq!(ctx.string_at(0x3000, true), None);
     }
+
+    /// C of a function given as LLVM IR text, without prototypes
+    fn c_of_ir(ir: &str) -> String {
+        let mut program = Program::default();
+        program.arch = Some(Architecture::X86_64);
+        program.pointer_size = 8;
+
+        let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
+        let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None) };
+
+        let llvm = inkwell::context::Context::create();
+        let buffer = inkwell::memory_buffer::MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "test");
+        let module = llvm.create_module_from_ir(buffer).unwrap();
+        let function = module.get_first_function().unwrap();
+
+        return decompile(&module, function, &ctx, None, 0).print().text;
+    }
+
+    #[test]
+    fn index_side_of_byte_accesses() {
+        // The counter indexes the integers it is added to, in either order
+        let code = c_of_ir(
+            "define i64 @copy(i64 %0, i64 %1) {
+            entry:
+              br label %loop
+            loop:
+              %i = phi i64 [ 0, %entry ], [ %next, %loop ]
+              %src = add i64 %i, %0
+              %p = inttoptr i64 %src to ptr
+              %c = load i8, ptr %p
+              %dst = add i64 %1, %i
+              %q = inttoptr i64 %dst to ptr
+              store i8 %c, ptr %q
+              %next = add i64 %i, 1
+              %z = icmp eq i8 %c, 0
+              br i1 %z, label %done, label %loop
+            done:
+              ret i64 %i
+            }",
+        );
+
+        assert!(code.contains("a1[") && code.contains("a2["), "{}", code);
+        assert!(!code.contains("(char *)"), "{}", code);
+    }
 }
