@@ -323,12 +323,45 @@ unsafe fn access(user: LLVMValueRef, pointer: LLVMValueRef, offset: u64, layout:
                     return Access { offset, size: (length.max(1)) as u64, kind, ty: None };
                 }
 
+                // The functions given a buffer and its size read or write that many bytes (fgets(buf, 9, ...)): the
+                // buffer ends there, the variables after it are not part of it
+                for &(_, buffer, length, writes) in SIZED_BUFFERS.iter().filter(|(f, ..)| *f == name) {
+                    if LLVMGetOperand(user, buffer) == pointer {
+                        if let Some(length) = constant(LLVMGetOperand(user, length)).filter(|&n| n > 0) {
+                            return Access { offset, size: length as u64, kind: if writes { Kind::Store(None) } else { Kind::Load }, ty: None };
+                        }
+                    }
+                }
+
                 return escape;
             }
             _ => return escape,
         }
     }
 }
+
+/// Functions given a buffer and its size: the buffer argument, the size argument, whether they write it
+const SIZED_BUFFERS: &[(&str, u32, u32, bool)] = &[
+    ("fgets", 0, 1, true),
+    ("_IO_fgets", 0, 1, true),
+    ("read", 1, 2, true),
+    ("__read", 1, 2, true),
+    ("pread", 1, 3, true),
+    ("recv", 1, 2, true),
+    ("readlink", 1, 2, true),
+    ("getcwd", 0, 1, true),
+    ("gethostname", 0, 1, true),
+    ("snprintf", 0, 1, true),
+    ("strncpy", 0, 2, true),
+    ("memset", 0, 2, true),
+    ("memcpy", 0, 2, true),
+    ("memmove", 0, 2, true),
+    ("bzero", 0, 1, true),
+    ("explicit_bzero", 0, 1, true),
+    ("write", 1, 2, false),
+    ("__write", 1, 2, false),
+    ("send", 1, 2, false),
+];
 
 /// Text written in a slot: at least 4 characters, the NULs at its end only
 fn is_text(bytes: &[u8]) -> bool {
@@ -472,12 +505,18 @@ unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSe
                     continue;
                 }
 
-                if offset >= size {
+                if offset > size {
                     return false;
                 }
 
                 if LLVMGetFirstUse(user).is_null() {
                     LLVMInstructionEraseFromParent(user);
+                    continue;
+                }
+
+                // The end of the frame (the address of the arguments a realigned frame keeps) is no access of it
+                if offset == size {
+                    pointers.push((user, offset, Vec::new()));
                     continue;
                 }
 
@@ -530,7 +569,7 @@ unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSe
             })
             .collect();
 
-        let slot_of = |offset: u64| slots.iter().position(|s| s.start <= offset && offset < s.end);
+        let slot_of = |offset: u64| slots.iter().position(|s| s.start <= offset && offset < s.end || offset == size && s.end == size);
 
         for (pointer, offset, _) in pointers.iter() {
             let Some(slot) = slot_of(*offset) else {

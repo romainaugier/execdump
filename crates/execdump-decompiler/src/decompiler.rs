@@ -1670,6 +1670,21 @@ mod tests {
     }
 
     #[test]
+    fn code_hidden_behind_a_computed_jump() {
+        let program = fixture("elf_i386_hidden");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let main = decompiler.c_code(function(&analysis, "main")).unwrap();
+
+        // lea eax, [1f]; inc eax; jmp eax lands after the first byte of what reads as mov eax, imm32
+        assert!(!main.contains("__indirect_jump") && main.contains("puts(\"hidden\");"), "{}", main);
+
+        // The buffer fgets reads 9 bytes into ends there, the key after it is not part of it; its characters
+        // compared are character literals
+        assert!(main.contains("char s[9];") && main.contains("fgets(s, 9, stdin);") && main.contains("s[0] != 'd'"), "{}", main);
+    }
+
+    #[test]
     fn conditional_tail_calls() {
         let program = fixture("elf_x86_64_quality");
         let analysis = analyze(&program, None).unwrap();

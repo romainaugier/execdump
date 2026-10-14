@@ -723,8 +723,19 @@ impl<'a> Builder<'a> {
                 return Expr::Name("NULL".to_string());
             }
 
-            // Characters compared with printable constants are character literals
-            if let (Some(c), CType::Char) = (self.f.int(id), self.ty(other)) {
+            // Characters compared with printable constants are character literals (also once extended)
+            let byte = |v: ValueId| self.ty(v) == &CType::Char || self.written_type(&self.expr(v)).is_some_and(|t| t.unqualified() == &CType::Char);
+            let character = |v: ValueId| match self.f.inst(v) {
+                Some((Op::SExt | Op::ZExt, [x])) => byte(*x),
+                _ => byte(v),
+            };
+
+            let constant = self.f.int(id).or_else(|| match (self.f.op(id), self.expr(id)) {
+                (Some(Op::Load), Expr::Int(c)) => Some(c),
+                _ => None,
+            });
+
+            if let (Some(c), true) = (constant, character(other)) {
                 if (0x20..0x7f).contains(&c) {
                     return Expr::Char(c as u8);
                 }

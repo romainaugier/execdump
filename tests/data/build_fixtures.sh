@@ -32,6 +32,9 @@ clang --target=i386-linux-gnu -O0 -fno-pie -no-pie -nostdlib -fno-stack-protecto
     -Wl,--build-id=none src/frame_i386.c "$TMP"/libc.so.6 -o elf_i386_frame
 clang --target=i386-linux-gnu -O0 -fno-pie -no-pie -nostdlib -fno-stack-protector -fuse-ld=lld -Wl,--dynamic-linker,/lib/ld-linux.so.2 \
     -Wl,--build-id=none src/pointer_i386.c "$TMP"/libc.so.6 -o elf_i386_pointer
+# Code hidden behind a jump into the middle of an instruction, a buffer read with its size
+gcc -m32 -O0 -fno-pie -fno-stack-protector -fcf-protection=none -c src/hidden_i386.c -o "$TMP"/hidden.o
+"$LLVM_BIN"/ld.lld -m elf_i386 --dynamic-linker /lib/ld-linux.so.2 --build-id=none -e _start "$TMP"/hidden.o "$TMP"/libc.so.6 -o elf_i386_hidden
 # The same built by gcc (its realigned frame for main, rep stosd, overlapping stores of strings)
 gcc -m32 -O0 -fno-pie -fno-stack-protector -fcf-protection=none -c src/pointer_i386.c -o "$TMP"/pointer_gcc.o
 "$LLVM_BIN"/ld.lld -m elf_i386 --dynamic-linker /lib/ld-linux.so.2 --build-id=none -e _start "$TMP"/pointer_gcc.o "$TMP"/libc.so.6 -o elf_i386_pointer_gcc

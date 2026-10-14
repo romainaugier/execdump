@@ -9,3 +9,5 @@ void qsort(void *base, __SIZE_TYPE__ count, __SIZE_TYPE__ size, int (*compare)(c
 int strcmp(const char *a, const char *b) { return 0; }
 void exit(int status) { for (;;) {} }
 void *memset(void *s, int c, __SIZE_TYPE__ n) { return s; }
+char *fgets(char *s, int n, void *stream) { return s; }
+void *stdin;

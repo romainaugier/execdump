@@ -339,11 +339,15 @@ Decompiler:
   - :heavy_check_mark: Differential test of the C backend: random programs with branches and loops are built as LLVM
     IR, optimized like the lifted code, decompiled, and the C is run by an interpreter, it must return what the
     programs return
+  - :heavy_check_mark: Jumps through a register holding a constant (`lea eax, [a]; inc eax; jmp eax`) are followed: code
+    hidden on purpose after the first byte of what reads as another instruction is decompiled
   - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
     pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
     escaping address starts a buffer that extends to the next one, to the registers the prologue saves or to the
     return address (what it points to stays reachable from it, so the code stays correct, the arguments are above
-    the return address), the scalars below the buffers become values. A buffer that only escaped through a store
+    the return address), the scalars below the buffers become values. A buffer given with its size to a known function (`fgets(buf, 9, f)`,
+    `read`, `memset`, `snprintf`...) ends there, the address of the arguments a realigned frame keeps is not part of
+    it. A buffer that only escaped through a store
     the split made dead is split once optimized (gcc's realigned frame of `main` keeps the address of the arguments
     with the saved registers: they are `argc` and `argv` again). The addresses computed from a copy of the
     stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of

@@ -156,6 +156,10 @@ impl Decoder {
         });
     }
 
+    pub fn address_mask(&self) -> u64 {
+        return self.address_mask;
+    }
+
     pub fn arch(&self) -> Architecture {
         return self.arch;
     }

@@ -193,7 +193,7 @@ fn return_type(f: &ir::Func, types: &[CType], prototype: Option<&Prototype>) -> 
 
     let mut seen = (false, false, false);
 
-    if declared.as_ref().is_none_or(|d| matches!(d, CType::Int { .. })) && !values.is_empty() && values.iter().all(|&v| boolean(f, v, &mut seen, MAX_BOOLEAN_DEPTH)) && (seen.2 || seen.0 && seen.1) {
+    if f.name != "main" && declared.as_ref().is_none_or(|d| matches!(d, CType::Int { .. })) && !values.is_empty() && values.iter().all(|&v| boolean(f, v, &mut seen, MAX_BOOLEAN_DEPTH)) && (seen.2 || seen.0 && seen.1) {
         return CType::Bool;
     }
 

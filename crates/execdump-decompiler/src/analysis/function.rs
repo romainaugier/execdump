@@ -18,6 +18,9 @@ const MAX_FUNCTION_INSNS: usize = 200_000;
 /// Maximum number of entries read from a jump table
 const MAX_JUMP_TABLE_ENTRIES: u64 = 1024;
 
+/// Instructions looked at before a jump through a register for the constant it holds
+const MAX_CONSTANT_JUMP_INSNS: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EdgeKind {
     /// Unconditional jump
@@ -320,6 +323,12 @@ impl Recovery<'_, '_> {
                         }
 
                         self.switches.insert(pc, targets);
+                    } else if let Some(target) = self.constant_jump(&decoded).filter(|&t| !self.is_tail_jump(t)) {
+                        // A jump to an address computed in the register (lea eax, [a]; inc eax; jmp eax): obfuscated
+                        // code jumps into the middle of an instruction, the code is there
+                        self.leaders.insert(target);
+                        work.push(target);
+                        self.switches.insert(pc, vec![target]);
                     } else {
                         self.unresolved_jumps += 1;
                     }
@@ -331,6 +340,38 @@ impl Recovery<'_, '_> {
 
             pc = insn.end();
         }
+    }
+
+    /// The constant target of a jump through a register written just before: mov or lea of an address, then
+    /// constants added (inc, dec, add, sub)
+    fn constant_jump(&self, jump: &Decoded) -> Option<u64> {
+        if !matches!(self.ctx.decoder.arch(), Architecture::X86 | Architecture::X86_64) {
+            return None;
+        }
+
+        let Operand::Reg(reg) = jump.operand(0) else {
+            return None;
+        };
+
+        let mut delta = 0i64;
+
+        for decoded in self.previous_insns(jump.insn.addr, MAX_CONSTANT_JUMP_INSNS) {
+            if decoded.operand(0) != Operand::Reg(reg) || matches!(decoded.base_mnemonic(), "cmp" | "test" | "push" | "bt") {
+                continue;
+            }
+
+            match (decoded.base_mnemonic(), decoded.operand(1)) {
+                ("inc", _) => delta += 1,
+                ("dec", _) => delta -= 1,
+                ("add", Operand::Imm(imm)) => delta = delta.wrapping_add(imm),
+                ("sub", Operand::Imm(imm)) => delta = delta.wrapping_sub(imm),
+                ("mov", Operand::Imm(imm)) => return Some((imm as u64).wrapping_add(delta as u64) & self.ctx.decoder.address_mask()),
+                ("lea", Operand::Mem { .. }) => return decoded.insn.imm_ref.map(|base| base.wrapping_add(delta as u64) & self.ctx.decoder.address_mask()),
+                _ => return None,
+            }
+        }
+
+        return None;
     }
 
     /// Previous instructions in address order, closest first
