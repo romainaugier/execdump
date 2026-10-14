@@ -11,6 +11,7 @@ use crate::cache::{Cache, Meta, Rendered};
 use execdump_core::crash;
 use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
+use execdump_decompiler::c::ast::CFunction;
 use execdump_decompiler::notes::{apply_summary, apply_vars, used_names};
 use execdump_decompiler::types::Prototype;
 use execdump_decompiler::{Decompiler, SharedSignatures};
@@ -293,11 +294,14 @@ pub fn render(decompiler: Result<&Decompiler, &String>, addr: u64, notes: &Funct
         Err(error) => return failed(addr, &format!("sub_{:x}", addr), error),
     };
 
-    let mut function = match decompiler.c_function(addr) {
-        Ok(function) => function,
-        Err(error) => return failed(addr, &decompiler.function_name(addr), &error),
+    return match decompiler.c_function(addr) {
+        Ok(function) => render_function(decompiler, function, notes, name),
+        Err(error) => failed(addr, &decompiler.function_name(addr), &error),
     };
+}
 
+/// Text of a decompiled function with the notes applied
+pub fn render_function(decompiler: &Decompiler, mut function: CFunction, notes: &FunctionNotes, name: Option<&str>) -> Rendered {
     let original: Vec<String> = function.vars.iter().map(|v| v.name.clone()).collect();
     let errors = apply_vars(&mut function, &notes.var_notes(), &decompiler.typedb);
 

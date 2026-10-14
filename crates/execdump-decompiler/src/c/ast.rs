@@ -240,6 +240,9 @@ pub struct CFunction {
     pub vars: Vec<Var>,
     pub body: Vec<Stmt>,
     pub addr: u64,
+    /// Type each global is accessed with (an array of unknown size when indexed), None when the
+    /// accesses do not agree
+    pub globals: Vec<(String, Option<CType>)>,
 }
 
 /// Printed C code with the address of each line
@@ -630,6 +633,7 @@ mod tests {
             vars: vec![Var { name: "a".to_string(), ty: CType::int(32) }, Var { name: "b".to_string(), ty: CType::int(32) }],
             body: Vec::new(),
             addr: 0,
+            globals: Vec::new(),
         };
         let printer = Printer { function: &function, out: String::new(), lines: Vec::new() };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
@@ -666,6 +670,7 @@ mod tests {
                 Stmt::new(StmtKind::Return(Some(Expr::Var(1))), Some(4)),
             ],
             addr: 0x1000,
+            globals: Vec::new(),
         };
 
         let printed = function.print();

@@ -14,6 +14,9 @@ use super::Context;
 
 use crate::types::CType;
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
     Return(Option<Expr>),
@@ -34,6 +37,7 @@ pub struct Built {
     pub blocks: Vec<SBlock>,
     pub vars: Vec<Var>,
     pub params: Vec<VarId>,
+    pub globals: Vec<(String, Option<CType>)>,
 }
 
 struct Builder<'a> {
@@ -48,6 +52,8 @@ struct Builder<'a> {
     reads_memory: Vec<bool>,
     /// Constant expressions computed once at the start of the function, operands first
     constants: Vec<ValueId>,
+    /// Type each global is accessed with, None when the accesses disagree
+    globals: RefCell<BTreeMap<String, Option<CType>>>,
 }
 
 /// Size of an inlined constant expression above which it gets a variable when it is used more than once
@@ -314,6 +320,16 @@ impl<'a> Builder<'a> {
             Some(Allocated::Bytes(size)) => CType::Array(Box::new(CType::Char), Some(*size)),
             None => CType::Unknown(0),
         };
+    }
+
+    /// A global accessed with a type (unknown: only its address is used)
+    fn accessed(&self, name: &str, ty: CType) {
+        let mut globals = self.globals.borrow_mut();
+        let known = globals.entry(name.to_string()).or_insert_with(|| Some(ty.clone()));
+
+        if known.as_ref() != Some(&ty) || ty.is_unknown() {
+            *known = None;
+        }
     }
 
     fn is_array(&self, var: VarId) -> bool {
@@ -774,18 +790,27 @@ impl<'a> Builder<'a> {
             if let (Some(import), 0, true) = (name.strip_prefix("__imp_"), offset, terms.is_empty()) {
                 let function = self.ctx.prototypes.contains_key(import) || self.ctx.typedb.function(import).is_some();
                 let name = Expr::Name(import.to_string());
-                return if function { name } else { Expr::unary(UnaryOp::AddrOf, name) };
+
+                if function {
+                    return name;
+                }
+
+                self.accessed(import, CType::Unknown(0));
+                return Expr::unary(UnaryOp::AddrOf, name);
             }
 
             if offset == 0 && terms.is_empty() && self.string_global(name).is_none() {
+                self.accessed(name, ty.clone());
                 return Expr::Name(name.clone());
             }
 
             if terms.is_empty() && offset % size == 0 && self.string_global(name).is_none() {
+                self.accessed(name, CType::Array(Box::new(ty.clone()), None));
                 return Expr::Index(Box::new(Expr::Name(name.clone())), Box::new(Expr::Int(offset / size)));
             }
 
             if terms.len() == 1 && terms[0].1 == size && offset % size == 0 {
+                self.accessed(name, CType::Array(Box::new(ty.clone()), None));
                 let index = self.index_expr(terms[0].0, offset / size);
                 return Expr::Index(Box::new(Expr::Name(name.clone())), Box::new(index));
             }
@@ -1277,6 +1302,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         reads_memory: vec![false; f.values.len()],
         types,
         constants: Vec::new(),
+        globals: RefCell::new(BTreeMap::new()),
     };
 
     // Parameters are the first variables
@@ -1392,6 +1418,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
     blocks.extend(edges);
 
     let vars = std::mem::take(&mut builder.vars);
+    let globals = builder.globals.take().into_iter().collect();
 
-    return Built { blocks, vars, params };
+    return Built { blocks, vars, params, globals };
 }

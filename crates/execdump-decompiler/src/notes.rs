@@ -221,6 +221,7 @@ mod tests {
                 Stmt::new(StmtKind::Return(Some(Expr::Var(1))), Some(0x1004)),
             ],
             addr: 0x1000,
+            globals: Vec::new(),
         };
     }
 

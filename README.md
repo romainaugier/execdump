@@ -35,6 +35,14 @@ CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTION
     cargo run --release --target-dir target/checked -p execdump-project --example sweep -- /usr/bin/*
 ```
 
+The sweep also measures the C code of each binary: its lines, the copies between variables (`v1 = v2;`), the `goto`s, the memory accesses through a cast pointer (`*(int *)((char *)p + 8)`), the local variables and the instructions kept as inline assembly. With `SWEEP_COMPILE=1` it checks which functions compile (`SWEEP_CC` sets the compiler, `cc` by default): every function goes in one translation unit after the types of the type database and the prototypes it uses, its globals declared with the type it accesses them with. `SWEEP_REPORT=file.tsv` saves the counts of every function, `SWEEP_BASELINE=file.tsv` compares a run with a saved one, the totals and the functions that got worse:
+
+```
+SWEEP_COMPILE=1 SWEEP_REPORT=before.tsv cargo run --release -p execdump-project --example sweep -- /usr/bin/tar
+# change the decompiler
+SWEEP_COMPILE=1 SWEEP_BASELINE=before.tsv cargo run --release -p execdump-project --example sweep -- /usr/bin/tar
+```
+
 A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
 
 ## Usage
