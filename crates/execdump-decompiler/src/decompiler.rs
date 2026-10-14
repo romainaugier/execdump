@@ -50,6 +50,9 @@ const FRAMES: usize = 64;
 /// Instructions of the functions looked at to be inlined in their callers (trivial ones are a few)
 const MAX_TRIVIAL_INSNS: usize = 32;
 
+/// Optimizations of a function after its stack frame was split (a split can make another one possible)
+const MAX_SPLIT_ROUNDS: usize = 3;
+
 /// Prototypes of the functions the C runtime links in the programs
 const CRT_PROTOTYPES: &[(&str, &str)] = &[
     ("__libc_csu_init", "void __libc_csu_init(int argc, char **argv, char **envp)"),
@@ -378,7 +381,8 @@ impl<'a> Decompiler<'a> {
         let frame = self.frame(&env, function)?;
         let (_, slot_writes) = lift::lift(cx, &module, &env, function, &frame, sig, false, storage)?;
 
-        let canaries = self.optimize(&module, storage)?.into_iter().map(|index| index as i64 + frame.low).collect();
+        let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
+        let canaries = self.optimize(&module, storage, &saved)?.into_iter().map(|index| index as i64 + frame.low).collect();
 
         return Ok((module, Lifted { frame, slot_writes, canaries }));
     }
@@ -447,8 +451,9 @@ impl<'a> Decompiler<'a> {
         return Ok(module);
     }
 
-    /// Optimizes a lifted module, returns the frame offsets the stack canary was stored at
-    fn optimize(&self, module: &Module, storage: bool) -> Result<Vec<u64>, String> {
+    /// Optimizes a lifted module, returns the frame offsets the stack canary was stored at. The saved slots are
+    /// the offsets from the stack pointer at the entry the prologue saves registers to.
+    fn optimize(&self, module: &Module, storage: bool, saved: &[i64]) -> Result<Vec<u64>, String> {
         module.verify().map_err(|e| format!("invalid IR: {}", e.to_string()))?;
 
         module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
@@ -462,7 +467,7 @@ impl<'a> Decompiler<'a> {
             lift::fold_frame_addresses(function);
             let protector = lift::remove_stack_protector(function);
             again |= protector.changed;
-            let split = lift::split_frame(module, function, &protector.slots);
+            let split = lift::split_frame(module, function, &protector.slots, saved);
             again |= split;
             canaries.extend(protector.slots.iter().map(|(_, offset)| *offset));
 
@@ -471,9 +476,26 @@ impl<'a> Decompiler<'a> {
             }
         }
 
-        if again {
+        // A buffer whose address only escaped through a store the split made dead (the arguments of a realigned
+        // frame, their address saved by the prologue) is split once that store is gone
+        for round in 0..MAX_SPLIT_ROUNDS {
+            if !again {
+                break;
+            }
+
             module.verify().map_err(|e| format!("invalid IR after the stack protector removal and the split of the stack frame: {}", e.to_string()))?;
             module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+
+            again = false;
+
+            for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0 && round + 1 < MAX_SPLIT_ROUNDS) {
+                let split = lift::split_frame(module, function, &[], saved);
+                again |= split;
+
+                if split && storage {
+                    lift::declare_slots(module, function);
+                }
+            }
         }
 
         // Helpers and globals the optimizations made useless
@@ -886,7 +908,8 @@ impl<'a> Decompiler<'a> {
         let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params);
         let (llvm, _) = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true, false)?;
 
-        self.optimize(&module, false)?;
+        let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
+        self.optimize(&module, false, &saved)?;
 
         return Ok(refine(&module, llvm, &discovery, &self.abi));
     }
@@ -1233,9 +1256,9 @@ mod tests {
         let decompiler = Decompiler::new(&program, &analysis).unwrap();
         let check = decompiler.c_code(function(&analysis, "check")).unwrap();
 
-        // The buffers are arrays (up to the return address, the arguments are above it), the scalars below them
-        // are values
-        assert!(check.contains("char dest[36];") && check.contains("strcpy(dest, src);") && !check.contains("dest[40]"), "{}", check);
+        // The buffers are arrays (up to the registers the prologue saves, the return address and the arguments
+        // are above them), the scalars below them are values
+        assert!(check.contains("char dest[32];") && check.contains("strcpy(dest, src);"), "{}", check);
         assert!(check.contains("for (i = 0; i <= 3; i++) {") && check.contains("+= dest[i];"), "{}", check);
 
         // The buffer is read after the call that wrote it
@@ -1269,11 +1292,26 @@ mod tests {
         assert!(verify.starts_with("void verify(const char *s1, const char *s2)") && !verify.contains("return"), "{}", verify);
 
         // The pointer is only ever set to verify: the call is a call to verify, with its arguments
-        assert!(main.contains("main_check = verify;") && main.contains("verify(dest, \"secret\");"), "{}", main);
+        assert!(main.contains("main_check = verify;") && main.contains("verify(dest, s);"), "{}", main);
 
         // main has its standard prototype, the format string is in a register before it is passed
         assert!(main.starts_with("int main(int argc, char **argv)"), "{}", main);
         assert!(main.contains("strcpy(dest, argv[1]);") && main.contains("printf(\"usage: %s password\\n\", *argv);"), "{}", main);
+    }
+
+    #[test]
+    fn realigned_frame_of_gcc() {
+        let program = fixture("elf_i386_pointer_gcc");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let main = decompiler.c_code(function(&analysis, "main")).unwrap();
+
+        // The arguments are read through the address the realigned frame keeps of them (saved by the prologue)
+        assert!(main.starts_with("int main(int argc, char **argv)") && main.contains("if (argc == 2) {") && main.contains("strcpy(dest, argv[1]);"), "{}", main);
+        assert!(!main.contains(" *)"), "{}", main);
+
+        // rep stosd clears the buffer, two overlapping stores write the string
+        assert!(main.contains("memset(v1, 0, 100);") && main.contains("memcpy(v1, \"secret\", 7);") && main.contains("verify(dest, v1);"), "{}", main);
     }
 
     #[test]

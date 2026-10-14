@@ -323,11 +323,14 @@ Decompiler:
     programs return
   - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
     pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
-    escaping address starts a buffer that extends to the next one or to the return address (what it points to stays
-    reachable from it, so the code stays correct, the arguments are above the return address), the scalars below
-    the buffers become values. The addresses computed from a copy of the
+    escaping address starts a buffer that extends to the next one, to the registers the prologue saves or to the
+    return address (what it points to stays reachable from it, so the code stays correct, the arguments are above
+    the return address), the scalars below the buffers become values. A buffer that only escaped through a store
+    the split made dead is split once optimized (gcc's realigned frame of `main` keeps the address of the arguments
+    with the saved registers: they are `argc` and `argv` again). The addresses computed from a copy of the
     stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of
-    constants (`mov dword [ebp-0x25], 0x4763305f`...) are one `memcpy` of the string literal
+    constants (`mov dword [ebp-0x25], 0x4763305f`..., also overlapping ones: `"secr"` at 0 then `"ret\0"` at 3)
+    are one `memcpy` of the string literal, and `rep stos` of a repeated byte is a `memset`
   - :heavy_check_mark: Trivial functions inlined: a function whose body is one statement with no effect of its own
     (`abort();`, often a cold part the compiler split off or a noreturn stub, `return f(a1, a2);`, `return 42;`,
     `return &g;`) is shown by its callers instead of the call, with the arguments in place of the parameters

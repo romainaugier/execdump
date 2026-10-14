@@ -1,4 +1,5 @@
-/* 32-bit unoptimized code: a function only ever called through a global pointer set to it, main's arguments */
+/* 32-bit unoptimized code: a function only ever called through a global pointer set to it, main's arguments, a
+   buffer cleared by its initializer (rep stosd with gcc, memset with clang) */
 
 char *strcpy(char *dest, const char *src);
 int strcmp(const char *a, const char *b);
@@ -17,6 +18,7 @@ int main(int argc, char **argv)
 {
     static void (*check)(const char *, const char *);
     char copy[32];
+    char expected[100] = {0};
 
     if (argc != 2) {
         printf("usage: %s password\n", argv[0]);
@@ -25,7 +27,8 @@ int main(int argc, char **argv)
 
     check = verify;
     strcpy(copy, argv[1]);
-    check(copy, "secret");
+    strcpy(expected, "secret");
+    check(copy, expected);
     return 0;
 }
 

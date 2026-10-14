@@ -323,6 +323,33 @@ pub struct Frame {
     pub stack_params: BTreeSet<i64>,
 }
 
+impl Frame {
+    /// Stack slots the prologue pushes registers to (and the copy of the return address of a realigned frame:
+    /// lea ecx, [esp+4]; and esp, -16; push [ecx-4]), as offsets from the stack pointer at the entry. They are
+    /// variables of their own, the buffers below them end there.
+    pub fn saved_slots(&self, entry: u64, slot: i64) -> Vec<i64> {
+        let mut offset = 0;
+        let mut saved = Vec::new();
+
+        for insn in self.blocks.get(&entry).into_iter().flatten() {
+            let Insn::X86(insn) = insn else {
+                break;
+            };
+
+            match (insn.mnemonic.as_str(), insn.ops.as_slice()) {
+                ("push", [x86::Op::Reg(_) | x86::Op::Mem(_)]) => {
+                    offset -= slot;
+                    saved.push(offset);
+                }
+                ("mov", [x86::Op::Reg(_), x86::Op::Reg(_)]) | ("lea", [x86::Op::Reg(_), x86::Op::Mem(_)]) | ("and", [x86::Op::Reg(_), x86::Op::Imm(..)]) => {}
+                _ => break,
+            }
+        }
+
+        return saved;
+    }
+}
+
 pub fn capstone(arch: Architecture) -> Result<capstone::Capstone, String> {
     use capstone::prelude::*;
 

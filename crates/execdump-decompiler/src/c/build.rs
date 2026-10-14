@@ -1068,6 +1068,30 @@ impl<'a> Builder<'a> {
             return Expr::Call(Box::new(self.expr(target)), rest.iter().map(|&a| self.expr(a)).collect());
         }
 
+        // rep stos of a value whose bytes are the same: memset (__stosd(p, 0, 25) is memset(p, 0, 100))
+        if let Some(width) = match callee {
+            "__stosw" => Some(2),
+            "__stosd" => Some(4),
+            "__stosq" => Some(8),
+            _ => None,
+        } {
+            if let Some((dst, value, count)) = match args {
+                [dst, value, count] => f.int(*value).map(|value| (dst, value, count)),
+                _ => None,
+            } {
+                let byte = value & 0xff;
+
+                if (0..width).all(|i| (value >> (8 * i)) & 0xff == byte) {
+                    let size = match f.int(*count) {
+                        Some(n) => Expr::Int(n * width as i128),
+                        None => Expr::binary(BinaryOp::Mul, self.expr(*count), Expr::Int(width as i128)),
+                    };
+
+                    return call("memset", vec![self.expr(*dst), Expr::Int(byte), size]);
+                }
+            }
+        }
+
         if callee == "asm" {
             let text = f.addr(id).map(|a| self.ctx.instruction(a)).unwrap_or_default();
             return call("__asm__", vec![Expr::Str(text)]);
