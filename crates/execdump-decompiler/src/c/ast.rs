@@ -514,7 +514,8 @@ impl Printer<'_> {
                 self.line(depth, &text, addr);
             }
             StmtKind::For(init, cond, step, body) => {
-                let text = format!("for ({}; {}; {}) {{", self.simple(init), self.expr(cond), self.simple(step));
+                let cond = if *cond == Expr::Int(1) { String::new() } else { format!(" {}", self.expr(cond)) };
+                let text = format!("for ({};{}; {}) {{", self.simple(init), cond, self.simple(step));
                 self.line(depth, &text, addr);
                 self.block(body, depth + 1);
                 self.line(depth, "}", None);
@@ -656,7 +657,7 @@ impl CFunction {
 }
 
 /// The variables statements use, once each
-fn mentioned(stmts: &[Stmt]) -> Vec<VarId> {
+pub(super) fn mentioned(stmts: &[Stmt]) -> Vec<VarId> {
     let mut vars = Vec::new();
     let expr = |e: &Expr, vars: &mut Vec<VarId>| {
         e.visit(&mut |e| {

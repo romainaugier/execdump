@@ -259,7 +259,13 @@ Decompiler:
     has the prototype of that parameter (`int compare(const void *a1, const void *a2)`), the address is the
     constant the instruction that last writes the register of the argument before the call computes (the
     arguments passed on the stack are not followed)
-  - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
+  - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
+    Once the copies are gone the loops get their shape: the loops whose test is first or last are `while (c)` and
+    `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
+    counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
+    (`for (i = 0;; i++)`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
+    two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the cases of the
+    switches and the blocks with labels, their declarations would move out of them)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of
     comparisons LLVM makes) are taken for every value of interest (the boundaries of the comparisons, the cases,

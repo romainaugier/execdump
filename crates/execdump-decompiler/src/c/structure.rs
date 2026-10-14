@@ -1040,6 +1040,18 @@ fn is_single(stmts: &[Stmt], kind: &StmtKind) -> bool {
 /// while (1) loops get their condition from a leading or trailing test
 fn loop_conditions(stmts: &mut Vec<Stmt>) {
     for stmt in stmts.iter_mut() {
+        // for (init;; step) { if (c) break; ... } -> for (init; !c; step) { ... }
+        if let StmtKind::For(_, cond @ Expr::Int(1), _, body) = &mut stmt.kind {
+            if let Some(StmtKind::If(c, then, otherwise)) = body.first().map(|s| &s.kind) {
+                if is_single(then, &StmtKind::Break) && otherwise.is_empty() {
+                    *cond = c.clone().not();
+                    body.remove(0);
+                }
+            }
+
+            continue;
+        }
+
         let StmtKind::While(Expr::Int(1), body) = &mut stmt.kind else {
             continue;
         };
@@ -1051,6 +1063,13 @@ fn loop_conditions(stmts: &mut Vec<Stmt>) {
             if is_single(&then, &StmtKind::Break) && otherwise.is_empty() {
                 body.remove(0);
                 stmt.kind = StmtKind::While(c.not(), std::mem::take(body));
+                continue;
+            }
+
+            // while (1) { if (c) { x } else { break; } ... } -> while (c) { x ... }
+            if is_single(&otherwise, &StmtKind::Break) {
+                let rest = body.split_off(1);
+                stmt.kind = StmtKind::While(c, then.into_iter().chain(rest).collect());
                 continue;
             }
         }
@@ -1089,6 +1108,66 @@ fn simplify_ifs(stmts: &mut Vec<Stmt>) {
 
         i += 1;
     }
+
+}
+
+/// The jumps first: if (c) { x } else { break; } y -> if (!c) { break; } x y (an if alone in its list may be
+/// an else if)
+fn jumps_first(stmts: &mut Vec<Stmt>) {
+    if stmts.len() < 2 {
+        return;
+    }
+
+    for stmt in stmts.iter_mut() {
+        if let StmtKind::If(c, then, otherwise) = &mut stmt.kind {
+            if !then.last().is_some_and(|s| s.is_jump()) && otherwise.last().is_some_and(|s| s.is_jump()) {
+                *c = c.clone().not();
+                std::mem::swap(then, otherwise);
+            }
+        }
+    }
+
+    simplify_ifs(stmts);
+}
+
+/// The shorter exit first: if (c) { long; return a; } return b; -> if (!c) { return b; } long; return a;
+/// (not in the cases of the switches and the lists with labels: the declarations would move out of them)
+fn shorter_exits_first(stmts: &mut Vec<Stmt>) {
+    for stmt in stmts.iter_mut() {
+        match &mut stmt.kind {
+            StmtKind::If(_, a, b) => {
+                shorter_exits_first(a);
+                shorter_exits_first(b);
+            }
+            StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => shorter_exits_first(body),
+            _ => {}
+        }
+    }
+
+    if let [.., Stmt { kind: StmtKind::If(_, then, otherwise), .. }, last] = stmts.as_slice() {
+        let length = |list: &[Stmt]| list.iter().map(size).sum::<usize>();
+
+        if otherwise.is_empty() && last.is_jump() && then.last().is_some_and(|s| s.is_jump()) && length(then) > 2 * length(std::slice::from_ref(last)) && !stmts.iter().any(has_label) {
+            let last = stmts.pop().unwrap();
+            let Some(Stmt { kind: StmtKind::If(c, then, _), .. }) = stmts.last_mut() else {
+                unreachable!();
+            };
+
+            *c = c.clone().not();
+            let rest = std::mem::replace(then, vec![last]);
+            stmts.extend(rest);
+        }
+    }
+}
+
+/// Number of statements, the nested ones included
+fn size(stmt: &Stmt) -> usize {
+    return 1 + match &stmt.kind {
+        StmtKind::If(_, a, b) => a.iter().chain(b.iter()).map(size).sum(),
+        StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => body.iter().map(size).sum(),
+        StmtKind::Switch(_, cases, default) => cases.iter().flat_map(|c| c.body.iter()).chain(default.iter()).map(size).sum(),
+        _ => 0,
+    };
 }
 
 fn assigned_var(stmt: &Stmt) -> Option<(VarId, &Expr)> {
@@ -1118,7 +1197,10 @@ fn for_loops(stmts: &mut Vec<Stmt>) {
 
         let step = body.last().and_then(|s| assigned_var(s)).filter(|(v, value)| *v == var && value.uses(var)).is_some();
 
-        if step && cond.uses(var) && !has_loop_jump(body, &StmtKind::Continue) {
+        // A loop left from its body counts in its header too: for (v = init;; v += k) { ...; if (c) break; ... }
+        let counted = *cond == Expr::Int(1) && super::ast::mentioned(&body[..body.len().saturating_sub(1)]).contains(&var);
+
+        if step && (cond.uses(var) || counted) && !has_loop_jump(body, &StmtKind::Continue) {
             let step = body.pop().unwrap();
             let (cond, body) = (cond.clone(), std::mem::take(body));
             let addr = after[0].addr;
@@ -1264,6 +1346,17 @@ fn remove_goto_next(stmts: &mut Vec<Stmt>) {
     }
 }
 
+/// After the copies are gone: the loops counting a variable are for loops (the start of the count is the
+/// value it was copied from), the shorter exits go first
+pub fn loops_and_exits(stmts: &mut Vec<Stmt>) {
+    walk(stmts, &mut for_loops);
+    walk(stmts, &mut loop_conditions);
+    walk(stmts, &mut jumps_first);
+    walk(stmts, &mut loop_conditions);
+    walk(stmts, &mut for_loops);
+    shorter_exits_first(stmts);
+}
+
 /// Structured statements of the blocks (block 0 is the entry)
 pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
     if blocks.is_empty() {
@@ -1313,7 +1406,6 @@ pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
         walk(&mut stmts, &mut remove_goto_next);
         let gotos = collect_gotos(&mut stmts);
         walk(&mut stmts, &mut |list: &mut Vec<Stmt>| remove_labels(list, &gotos));
-        walk(&mut stmts, &mut for_loops);
         walk(&mut stmts, &mut merge_cases);
     }
 
@@ -1812,6 +1904,33 @@ mod tests {
         ];
 
         assert_eq!(gotos(blocks), 0);
+    }
+
+    #[test]
+    fn loops_and_exits_after_the_copies() {
+        let call = |name: &str| Stmt::new(StmtKind::Expr(Expr::Call(Box::new(Expr::Name(name.to_string())), Vec::new())), None);
+        let stmt = |kind: StmtKind| Stmt::new(kind, None);
+        let increment = stmt(StmtKind::Assign(Expr::Var(0), Expr::binary(BinaryOp::Add, Expr::Var(0), Expr::Int(1))));
+        let test = Expr::binary(BinaryOp::Gt, Expr::Var(0), Expr::Int(3));
+
+        // v0 = 0; while (1) { b(v0); if (v0 > 3) break; v0 += 1; } -> for (v0 = 0;; v0 += 1) { ... }
+        let body = vec![stmt(StmtKind::Assign(Expr::Var(1), Expr::Var(0))), stmt(StmtKind::If(test.clone(), vec![stmt(StmtKind::Break)], Vec::new())), increment.clone()];
+        let mut stmts = vec![stmt(StmtKind::Assign(Expr::Var(0), Expr::Int(0))), stmt(StmtKind::While(Expr::Int(1), body))];
+        loops_and_exits(&mut stmts);
+        assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::For(_, Expr::Int(1), _, body), .. }] if body.len() == 2), "{:?}", stmts);
+
+        // while (1) { if (c) { b(); } else { break; } c(); } -> while (c) { b(); c(); }
+        let body = vec![stmt(StmtKind::If(test.clone(), vec![call("b")], vec![stmt(StmtKind::Break)])), call("c")];
+        let mut stmts = vec![stmt(StmtKind::While(Expr::Int(1), body))];
+        loops_and_exits(&mut stmts);
+        assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::While(c, body), .. }] if *c == test && body.len() == 2), "{:?}", stmts);
+
+        // if (c) { b(); b(); b(); return 1; } return 0; -> if (!c) { return 0; } b(); b(); b(); return 1;
+        let returns = |v: i128| stmt(StmtKind::Return(Some(Expr::Int(v))));
+        let mut stmts = vec![stmt(StmtKind::If(test.clone(), vec![call("b"), call("b"), call("b"), returns(1)], Vec::new())), returns(0)];
+        loops_and_exits(&mut stmts);
+        assert_eq!(stmts.len(), 5, "{:?}", stmts);
+        assert!(matches!(&stmts[0].kind, StmtKind::If(c, then, _) if *c == test.clone().not() && then[..] == [returns(0)]), "{:?}", stmts);
     }
 
     fn assign(var: VarId) -> Stmt {
