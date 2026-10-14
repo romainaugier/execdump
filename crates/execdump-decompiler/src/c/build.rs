@@ -677,6 +677,13 @@ impl<'a> Builder<'a> {
         };
 
         let operand = |id: ValueId, other: ValueId| -> Expr {
+            // Pointers are compared with NULL
+            let pointer = |v: ValueId| is_pointer(self.ty(v)) || self.written_type(&self.expr(v)).is_some_and(|t| is_pointer(&t));
+
+            if self.f.int(id) == Some(0) && !matches!(self.f.values[other].kind, ValueKind::Int(_)) && pointer(other) {
+                return Expr::Name("NULL".to_string());
+            }
+
             // Characters compared with printable constants are character literals
             if let (Some(c), CType::Char) = (self.f.int(id), self.ty(other)) {
                 if (0x20..0x7f).contains(&c) {
@@ -1662,7 +1669,10 @@ impl<'a> Builder<'a> {
                 continue;
             };
 
-            let value = self.expr(operands[position]);
+            let value = match self.expr(operands[position]) {
+                Expr::Int(0) if is_pointer(&self.vars[var].ty) => Expr::Name("NULL".to_string()),
+                value => value,
+            };
 
             if value != Expr::Var(var) {
                 pending.push((var, value, f.addr(id).or(jump)));

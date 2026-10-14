@@ -986,6 +986,7 @@ fn reads(e: &Expr) -> (HashSet<VarId>, bool, bool) {
             vars.insert(*v);
         }
         Expr::Call(..) => call = true,
+        Expr::Name(name) if name == "NULL" => {}
         Expr::Name(_) | Expr::Index(..) | Expr::Member(..) | Expr::Unary(UnaryOp::Deref, _) => memory = true,
         _ => {}
     });
