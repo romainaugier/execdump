@@ -13,11 +13,13 @@
 
 pub mod regs;
 mod frame;
+mod protector;
 mod refine;
 mod x86;
 mod aarch64;
 
-pub use frame::split_frame;
+pub use frame::{fold_frame_addresses, split_frame};
+pub use protector::{remove_stack_protector, Protector};
 pub use refine::refine;
 
 use crate::analysis::function::{CallTarget, EdgeKind, Function};

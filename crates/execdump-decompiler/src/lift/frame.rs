@@ -8,7 +8,8 @@
  *
  * - an address that escapes (taken, passed, indexed by a variable) is the start of an object that
  *   extends to the next escaping address, or to the end of the frame: what it points to may be
- *   reached from it, the slot keeps it whole
+ *   reached from it, the slot keeps it whole. The slot of the stack protector canary (removed
+ *   before, see protector.rs) ends the objects below it too: the buffers it protects end there
  * - below the first escaping address, the loads and stores make the slots (overlapping accesses
  *   share one)
  *
@@ -53,17 +54,32 @@ struct Slot {
     accesses: Vec<usize>,
 }
 
-/// Splits the byte arrays of the stack frame of a function, true when one was split
-pub fn split_frame(module: &Module, function: FunctionValue) -> bool {
+/// Splits the byte arrays of the stack frame of a function, true when one was split. The bounds are
+/// offsets in frames where the objects end (the slots of the stack protector canary).
+pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValueRef, u64)]) -> bool {
     let mut split = false;
 
     unsafe {
         let module = module.as_mut_ptr();
+
+        for frame in frames(function) {
+            let ends: BTreeSet<u64> = bounds.iter().filter(|(f, _)| *f == frame).map(|(_, offset)| *offset).collect();
+            split |= split_one(module, frame, &ends);
+        }
+    }
+
+    return split;
+}
+
+/// Byte array allocas of the entry block
+unsafe fn frames(function: FunctionValue) -> Vec<LLVMValueRef> {
+    let mut frames = Vec::new();
+
+    unsafe {
         let Some(entry) = function.get_first_basic_block() else {
-            return false;
+            return frames;
         };
 
-        let mut frames = Vec::new();
         let mut instruction = LLVMGetFirstInstruction(entry.as_mut_ptr());
 
         while !instruction.is_null() {
@@ -73,17 +89,23 @@ pub fn split_frame(module: &Module, function: FunctionValue) -> bool {
 
             instruction = LLVMGetNextInstruction(instruction);
         }
-
-        for frame in frames {
-            split |= split_one(module, frame);
-        }
     }
 
-    return split;
+    return frames;
+}
+
+/// Addresses of the stack frames computed on integers become addresses in the frames (before the other
+/// passes that look at how the frames are accessed)
+pub fn fold_frame_addresses(function: FunctionValue) {
+    unsafe {
+        for frame in frames(function) {
+            fold_integer_addresses(frame, byte_array(LLVMGetAllocatedType(frame)).unwrap_or(0));
+        }
+    }
 }
 
 /// Length of an array of bytes
-unsafe fn byte_array(ty: LLVMTypeRef) -> Option<u64> {
+pub(super) unsafe fn byte_array(ty: LLVMTypeRef) -> Option<u64> {
     unsafe {
         if LLVMGetTypeKind(ty) != LLVMTypeKind::LLVMArrayTypeKind {
             return None;
@@ -96,7 +118,7 @@ unsafe fn byte_array(ty: LLVMTypeRef) -> Option<u64> {
     }
 }
 
-unsafe fn users(value: LLVMValueRef) -> Vec<LLVMValueRef> {
+pub(super) unsafe fn users(value: LLVMValueRef) -> Vec<LLVMValueRef> {
     let mut users = Vec::new();
 
     unsafe {
@@ -111,13 +133,13 @@ unsafe fn users(value: LLVMValueRef) -> Vec<LLVMValueRef> {
     return users;
 }
 
-unsafe fn constant(value: LLVMValueRef) -> Option<i64> {
+pub(super) unsafe fn constant(value: LLVMValueRef) -> Option<i64> {
     unsafe {
         return (!LLVMIsAConstantInt(value).is_null() && LLVMGetIntTypeWidth(LLVMTypeOf(value)) <= 64).then(|| LLVMConstIntGetSExtValue(value));
     }
 }
 
-unsafe fn callee_name(call: LLVMValueRef) -> String {
+pub(super) unsafe fn callee_name(call: LLVMValueRef) -> String {
     unsafe {
         let callee = LLVMGetCalledValue(call);
 
@@ -132,7 +154,7 @@ unsafe fn callee_name(call: LLVMValueRef) -> String {
 }
 
 /// Constant offset of a GEP of the frame (i8 with one index, or the array with 0 and an index)
-unsafe fn gep_offset(gep: LLVMValueRef, frame: LLVMValueRef) -> Option<u64> {
+pub(super) unsafe fn gep_offset(gep: LLVMValueRef, frame: LLVMValueRef) -> Option<u64> {
     unsafe {
         if LLVMGetInstructionOpcode(gep) != LLVMOpcode::LLVMGetElementPtr || LLVMGetOperand(gep, 0) != frame {
             return None;
@@ -209,12 +231,13 @@ fn is_text(bytes: &[u8]) -> bool {
     return text.len() >= 4 && !text.contains(&0) && text_bytes(text);
 }
 
-/// Slots of a frame of a size from its accesses
-fn layout(accesses: &[Access], size: u64) -> Vec<Slot> {
+/// Slots of a frame of a size from its accesses, the objects also end at the bounds
+fn layout(accesses: &[Access], size: u64, bounds: &BTreeSet<u64>) -> Vec<Slot> {
     let bases: BTreeSet<u64> = accesses.iter().filter(|a| a.kind == Kind::Escape).map(|a| a.offset).collect();
+    let end = |b: u64| bases.range(b + 1..).chain(bounds.range(b + 1..)).min().copied().unwrap_or(size);
 
     // Objects from each escaping address to the next, then the accesses
-    let mut intervals: Vec<(u64, u64, Vec<usize>)> = bases.iter().map(|&b| (b, bases.range(b + 1..).next().copied().unwrap_or(size), Vec::new())).collect();
+    let mut intervals: Vec<(u64, u64, Vec<usize>)> = bases.iter().map(|&b| (b, end(b), Vec::new())).collect();
 
     for (index, access) in accesses.iter().enumerate() {
         intervals.push((access.offset, (access.offset + access.size).min(size).max(access.offset + 1), vec![index]));
@@ -266,11 +289,70 @@ fn layout(accesses: &[Access], size: u64) -> Vec<Slot> {
     return merged;
 }
 
-unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef) -> bool {
+/// Addresses of the frame computed on integers (the stack pointer copied to a register, then offset:
+/// inttoptr(ptrtoint(frame + a) + c)) become addresses in the frame (frame + a + c)
+unsafe fn fold_integer_addresses(frame: LLVMValueRef, size: u64) {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(frame));
+        let (i8, i64) = (LLVMInt8TypeInContext(context), LLVMInt64TypeInContext(context));
+        let builder = LLVMCreateBuilderInContext(context);
+
+        let mut bases: Vec<(LLVMValueRef, u64)> = vec![(frame, 0)];
+        bases.extend(users(frame).into_iter().filter_map(|u| Some((u, gep_offset(u, frame)?))));
+
+        for (base, offset) in bases {
+            for integer in users(base).into_iter().filter(|&u| LLVMGetInstructionOpcode(u) == LLVMOpcode::LLVMPtrToInt) {
+                for sum in users(integer) {
+                    let delta = match LLVMGetInstructionOpcode(sum) {
+                        LLVMOpcode::LLVMAdd if LLVMGetOperand(sum, 0) == integer => constant(LLVMGetOperand(sum, 1)),
+                        LLVMOpcode::LLVMAdd => constant(LLVMGetOperand(sum, 0)),
+                        LLVMOpcode::LLVMSub if LLVMGetOperand(sum, 0) == integer => constant(LLVMGetOperand(sum, 1)).map(|c| -c),
+                        _ => None,
+                    };
+
+                    let Some(target) = delta.and_then(|d| offset.checked_add_signed(d)).filter(|&t| t < size) else {
+                        continue;
+                    };
+
+                    LLVMPositionBuilderBefore(builder, sum);
+                    let mut index = [LLVMConstInt(i64, target, 0)];
+                    let address = LLVMBuildInBoundsGEP2(builder, i8, frame, index.as_mut_ptr(), 1, c"".as_ptr());
+
+                    for pointer in users(sum).into_iter().filter(|&u| LLVMGetInstructionOpcode(u) == LLVMOpcode::LLVMIntToPtr && LLVMTypeOf(u) == LLVMTypeOf(address)) {
+                        LLVMReplaceAllUsesWith(pointer, address);
+                        LLVMInstructionEraseFromParent(pointer);
+                    }
+
+                    // The other uses keep the integer
+                    if !LLVMGetFirstUse(sum).is_null() {
+                        let value = LLVMBuildPtrToInt(builder, address, LLVMTypeOf(sum), c"".as_ptr());
+                        LLVMReplaceAllUsesWith(sum, value);
+                    }
+
+                    LLVMInstructionEraseFromParent(sum);
+                }
+
+                if LLVMGetFirstUse(integer).is_null() {
+                    LLVMInstructionEraseFromParent(integer);
+                }
+            }
+
+            // The address of the top of the frame (the stack pointer at the entry) is out of it
+            if base != frame && LLVMGetFirstUse(base).is_null() {
+                LLVMInstructionEraseFromParent(base);
+            }
+        }
+
+        LLVMDisposeBuilder(builder);
+    }
+}
+
+unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSet<u64>) -> bool {
     unsafe {
         let Some(size) = byte_array(LLVMGetAllocatedType(frame)) else {
             return false;
         };
+
 
         let layout_data = LLVMGetModuleDataLayout(module);
         let mut accesses = Vec::new();
@@ -305,7 +387,7 @@ unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef) -> bool {
             }
         }
 
-        let slots = layout(&accesses, size);
+        let slots = layout(&accesses, size, bounds);
 
         if slots.len() <= 1 && slots.first().is_none_or(|s| s.start == 0 && s.end == size) {
             return false;
@@ -512,10 +594,14 @@ mod tests {
     fn slots() {
         // Scalars below the first escaping address, objects from each escaping address to the next
         let accesses = vec![load(4, 4), store(4, &[1, 0, 0, 0]), store(8, &[0; 4]), load(10, 2), escape(16), store(20, &[0; 4]), escape(32), load(40, 4)];
-        assert_eq!(spans(&layout(&accesses, 48)), vec![(4, 8), (8, 12), (16, 32), (32, 48)]);
+        assert_eq!(spans(&layout(&accesses, 48, &BTreeSet::new())), vec![(4, 8), (8, 12), (16, 32), (32, 48)]);
+
+        // The canary slot ends the buffer below it
+        let accesses = vec![load(4, 4), escape(8)];
+        assert_eq!(spans(&layout(&accesses, 64, &BTreeSet::from([40]))), vec![(4, 8), (8, 40)]);
 
         // A string written 4 bytes at a time is one slot, not numbers
         let accesses = vec![store(0, b"libe"), store(4, b"rt\xc3\xa9"), store(8, b"!\0\0\0"), store(12, &[1, 0, 0, 0]), store(16, &[2, 0, 0, 0])];
-        assert_eq!(spans(&layout(&accesses, 20)), vec![(0, 12), (12, 16), (16, 20)]);
+        assert_eq!(spans(&layout(&accesses, 20, &BTreeSet::new())), vec![(0, 12), (12, 16), (16, 20)]);
     }
 }

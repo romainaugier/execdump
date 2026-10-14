@@ -254,8 +254,14 @@ Decompiler:
   - :heavy_check_mark: Stack frame variables: when the address of a part of the frame is taken (buffers passed to calls,
     pointers kept in locals, typical of 32-bit and unoptimized code), the frame is split by how it is accessed: each
     escaping address starts a buffer that extends to the next one (what it points to stays reachable from it, so the
-    code stays correct), the scalars below the buffers become values. Strings written on the stack by stores of
+    code stays correct), the scalars below the buffers become values. The addresses computed from a copy of the
+    stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of
     constants (`mov dword [ebp-0x25], 0x4763305f`...) are one `memcpy` of the string literal
+  - :heavy_check_mark: Stack protector removed: the canary is recognized by its value (`fs:0x28` on x86_64, `gs:0x14`
+    on x86, `__stack_chk_guard`, the MSVC `__security_cookie`), its checks always pass (the branches to
+    `__stack_chk_fail` and the calls to `__security_check_cookie` disappear, with the duplicated checks before
+    each return), its stores are removed and its slot ends the buffers below it (`char buffer[64]`, not the rest
+    of the frame)
   - :heavy_check_mark: 32-bit calls: the stack arguments by size (doubles and 64-bit integers take two slots), the
     arguments of variadic functions from their format string, the pointer sized types of the headers (`size_t`...)
   - :heavy_check_mark: C code generation (`--decompile c`)

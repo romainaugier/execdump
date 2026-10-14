@@ -307,15 +307,19 @@ impl<'a> Decompiler<'a> {
 
         module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
 
-        // Frames kept whole by an escaping address: split into variables, optimized again
-        let mut split = false;
+        // Stack protector checks removed, frames kept whole by an escaping address split into variables,
+        // then optimized again
+        let mut again = false;
 
         for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
-            split |= lift::split_frame(module, function);
+            lift::fold_frame_addresses(function);
+            let protector = lift::remove_stack_protector(function);
+            again |= protector.changed;
+            again |= lift::split_frame(module, function, &protector.slots);
         }
 
-        if split {
-            module.verify().map_err(|e| format!("invalid IR after the split of the stack frame: {}", e.to_string()))?;
+        if again {
+            module.verify().map_err(|e| format!("invalid IR after the stack protector removal and the split of the stack frame: {}", e.to_string()))?;
             module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
         }
 
@@ -958,6 +962,28 @@ mod tests {
 
         // gcc moves the unlikely path to a cold part reached by a conditional jump, the rest follows it
         assert!(code.contains("if (") && code.contains("length_of_cold();") && code.contains("strlen("), "{}", code);
+    }
+
+    #[test]
+    fn stack_protector() {
+        // The thread canary (fs:0x28, gs:0x14) and __stack_chk_guard (aarch64)
+        for (name, buffer) in [("elf_x86_64_quality", 72), ("elf_i386_quality", 64), ("elf_aarch64_quality", 64)] {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+
+            for function_name in ["length_of", "parse_opt"] {
+                let code = decompiler.c_code(function(&analysis, function_name)).unwrap();
+
+                for canary in ["__readfsqword", "__readgsdword", "__stack_chk_fail", "__stack_chk_guard"] {
+                    assert!(!code.contains(canary), "{}: {}", name, code);
+                }
+            }
+
+            // The buffer ends at the slot of the canary
+            let code = decompiler.c_code(function(&analysis, "length_of")).unwrap();
+            assert!(code.contains(&format!("char dest[{}];", buffer)) && code.contains("strcpy(dest, src);"), "{}: {}", name, code);
+        }
     }
 
     #[test]
