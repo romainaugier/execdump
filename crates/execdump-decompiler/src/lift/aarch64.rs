@@ -692,7 +692,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
                 _ => None,
             };
 
-            l.call(&site, value)?;
+            l.call(&site, value, false)?;
         }
         ("ret" | "retaa" | "retab", _) => {}
         ("svc", _) => {

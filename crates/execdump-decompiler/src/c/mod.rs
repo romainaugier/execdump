@@ -8,6 +8,7 @@
 
 pub mod ast;
 mod build;
+pub mod inline;
 pub mod ir;
 mod naming;
 pub mod quality;
@@ -111,7 +112,7 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
     let mut built = build::build(&f, ctx, types, &names);
     let body = structure::structure(built.blocks, &mut built.vars);
 
-    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals };
+    let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false };
     simplify::simplify(&mut function);
     simplify::null_returns(&mut function);
     naming::name(&mut function, ctx);

@@ -619,7 +619,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
                 _ => Some(get(l, target, slot as u32 * 8)?),
             };
 
-            l.call(&site, value)?;
+            l.call(&site, value, false)?;
         }
         ("ret" | "retn", _) => {}
 

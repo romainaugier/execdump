@@ -218,11 +218,13 @@ pub enum StmtKind {
 pub struct Stmt {
     pub kind: StmtKind,
     pub addr: Option<u64>,
+    /// Comment at the end of its first line
+    pub note: Option<String>,
 }
 
 impl Stmt {
     pub fn new(kind: StmtKind, addr: Option<u64>) -> Self {
-        return Stmt { kind, addr };
+        return Stmt { kind, addr, note: None };
     }
 
     /// Statements after which the execution does not continue (calls to noreturn functions are NoReturn)
@@ -243,6 +245,8 @@ pub struct CFunction {
     /// Type each global is accessed with (an array of unknown size when indexed), None when the
     /// accesses do not agree
     pub globals: Vec<(String, Option<CType>)>,
+    /// Its callers show its only statement instead of calling it, it is printed on one line
+    pub inlined: bool,
 }
 
 /// Printed C code with the address of each line
@@ -255,6 +259,8 @@ struct Printer<'a> {
     function: &'a CFunction,
     out: String,
     lines: Vec<Option<u64>>,
+    /// Note of the statement being printed, at the end of its first line
+    note: Option<String>,
 }
 
 const INDENT: &str = "    ";
@@ -266,6 +272,12 @@ impl Printer<'_> {
         }
 
         self.out.push_str(text);
+
+        if let Some(note) = self.note.take() {
+            self.out.push_str(" // ");
+            self.out.push_str(&note);
+        }
+
         self.out.push('\n');
         self.lines.push(addr);
     }
@@ -412,6 +424,7 @@ impl Printer<'_> {
 
     fn stmt(&mut self, stmt: &Stmt, depth: usize) {
         let addr = stmt.addr;
+        self.note = stmt.note.clone();
 
         match &stmt.kind {
             StmtKind::Expr(_) | StmtKind::Assign(..) | StmtKind::NoReturn(_) => {
@@ -426,7 +439,7 @@ impl Printer<'_> {
                 // else if chains
                 let mut otherwise = otherwise;
 
-                while let [Stmt { kind: StmtKind::If(cond, then, rest), addr }] = otherwise.as_slice() {
+                while let [Stmt { kind: StmtKind::If(cond, then, rest), addr, .. }] = otherwise.as_slice() {
                     let text = format!("}} else if ({}) {{", self.expr(cond));
                     self.line(depth, &text, *addr);
                     self.block(then, depth + 1);
@@ -564,9 +577,20 @@ impl CFunction {
     }
 
     pub fn print(&self) -> Printed {
-        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new() };
+        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None };
 
         let signature = self.signature();
+
+        if let ([stmt], true) = (self.body.as_slice(), self.inlined) {
+            let text = match &stmt.kind {
+                StmtKind::Return(Some(e)) => format!("return {};", printer.expr(e)),
+                _ => format!("{};", printer.simple(stmt)),
+            };
+
+            printer.line(0, &format!("{} {{ {} }}", signature, text), Some(self.addr));
+            return Printed { text: printer.out, lines: printer.lines };
+        }
+
         printer.line(0, &signature, Some(self.addr));
         printer.line(0, "{", None);
 
@@ -654,8 +678,9 @@ mod tests {
             body: Vec::new(),
             addr: 0,
             globals: Vec::new(),
+            inlined: false,
         };
-        let printer = Printer { function: &function, out: String::new(), lines: Vec::new() };
+        let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
 
         let sum = Expr::binary(BinaryOp::Add, a.clone(), b.clone());
@@ -691,6 +716,7 @@ mod tests {
             ],
             addr: 0x1000,
             globals: Vec::new(),
+            inlined: false,
         };
 
         let printed = function.print();

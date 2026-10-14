@@ -13,7 +13,7 @@ use crate::lift::regs::{Abi, RegisterFile};
 use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
 use crate::typedb::{Platform, TypeDb};
 use crate::analysis::insn::{Decoder, Flow};
-use crate::c::{self, ast::CFunction};
+use crate::c::{self, ast::CFunction, inline::Trivial};
 use crate::llm::{self, Assistant, LlmConfig, Renames};
 use crate::types::{CType, DataModel, FuncType, Param, Prototype};
 
@@ -45,6 +45,9 @@ pub(crate) fn stack_bytes(ty: LType, slot_size: i64, pointer_bits: u16) -> i64 {
 
 /// Frames kept for the final lift after the discovery of the signature
 const FRAMES: usize = 64;
+
+/// Instructions of the functions looked at to be inlined in their callers (trivial ones are a few)
+const MAX_TRIVIAL_INSNS: usize = 32;
 
 /// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
 /// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
@@ -113,6 +116,10 @@ pub struct Decompiler<'a> {
     user_prototypes: RefCell<HashMap<u64, Prototype>>,
     shared: Option<SharedSignatures>,
     epoch: Cell<u64>,
+    /// Statement of the trivial functions (None for the others), their callers show it instead of the call
+    trivial: RefCell<HashMap<u64, Option<Rc<Trivial>>>>,
+    /// Functions whose calls are being inlined (a trivial function calling itself stays a call)
+    inlining: RefCell<HashSet<u64>>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -155,6 +162,8 @@ impl<'a> Decompiler<'a> {
             user_prototypes: RefCell::new(HashMap::new()),
             shared: None,
             epoch: Cell::new(0),
+            trivial: RefCell::new(HashMap::new()),
+            inlining: RefCell::new(HashSet::new()),
         });
     }
 
@@ -168,6 +177,7 @@ impl<'a> Decompiler<'a> {
     /// Annotations up to this epoch of the shared signatures are applied
     pub fn set_epoch(&self, epoch: u64) {
         self.epoch.set(epoch);
+        self.trivial.borrow_mut().clear();
     }
 
     /// Enables the LLM improvement pass of the C code
@@ -248,23 +258,78 @@ impl<'a> Decompiler<'a> {
         let function = module.get_function(&sig.name).ok_or("the lifted function is missing")?;
         let prototype = self.prototypes.borrow().get(&sig.name).cloned();
 
-        let (globals, prototypes, noreturn) = (self.globals.borrow(), self.prototypes.borrow(), self.noreturn.borrow());
+        let mut function = {
+            let (globals, prototypes, noreturn) = (self.globals.borrow(), self.prototypes.borrow(), self.noreturn.borrow());
 
-        let ctx = c::Context {
-            program: self.program,
-            typedb: &self.typedb,
-            globals: &globals,
-            prototypes: &prototypes,
-            noreturn: &noreturn,
-            instruction: Box::new(|a| self.instruction_text(a)),
-            ret: self.single_return(addr),
-            function: Box::new(|a| self.analysis.functions.contains_key(&a).then(|| self.function_name(a))),
+            let ctx = c::Context {
+                program: self.program,
+                typedb: &self.typedb,
+                globals: &globals,
+                prototypes: &prototypes,
+                noreturn: &noreturn,
+                instruction: Box::new(|a| self.instruction_text(a)),
+                ret: self.single_return(addr),
+                function: Box::new(|a| self.analysis.functions.contains_key(&a).then(|| self.function_name(a))),
+            };
+
+            c::decompile(&module, function, &ctx, prototype.as_ref(), addr)
         };
 
-        let mut function = c::decompile(&module, function, &ctx, prototype.as_ref(), addr);
+        let first = self.inlining.borrow_mut().insert(addr);
+        self.inline_trivial(&mut function);
+
+        if first {
+            self.inlining.borrow_mut().remove(&addr);
+        }
+
+        let trivial = Trivial::of(&function).map(Rc::new);
+        function.inlined = trivial.is_some();
+        self.trivial.borrow_mut().insert(addr, trivial);
+
         llm::apply_renames(&mut function, &self.renames.borrow());
 
         return Ok(function);
+    }
+
+    /// The calls to trivial functions show their statement, with the name of the function as a note when
+    /// it has one (a symbol, or a name given by the user)
+    fn inline_trivial(&self, function: &mut CFunction) {
+        let names: HashMap<String, u64> = self.signatures.borrow().iter().map(|(addr, sig)| (sig.name.clone(), *addr)).collect();
+
+        let lookup = |name: &str| -> Option<(Rc<Trivial>, Option<String>)> {
+            let addr = *names.get(name)?;
+            let trivial = self.trivial(addr)?;
+            let named = self.program.symbol_at(addr).is_some() || self.user_names.borrow().contains_key(&addr);
+            Some((trivial, named.then(|| name.to_string())))
+        };
+
+        c::inline::inline(function, &lookup);
+    }
+
+    /// The statement of a trivial function of the program, decompiled to know (the small ones only)
+    fn trivial(&self, addr: u64) -> Option<Rc<Trivial>> {
+        if let Some(known) = self.trivial.borrow().get(&addr) {
+            return known.clone();
+        }
+
+        let function = self.analysis.functions.get(&addr)?;
+
+        if function.thunk.is_some() || function.num_insns() > MAX_TRIVIAL_INSNS || self.inlining.borrow().contains(&addr) {
+            return None;
+        }
+
+        // Decompiling it records whether it is trivial
+        if self.c_function(addr).is_err() {
+            self.trivial.borrow_mut().insert(addr, None);
+        }
+
+        return self.trivial.borrow().get(&addr).cloned().flatten();
+    }
+
+    /// Whether the callers of a function show its only statement instead of calling it (known once it was
+    /// decompiled)
+    pub fn is_inlined(&self, addr: u64) -> bool {
+        return self.trivial.borrow().get(&addr).is_some_and(|t| t.is_some());
     }
 
     fn instruction_text(&self, addr: u64) -> String {
@@ -342,6 +407,8 @@ impl<'a> Decompiler<'a> {
     /// Names a function or a global, None restores the name from the symbols. The functions decompiled
     /// afterwards use the new name, in their body as well as in their callers.
     pub fn rename(&self, addr: u64, name: Option<String>) {
+        self.trivial.borrow_mut().clear();
+
         match name {
             Some(name) => self.user_names.borrow_mut().insert(addr, name),
             None => self.user_names.borrow_mut().remove(&addr),
@@ -375,6 +442,7 @@ impl<'a> Decompiler<'a> {
     /// Gives a function a prototype (parameters and result), None goes back to the recovered one.
     /// Its callers pass the arguments of the new prototype once they are decompiled again.
     pub fn set_prototype(&self, addr: u64, prototype: Option<Prototype>) {
+        self.trivial.borrow_mut().clear();
         let sig = self.signatures.borrow_mut().remove(&addr);
 
         if let Some(sig) = sig {
@@ -960,8 +1028,33 @@ mod tests {
         let decompiler = Decompiler::new(&program, &analysis).unwrap();
         let code = decompiler.c_code(function(&analysis, "length_of")).unwrap();
 
-        // gcc moves the unlikely path to a cold part reached by a conditional jump, the rest follows it
-        assert!(code.contains("if (") && code.contains("length_of_cold();") && code.contains("strlen("), "{}", code);
+        // gcc moves the unlikely path to a cold part reached by a conditional jump, the rest follows it (the
+        // cold part only calls fatal, which only calls abort)
+        assert!(code.contains("if (") && code.contains("abort(); // length_of_cold") && code.contains("strlen("), "{}", code);
+    }
+
+    #[test]
+    fn trivial_functions_inlined() {
+        for (name, cold) in [("elf_x86_64_quality", "length_of_cold"), ("elf_i386_quality", "fatal"), ("elf_aarch64_quality", "fatal")] {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+            let code = |function_name: &str| decompiler.c_code(function(&analysis, function_name)).unwrap();
+
+            // Their callers show their statement, they are printed on one line
+            assert_eq!(code("fatal"), "void fatal(void) { abort(); }\n", "{}", name);
+            assert!(code("answer").ends_with(" answer(void) { return 42; }\n"), "{}: {}", name, code("answer"));
+            assert!(decompiler.is_inlined(function(&analysis, "fatal")));
+
+            let length_of = code("length_of");
+            assert!(length_of.contains(&format!("abort(); // {}", cold)), "{}: {}", name, length_of);
+
+            // The unused parameter of forward is dropped with its argument (on x86 the arguments it passes on
+            // the stack are the ones it received), clang folds the result of answer
+            let parse_opt = code("parse_opt");
+            assert!(parse_opt.contains("return length_of(src); // forward"), "{}: {}", name, parse_opt);
+            assert!(parse_opt.contains(if name == "elf_x86_64_quality" { "return 42; // answer" } else { "return 42;" }), "{}: {}", name, parse_opt);
+        }
     }
 
     #[test]

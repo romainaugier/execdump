@@ -263,6 +263,14 @@ Decompiler:
     code stays correct), the scalars below the buffers become values. The addresses computed from a copy of the
     stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of
     constants (`mov dword [ebp-0x25], 0x4763305f`...) are one `memcpy` of the string literal
+  - :heavy_check_mark: Trivial functions inlined: a function whose body is one statement with no effect of its own
+    (`abort();`, often a cold part the compiler split off or a noreturn stub, `return f(a1, a2);`, `return 42;`,
+    `return &g;`) is shown by its callers instead of the call, with the arguments in place of the parameters
+    (`abort(); // fatal`: the name of the function is a comment when it has one, a symbol or a name given by the
+    user). It is found when the function is decompiled (the small ones only are looked at), callees first, so the
+    chains of them are followed, and it is printed on one line (`void fatal(void) { abort(); }`). A tail call to
+    a function that does not return ends the path, and on x86 the arguments a tail call passes on the stack are
+    the ones the function received
   - :heavy_check_mark: Stack protector removed: the canary is recognized by its value (`fs:0x28` on x86_64, `gs:0x14`
     on x86, `__stack_chk_guard`, the MSVC `__security_cookie`), its checks always pass (the branches to
     `__stack_chk_fail` and the calls to `__security_check_cookie` disappear, with the duplicated checks before

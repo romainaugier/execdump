@@ -254,7 +254,8 @@ pub struct Frame {
     /// Lowest and highest stack offsets used (relative to the stack pointer at the entry)
     pub low: i64,
     pub high: i64,
-    /// Stack offsets read at or above the first stack argument
+    /// Stack offsets read at or above the first stack argument (the stack arguments of a tail call are
+    /// the ones the function received)
     pub stack_params: BTreeSet<i64>,
 }
 
@@ -298,7 +299,15 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
             continue;
         };
 
-        for insn in frame.blocks[&addr].iter() {
+        for (insn, info) in frame.blocks[&addr].iter().zip(function.blocks[&addr].insns.iter()) {
+            if let (Some(site), Some(Known::Stack(at))) = (function.calls.iter().find(|c| c.tail && c.addr == info.addr), tracker.get(sp)) {
+                for param in (env.signature)(&site.target).params.iter() {
+                    if let Loc::Stack(offset) = param.loc {
+                        frame.stack_params.insert(offset + at);
+                    }
+                }
+            }
+
             for access in insn.memory() {
                 let Some(Known::Stack(offset)) = access.base.and_then(|b| tracker.offset(b, access.disp)) else {
                     continue;
@@ -805,8 +814,8 @@ impl<'ctx> Lifter<'ctx, '_> {
             // Conditional tail calls are branches (below)
             _ if tail.is_some() && !matches!(last.flow, Flow::CondJump(_)) => {
                 let site = tail.unwrap();
-                self.call(&site.target, self.jump)?;
-                self.build_return()?;
+                self.call(&site.target, self.jump, true)?;
+                self.build_tail_return(&site.target)?;
             }
             Flow::CondJump(destination) => {
                 let target = |kind| block.succs.iter().find(|e| e.kind == kind).and_then(|e| blocks.get(&e.to)).copied();
@@ -819,8 +828,8 @@ impl<'ctx> Lifter<'ctx, '_> {
                     None => {
                         let tail = self.cx.append_basic_block(self.llvm, &format!("bb_{:x}_tail", addr));
                         self.builder.position_at_end(tail);
-                        self.call(&CallTarget::Function(destination), None)?;
-                        self.build_return()?;
+                        self.call(&CallTarget::Function(destination), None, true)?;
+                        self.build_tail_return(&CallTarget::Function(destination))?;
                         tail
                     }
                 };
@@ -881,6 +890,16 @@ impl<'ctx> Lifter<'ctx, '_> {
             let location = builder.create_debug_location(self.cx, line, column, *scope, None);
             self.builder.set_current_debug_location(location);
         }
+    }
+
+    /// End of a tail call: the return of the callee, nothing when it does not return
+    fn build_tail_return(&mut self, target: &CallTarget) -> Result<(), String> {
+        if (self.env.signature)(target).noreturn {
+            llvm!(self.builder.build_unreachable());
+            return Ok(());
+        }
+
+        return self.build_return();
     }
 
     fn build_return(&mut self) -> Result<(), String> {
@@ -1285,12 +1304,13 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(call.try_as_basic_value().basic());
     }
 
-    /// Calls a function: the arguments are read where its signature puts them, the result is written back
-    pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>) -> Result<(), String> {
+    /// Calls a function: the arguments are read where its signature puts them, the result is written back.
+    /// A tail call (a jump) passes the arguments above the return address of the function.
+    pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<(), String> {
         let sig = (self.env.signature)(target);
 
         // Stack arguments are above the return address the call pushes
-        let sp_offset = -self.env.abi.return_address;
+        let sp_offset = if tail { 0 } else { -self.env.abi.return_address };
 
         let mut args: Vec<BasicMetadataValueEnum> = Vec::new();
 
