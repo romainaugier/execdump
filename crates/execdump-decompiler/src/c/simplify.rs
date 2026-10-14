@@ -218,28 +218,39 @@ pub fn simplify(function: &mut CFunction) {
     }
 }
 
-/// return 0 in a function returning a pointer is return NULL
+/// return 0 in a function returning a pointer is return NULL (a boolean returned is converted), return 0 and 1
+/// in a function returning a boolean are return false and true
 pub fn null_returns(function: &mut CFunction) {
-    fn walk(stmts: &mut [Stmt]) {
+    // A boolean returned by a function returning a pointer (the register holds one or the other) is converted
+    fn walk(stmts: &mut [Stmt], ret: &crate::types::CType, vars: &[super::ast::Var]) {
+        let boolean = matches!(ret, crate::types::CType::Bool);
+
         for stmt in stmts.iter_mut() {
             match &mut stmt.kind {
-                StmtKind::Return(Some(value @ Expr::Int(0))) => *value = Expr::Name("NULL".to_string()),
-                StmtKind::If(_, a, b) => {
-                    walk(a);
-                    walk(b);
+                StmtKind::Return(Some(value @ Expr::Int(0 | 1))) if boolean => *value = Expr::Name(if *value == Expr::Int(1) { "true" } else { "false" }.to_string()),
+                StmtKind::Return(Some(value @ Expr::Int(0))) if !boolean => *value = Expr::Name("NULL".to_string()),
+                StmtKind::Return(Some(Expr::Var(v))) if !boolean && vars[*v].ty == crate::types::CType::Bool => {
+                    let var = *v;
+                    stmt.kind = StmtKind::Return(Some(Expr::cast(ret.clone(), Expr::Var(var))));
                 }
-                StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => walk(body),
+                StmtKind::If(_, a, b) => {
+                    walk(a, ret, vars);
+                    walk(b, ret, vars);
+                }
+                StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => walk(body, ret, vars),
                 StmtKind::Switch(_, cases, default) => {
-                    cases.iter_mut().for_each(|case| walk(&mut case.body));
-                    walk(default);
+                    cases.iter_mut().for_each(|case| walk(&mut case.body, ret, vars));
+                    walk(default, ret, vars);
                 }
                 _ => {}
             }
         }
     }
 
-    if matches!(function.ret.unqualified(), crate::types::CType::Pointer(_)) {
-        walk(&mut function.body);
+    let ret = function.ret.clone();
+
+    if matches!(ret, crate::types::CType::Bool) || matches!(ret.unqualified(), crate::types::CType::Pointer(_)) {
+        walk(&mut function.body, &ret, &function.vars);
     }
 }
 

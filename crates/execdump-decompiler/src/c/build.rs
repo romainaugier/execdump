@@ -445,6 +445,10 @@ impl<'a> Builder<'a> {
             Expr::Cast(ty, _) => Some(ty.clone()),
             Expr::Index(base, _) | Expr::Unary(UnaryOp::Deref, base) => self.written_type(base).and_then(|ty| pointee(&ty).cloned()),
             Expr::Name(name) => self.globals.borrow().get(name).cloned().flatten(),
+            Expr::Call(callee, _) => match &**callee {
+                Expr::Name(name) => self.ctx.prototype(name).map(|p| p.ty.ret.clone()).filter(|r| !r.is_unknown()),
+                _ => None,
+            },
             Expr::Member(base, field, arrow) => {
                 let base = self.written_type(base)?;
                 let aggregate = if *arrow { pointee(&base)?.clone() } else { base };
@@ -459,6 +463,10 @@ impl<'a> Builder<'a> {
             Expr::Unary(UnaryOp::LogicalNot, _) => Some(CType::int(32)),
             Expr::Binary(op, ..) if op.is_comparison() || matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) => Some(CType::int(32)),
             Expr::Binary(BinaryOp::Shl | BinaryOp::Shr, a, _) => self.written_type(a).map(promoted),
+            // Pointer arithmetic is of the type of the pointer
+            Expr::Binary(BinaryOp::Add | BinaryOp::Sub, a, b) if self.written_type(a).as_ref().is_some_and(is_pointer) || self.written_type(b).as_ref().is_some_and(is_pointer) => {
+                [a, b].into_iter().filter_map(|e| self.written_type(e)).find(is_pointer)
+            }
             Expr::Binary(_, a, b) | Expr::Ternary(_, a, b) => match (self.written_type(a).map(promoted), self.written_type(b).map(promoted)) {
                 (Some(CType::Int { bits: x, signed: s }), Some(CType::Int { bits: y, signed: t })) => {
                     let signed = if x == y { s && t } else if x > y { s } else { t };
@@ -573,7 +581,7 @@ impl<'a> Builder<'a> {
             // A pointer loaded from memory typed otherwise and used in the expressions of its users is
             // converted to its own type (the one they use it with)
             (Op::Load, [address]) => {
-                let loaded = self.constant_load(*address, id).unwrap_or_else(|| self.deref(*address, &self.types[id].clone()));
+                let loaded = self.constant_load(*address, id).or_else(|| self.narrowed(*address, &self.types[id])).unwrap_or_else(|| self.deref(*address, &self.types[id].clone()));
                 let ty = self.ty(id);
                 // char * converts to const char * without a cast
                 let qualified = |written: &CType| pointee(written).zip(pointee(ty)).is_some_and(|(w, t)| w.unqualified() == t.unqualified() && (!matches!(w, CType::Const(_)) || matches!(t, CType::Const(_))));
@@ -869,7 +877,7 @@ impl<'a> Builder<'a> {
         // Globals at a constant address are accessed by name, import slots hold their function
         if let ValueKind::Global(name) = &self.f.values[base].kind {
             if let (Some(import), 0, true) = (name.strip_prefix("__imp_"), offset, terms.is_empty()) {
-                let function = self.ctx.prototypes.contains_key(import) || self.ctx.typedb.function(import).is_some();
+                let function = self.ctx.prototype(import).is_some() || self.ctx.typedb.function(import).is_some();
                 let name = Expr::Name(import.to_string());
 
                 if function {
@@ -969,6 +977,43 @@ impl<'a> Builder<'a> {
         }
 
         return Expr::unary(UnaryOp::Deref, Expr::cast(CType::ptr(ty.clone()), pointer));
+    }
+
+    /// The low bytes of an integer field read: (char)p->flags rather than *(char *)&p->flags (the compilers test a
+    /// flag of a wider field in its byte)
+    fn narrowed(&self, address: ValueId, ty: &CType) -> Option<Expr> {
+        let integer = |t: &CType| matches!(self.ctx.resolve(t).unqualified(), CType::Int { .. } | CType::Char);
+
+        if !integer(ty) {
+            return None;
+        }
+
+        let (base, offset, terms) = self.decompose(address);
+        let size = self.ctx.size_of(ty)?;
+
+        if !terms.is_empty() || offset < 0 {
+            return None;
+        }
+
+        let field = match self.storage[base] {
+            Some(var) if !self.is_array(var) => self.field_at(Expr::Var(var), &self.vars[var].ty, offset, false).or_else(|| (offset == 0).then(|| Expr::Var(var)))?,
+            Some(_) => return None,
+            None => self.field_at(self.expr(base), pointee(self.ty(base))?, offset, true)?,
+        };
+
+        let written = self.written_type(&field)?;
+        let wider = self.ctx.size_of(&written).is_some_and(|s| s > size);
+
+        return (integer(&written) && wider).then(|| Expr::cast(ty.clone(), field));
+    }
+
+    /// A boolean assigned to a pointer variable (a variable holding a pointer or the result of a test, as the
+    /// return register does) is converted: C does not convert one to the other
+    fn converted(&self, var: VarId, value: Expr) -> Expr {
+        return match self.written_type(&value) {
+            Some(CType::Bool) if is_pointer(&self.vars[var].ty) => Expr::cast(self.vars[var].ty.clone(), value),
+            _ => value,
+        };
     }
 
     /// A field read as a float when it holds an integer or a pointer (or the reverse): *(double *)&p->f8
@@ -1196,7 +1241,7 @@ impl<'a> Builder<'a> {
                     stmts.push(self.stmt(StmtKind::Assign(self.deref(operands[1], &ty), value), id));
                 }
                 _ => match self.var_of[id] {
-                    Some(var) => stmts.push(self.stmt(StmtKind::Assign(Expr::Var(var), self.inst(id)), id)),
+                    Some(var) => stmts.push(self.stmt(StmtKind::Assign(Expr::Var(var), self.converted(var, self.inst(id))), id)),
                     None if op == Op::Call && f.values[id].uses.is_empty() => {
                         let ValueKind::Inst { callee, .. } = &f.values[id].kind else {
                             continue;
@@ -1868,7 +1913,7 @@ impl<'a> Builder<'a> {
             match ready {
                 Some(i) => {
                     let (var, value, addr) = pending.remove(i);
-                    stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), value), addr));
+                    stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), self.converted(var, value)), addr));
                 }
                 None => {
                     // Cycle: the first variable is saved before being overwritten
@@ -1881,7 +1926,7 @@ impl<'a> Builder<'a> {
                     }
 
                     let (var, value, addr) = pending.remove(0);
-                    stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), value), addr));
+                    stmts.push(Stmt::new(StmtKind::Assign(Expr::Var(var), self.converted(var, value)), addr));
                 }
             }
         }

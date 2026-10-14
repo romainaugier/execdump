@@ -11,7 +11,7 @@ use crate::analysis::Analysis;
 use crate::cxx;
 use crate::lift::regs::{Abi, RegisterFile};
 use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
-use crate::typedb::{Platform, TypeDb};
+use crate::typedb::{Aggregate, Platform, TypeDb};
 use crate::analysis::insn::{Decoder, Flow};
 use crate::c::{self, ast::CFunction, inline::Trivial};
 use crate::llm::{self, Assistant, LlmConfig, Renames};
@@ -30,7 +30,7 @@ use inkwell::values::BasicValue;
 use inkwell::OptimizationLevel;
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -49,6 +49,26 @@ const FRAMES: usize = 64;
 
 /// Instructions of the functions looked at to be inlined in their callers (trivial ones are a few)
 const MAX_TRIVIAL_INSNS: usize = 32;
+
+fn typing_pointee(ty: &CType) -> Option<&CType> {
+    return match ty {
+        CType::Pointer(inner) => Some(inner.unqualified()),
+        CType::Const(inner) => typing_pointee(inner),
+        _ => None,
+    };
+}
+
+/// Names of the structs a type names (through its pointers)
+fn struct_names(ty: &CType) -> Vec<String> {
+    return match ty {
+        CType::Struct(name) if name.starts_with("st_") => vec![name.clone()],
+        CType::Pointer(inner) | CType::Const(inner) | CType::Array(inner, _) => struct_names(inner),
+        _ => Vec::new(),
+    };
+}
+
+/// Callers followed up the call graph to know whether a result is read (the ones that return it)
+const MAX_RESULT_DEPTH: usize = 8;
 
 /// Optimizations of a function after its stack frame was split (a split can make another one possible)
 const MAX_SPLIT_ROUNDS: usize = 3;
@@ -79,6 +99,16 @@ struct SharedState {
     /// Incremented when the annotations change: signatures computed before are not published
     epoch: u64,
     entries: HashMap<u64, (Signature, Option<Prototype>)>,
+    /// Prototypes of the decompiled functions, for their callers
+    decompiled: HashMap<u64, Option<Arc<CPrototype>>>,
+}
+
+/// A function as the code of its callers sees it once decompiled: its C prototype (the structs it takes and
+/// returns, a boolean or nothing returned) and the structs the prototype names
+#[derive(Clone, Debug)]
+pub struct CPrototype {
+    pub prototype: Prototype,
+    pub structs: Vec<(String, Aggregate)>,
 }
 
 impl SharedSignatures {
@@ -87,11 +117,24 @@ impl SharedSignatures {
         let mut state = self.0.lock().unwrap();
         state.epoch += 1;
         state.entries.clear();
+        state.decompiled.clear();
         return state.epoch;
     }
 
     fn get(&self, addr: u64) -> Option<(Signature, Option<Prototype>)> {
         return self.0.lock().unwrap().entries.get(&addr).cloned();
+    }
+
+    fn decompiled(&self, addr: u64) -> Option<Option<Arc<CPrototype>>> {
+        return self.0.lock().unwrap().decompiled.get(&addr).cloned();
+    }
+
+    fn publish_decompiled(&self, epoch: u64, addr: u64, prototype: Option<Arc<CPrototype>>) {
+        let mut state = self.0.lock().unwrap();
+
+        if state.epoch == epoch {
+            state.decompiled.insert(addr, prototype);
+        }
     }
 
     fn publish(&self, epoch: u64, addr: u64, sig: Signature, prototype: Option<Prototype>) {
@@ -141,6 +184,14 @@ pub struct Decompiler<'a> {
     clobbered: RefCell<HashMap<u64, u128>>,
     /// Prototypes of the functions passed to known ones as callbacks (qsort, signal, atexit...)
     callbacks: std::cell::OnceCell<HashMap<u64, FuncType>>,
+    /// Prototypes of the decompiled functions for their callers (None when the decompilation failed), and the
+    /// functions being decompiled
+    decompiled: RefCell<HashMap<u64, Option<Arc<CPrototype>>>>,
+    decompiling: RefCell<HashSet<u64>>,
+    /// The functions decompiled for their callers, until they are asked for (they are not decompiled twice)
+    ready: RefCell<HashMap<u64, CFunction>>,
+    /// Component of each function in the call graph (the functions that call each other are one)
+    components: std::cell::OnceCell<HashMap<u64, usize>>,
 }
 
 impl<'a> Decompiler<'a> {
@@ -187,6 +238,10 @@ impl<'a> Decompiler<'a> {
             inlining: RefCell::new(HashSet::new()),
             clobbered: RefCell::new(HashMap::new()),
             callbacks: std::cell::OnceCell::new(),
+            decompiled: RefCell::new(HashMap::new()),
+            decompiling: RefCell::new(HashSet::new()),
+            ready: RefCell::new(HashMap::new()),
+            components: std::cell::OnceCell::new(),
         });
     }
 
@@ -201,6 +256,8 @@ impl<'a> Decompiler<'a> {
     pub fn set_epoch(&self, epoch: u64) {
         self.epoch.set(epoch);
         self.trivial.borrow_mut().clear();
+        self.decompiled.borrow_mut().clear();
+        self.ready.borrow_mut().clear();
     }
 
     /// Enables the LLM improvement pass of the C code
@@ -275,6 +332,27 @@ impl<'a> Decompiler<'a> {
 
     /// The C function of a function, with the address of each statement
     pub fn c_function(&self, addr: u64) -> Result<CFunction, String> {
+        if let Some(function) = self.ready.borrow_mut().remove(&addr) {
+            return Ok(function);
+        }
+
+        self.decompiling.borrow_mut().insert(addr);
+        let result = self.c_function_with_callees(addr);
+        self.decompiling.borrow_mut().remove(&addr);
+
+        let prototype = result.as_ref().ok().map(|(function, imported)| Arc::new(self.c_prototype(addr, function, imported)));
+
+        if let Some(shared) = self.shared.as_ref() {
+            shared.publish_decompiled(self.epoch.get(), addr, prototype.clone());
+        }
+
+        self.decompiled.borrow_mut().insert(addr, prototype);
+        return result.map(|(function, _)| function);
+    }
+
+    /// The C function, the structs of its callees it uses
+    fn c_function_with_callees(&self, addr: u64) -> Result<(CFunction, BTreeMap<String, Aggregate>), String> {
+        let (callees, imported) = self.callee_prototypes(addr);
         let cx = anonymous_context();
         let (module, lifted) = self.lift(&cx, addr, true)?;
         let sig = self.signature(addr);
@@ -294,6 +372,8 @@ impl<'a> Decompiler<'a> {
                 ret: self.single_return(addr),
                 function: Box::new(|a| self.analysis.functions.contains_key(&a).then(|| self.function_name(a))),
                 structs: Default::default(),
+                callees,
+                imported: imported.clone(),
             };
 
             c::decompile(&module, function, &ctx, prototype.as_ref(), addr)
@@ -314,7 +394,239 @@ impl<'a> Decompiler<'a> {
 
         llm::apply_renames(&mut function, &self.renames.borrow());
 
-        return Ok(function);
+        return Ok((function, imported));
+    }
+
+    /// The prototype of a decompiled function for its callers, with the structs it names (and the ones they
+    /// point to)
+    fn c_prototype(&self, addr: u64, function: &CFunction, imported: &BTreeMap<String, Aggregate>) -> CPrototype {
+        let name = self.signature(addr).name;
+        let discovered = self.prototypes.borrow().get(&name).cloned();
+
+        // A struct of the headers the function guessed from its uses is not one for its callers (the pointer may
+        // point to a bigger object starting with it): they keep the discovered type
+        let guessed = |ty: &CType| match typing_pointee(ty) {
+            Some(CType::Struct(n) | CType::Union(n)) => !n.starts_with("st_"),
+            _ => false,
+        };
+
+        let params = function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| {
+                let ty = &function.vars[p].ty;
+                let declared = discovered.as_ref().and_then(|d| d.ty.params.get(i)).map(|d| d.ty.clone());
+
+                // The callers take the structs the function recovered, the other types stay the discovered or
+                // declared ones (what the function guessed from its uses is its own)
+                let ty = match declared {
+                    Some(declared) if struct_names(ty).is_empty() || guessed(ty) => declared,
+                    _ => ty.clone(),
+                };
+
+                Param { name: Some(function.vars[p].name.clone()), ty }
+            })
+            .collect();
+
+        // A boolean, nothing or a recovered struct returned are what the callers get, a pointer guessed is not
+        let ret = match (&function.ret, discovered.as_ref().map(|d| d.ty.ret.clone())) {
+            (CType::Bool | CType::Void, _) => function.ret.clone(),
+            (ret, _) if !struct_names(ret).is_empty() => ret.clone(),
+            (_, Some(declared)) => declared,
+            (ret, None) => ret.clone(),
+        };
+
+        let prototype = Prototype { name, ty: FuncType { ret, params, variadic: function.variadic } };
+
+        let known = |name: &str| function.structs.iter().find(|(n, _)| n == name).map(|(_, a)| a.clone()).or_else(|| imported.get(name).cloned());
+        let mut structs: Vec<(String, Aggregate)> = Vec::new();
+        let mut pending: Vec<String> = prototype.ty.params.iter().map(|p| &p.ty).chain([&prototype.ty.ret]).flat_map(struct_names).collect();
+
+        while let Some(name) = pending.pop() {
+            if structs.iter().any(|(n, _)| *n == name) {
+                continue;
+            }
+
+            if let Some(aggregate) = known(&name) {
+                pending.extend(aggregate.fields.iter().flat_map(|f| struct_names(&f.ty)));
+                structs.push((name, aggregate));
+            }
+        }
+
+        structs.sort_by(|(a, _), (b, _)| a.cmp(b));
+        return CPrototype { prototype, structs };
+    }
+
+    /// Component of each function in the call graph (Tarjan's strongly connected components, iterative)
+    fn components(&self) -> &HashMap<u64, usize> {
+        return self.components.get_or_init(|| {
+            let callees = |addr: u64| -> Vec<u64> {
+                self.analysis.functions.get(&addr).map_or(Vec::new(), |f| {
+                    f.calls.iter().filter_map(|c| match c.target {
+                        CallTarget::Function(t) if self.analysis.functions.contains_key(&t) => Some(t),
+                        _ => None,
+                    }).collect()
+                })
+            };
+
+            let mut index: HashMap<u64, (usize, usize)> = HashMap::new();
+            let mut component: HashMap<u64, usize> = HashMap::new();
+            let mut stack: Vec<u64> = Vec::new();
+            let mut on_stack: HashSet<u64> = HashSet::new();
+            let mut next = 0;
+
+            for &root in self.analysis.functions.keys() {
+                if index.contains_key(&root) {
+                    continue;
+                }
+
+                // (function, its callees, the next one to visit)
+                let mut work: Vec<(u64, Vec<u64>, usize)> = vec![(root, callees(root), 0)];
+                index.insert(root, (next, next));
+                next += 1;
+                stack.push(root);
+                on_stack.insert(root);
+
+                while let Some((node, targets, position)) = work.last_mut() {
+                    let node = *node;
+
+                    if let Some(&target) = targets.get(*position) {
+                        *position += 1;
+
+                        match index.get(&target).copied() {
+                            None => {
+                                index.insert(target, (next, next));
+                                next += 1;
+                                stack.push(target);
+                                on_stack.insert(target);
+                                work.push((target, callees(target), 0));
+                            }
+                            Some((target_index, _)) if on_stack.contains(&target) => {
+                                let entry = index.get_mut(&node).unwrap();
+                                entry.1 = entry.1.min(target_index);
+                            }
+                            _ => {}
+                        }
+
+                        continue;
+                    }
+
+                    work.pop();
+                    let (node_index, low) = index[&node];
+
+                    if let Some((parent, _, _)) = work.last() {
+                        let parent = *parent;
+                        let entry = index.get_mut(&parent).unwrap();
+                        entry.1 = entry.1.min(low);
+                    }
+
+                    if node_index == low {
+                        while let Some(member) = stack.pop() {
+                            on_stack.remove(&member);
+                            component.insert(member, node_index);
+
+                            if member == node {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            component
+        });
+    }
+
+    /// The decompiled prototype of a function, decompiling it when needed (None when it failed or is being
+    /// decompiled)
+    fn decompiled_prototype(&self, addr: u64) -> Option<Arc<CPrototype>> {
+        if let Some(known) = self.decompiled.borrow().get(&addr) {
+            return known.clone();
+        }
+
+        if let Some(known) = self.shared.as_ref().and_then(|s| s.decompiled(addr)) {
+            self.decompiled.borrow_mut().insert(addr, known.clone());
+            return known;
+        }
+
+        if self.decompiling.borrow().contains(&addr) {
+            return None;
+        }
+
+        if let Ok(function) = self.c_function(addr) {
+            self.ready.borrow_mut().insert(addr, function);
+        }
+
+        return self.decompiled.borrow().get(&addr).cloned().flatten();
+    }
+
+    /// The decompiled prototypes of the callees of a function (decompiled first, callees before their callers)
+    /// and the structs they name. The callees calling the function back are left out: what each function of a
+    /// cycle sees would depend on the one decompiled first.
+    fn callee_prototypes(&self, addr: u64) -> (HashMap<String, Prototype>, BTreeMap<String, Aggregate>) {
+        let components = self.components();
+        let outside = |caller: u64, callee: u64| components.get(&caller) != components.get(&callee);
+
+        let direct = |addr: u64| -> Vec<u64> {
+            let mut found = Vec::new();
+
+            for call in self.analysis.functions.get(&addr).into_iter().flat_map(|f| f.calls.iter()) {
+                if let CallTarget::Function(target) = call.target {
+                    let function = self.analysis.functions.get(&target);
+
+                    if function.is_some_and(|f| f.thunk.is_none()) && outside(addr, target) && !found.contains(&target) {
+                        found.push(target);
+                    }
+                }
+            }
+
+            found
+        };
+
+        // Callees first, without recursing: each one finds its own callees decompiled
+        let known = |addr: u64| self.decompiled.borrow().contains_key(&addr) || self.decompiling.borrow().contains(&addr);
+        let mut order: Vec<u64> = Vec::new();
+        let mut visited: HashSet<u64> = HashSet::new();
+        let mut work: Vec<(u64, Vec<u64>, usize)> = vec![(addr, direct(addr), 0)];
+        visited.insert(addr);
+
+        while let Some((node, targets, position)) = work.last_mut() {
+            let node = *node;
+
+            match targets.get(*position).copied() {
+                Some(target) => {
+                    *position += 1;
+
+                    if !known(target) && visited.insert(target) {
+                        work.push((target, direct(target), 0));
+                    }
+                }
+                None => {
+                    work.pop();
+
+                    if node != addr {
+                        order.push(node);
+                    }
+                }
+            }
+        }
+
+        for callee in order {
+            let _ = self.decompiled_prototype(callee);
+        }
+
+        let mut prototypes = HashMap::new();
+        let mut structs = BTreeMap::new();
+
+        for callee in direct(addr) {
+            if let Some(decompiled) = self.decompiled_prototype(callee) {
+                structs.extend(decompiled.structs.iter().cloned());
+                prototypes.insert(decompiled.prototype.name.clone(), decompiled.prototype.clone());
+            }
+        }
+
+        return (prototypes, structs);
     }
 
     /// The calls to trivial functions show their statement, with the name of the function as a note when
@@ -521,6 +833,8 @@ impl<'a> Decompiler<'a> {
     /// afterwards use the new name, in their body as well as in their callers.
     pub fn rename(&self, addr: u64, name: Option<String>) {
         self.trivial.borrow_mut().clear();
+        self.decompiled.borrow_mut().clear();
+        self.ready.borrow_mut().clear();
 
         match name {
             Some(name) => self.user_names.borrow_mut().insert(addr, name),
@@ -556,6 +870,8 @@ impl<'a> Decompiler<'a> {
     /// Its callers pass the arguments of the new prototype once they are decompiled again.
     pub fn set_prototype(&self, addr: u64, prototype: Option<Prototype>) {
         self.trivial.borrow_mut().clear();
+        self.decompiled.borrow_mut().clear();
+        self.ready.borrow_mut().clear();
         let sig = self.signatures.borrow_mut().remove(&addr);
 
         if let Some(sig) = sig {
@@ -870,9 +1186,19 @@ impl<'a> Decompiler<'a> {
         });
     }
 
-    /// Whether one of the direct callers reads the return register (true when there is none)
+    /// Whether a caller reads the result of a function: after the call, or as its own result read by its callers
+    /// (a function without callers in the program is called from elsewhere)
     fn result_read_by_callers(&self, addr: u64) -> bool {
-        let Some(callers) = self.analysis.callers.get(&addr) else {
+        let mut visited = HashSet::new();
+        return self.result_read(addr, &mut visited, MAX_RESULT_DEPTH);
+    }
+
+    fn result_read(&self, addr: u64, visited: &mut HashSet<u64>, depth: usize) -> bool {
+        if !visited.insert(addr) {
+            return false;
+        }
+
+        let Some(callers) = self.analysis.callers.get(&addr).filter(|_| depth > 0) else {
             return true;
         };
 
@@ -885,7 +1211,15 @@ impl<'a> Decompiler<'a> {
             for call in caller.calls.iter().filter(|c| c.target == CallTarget::Function(addr)) {
                 sites += 1;
 
-                if call.tail || lift::result_used(&env, &self.cs, caller, call.addr, self.abi.int_ret) {
+                let used = if call.tail { lift::ResultUse::Returned } else { lift::result_used(&env, &self.cs, caller, call.addr, self.abi.int_ret) };
+
+                let read = match used {
+                    lift::ResultUse::Read => true,
+                    lift::ResultUse::Returned => self.result_read(caller.addr, visited, depth - 1),
+                    lift::ResultUse::Unused => false,
+                };
+
+                if read {
                     return true;
                 }
             }
@@ -1311,7 +1645,28 @@ mod tests {
         assert!(!main.contains(" *)"), "{}", main);
 
         // rep stosd clears the buffer, two overlapping stores write the string
-        assert!(main.contains("memset(v1, 0, 100);") && main.contains("memcpy(v1, \"secret\", 7);") && main.contains("verify(dest, v1);"), "{}", main);
+        assert!(main.contains("memset(s2, 0, 100);") && main.contains("memcpy(s2, \"secret\", 7);") && main.contains("verify(dest, s2);"), "{}", main);
+    }
+
+    #[test]
+    fn structs_between_functions() {
+        let program = fixture("elf_x86_64_structs");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = |name: &str| decompiler.c_code(function(&analysis, name)).unwrap();
+
+        // first uses only what sum knows of the node: it takes sum's struct
+        let (sum, first) = (code("sum"), code("first"));
+        let name = sum.split("int64_t sum(struct ").nth(1).and_then(|s| s.split(' ').next()).unwrap().to_string();
+        assert!(first.starts_with(&format!("int64_t first(struct {} *a1)", name)) && !first.contains(" {\n    struct"), "{}\n{}", sum, first);
+
+        // walk uses more: its struct has the fields of both of its callees and its own, the next pointer typed
+        // with sum's struct
+        let walk = code("walk");
+        assert!(walk.contains(&format!("    struct {} *f0;", name)) && walk.contains("    int64_t f8;") && walk.contains("    const char *f18;"), "{}", walk);
+
+        // named returns a test: a boolean for its callers
+        assert!(code("named").contains("\nbool named(struct ") && walk.contains("if (!named(a1)) {"), "{}", walk);
     }
 
     #[test]

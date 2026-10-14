@@ -75,10 +75,16 @@ struct Access {
     value: ValueId,
     /// The value is the address of the field (passed to a function), it points to the type of the field
     address: bool,
+    /// The type of a field a callee knows (the struct of its parameter)
+    known: Option<CType>,
 }
 
 impl Access {
     fn ty(&self, types: &[CType]) -> CType {
+        if let Some(known) = &self.known {
+            return known.clone();
+        }
+
         return match self.address {
             true => pointee(&types[self.value]).cloned().unwrap_or(CType::Unknown(0)),
             false => types[self.value].clone(),
@@ -88,6 +94,9 @@ impl Access {
 
 /// Type of a field from the value accessed, of the size accessed
 fn field_type(ctx: &Context, ty: &CType, bytes: u64) -> CType {
+    // A field is written where its value is read: not const
+    let ty = ty.unqualified();
+
     let ty = match pointee(ty) {
         Some(CType::Unknown(_)) => CType::ptr(CType::Void),
         _ => ty.clone(),
@@ -175,7 +184,7 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
         let bytes = f.values[accessed].ty.bits().div_ceil(8) as u64;
 
         if let Some((base, offset)) = decompose(f, address, &mut indexed).filter(|_| bytes > 0) {
-            accesses.entry(base).or_default().push(Access { offset, bytes, value: accessed, address: false });
+            accesses.entry(base).or_default().push(Access { offset, bytes, value: accessed, address: false, known: None });
         }
     }
 
@@ -190,11 +199,13 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
             let ty = pointee(&types[arg]).cloned().unwrap_or(CType::Char);
             let bytes = match ctx.resolve(&ty).unqualified() {
                 CType::Char | CType::Void | CType::Bool | CType::Unknown(_) | CType::Function(..) => continue,
+                // A struct recovered by a callee knows the part of it the callee accesses, not its size
+                CType::Struct(name) if ctx.imported.contains_key(name) => continue,
                 _ => ctx.size_of(&ty).unwrap_or(0),
             };
 
             if let Some((base, offset)) = decompose(f, arg, &mut indexed).filter(|&(base, offset)| base != arg && offset > 0 && bytes > 0) {
-                accesses.entry(base).or_default().push(Access { offset, bytes, value: arg, address: true });
+                accesses.entry(base).or_default().push(Access { offset, bytes, value: arg, address: true, known: None });
             }
         }
     }
@@ -257,6 +268,28 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
         }
     }
 
+    // The structs the callees take, by the pointer passed to them
+    let mut passed: BTreeMap<ValueId, Vec<String>> = BTreeMap::new();
+
+    for value in f.values.iter() {
+        let ValueKind::Inst { op: Op::Call, operands, callee: Some(callee), .. } = &value.kind else {
+            continue;
+        };
+
+        let Some(prototype) = ctx.prototype(callee) else {
+            continue;
+        };
+
+        for (&arg, param) in operands.iter().zip(prototype.ty.params.iter()) {
+            if let Some(CType::Struct(name)) = pointee(&param.ty).map(|p| p.unqualified()) {
+                if ctx.imported.contains_key(name) {
+                    let base = decompose(f, arg, &mut HashSet::new()).filter(|&(_, offset)| offset == 0).map_or(arg, |(base, _)| base);
+                    passed.entry(find(&mut parent, base)).or_default().push(name.clone());
+                }
+            }
+        }
+    }
+
     let mut members: BTreeMap<ValueId, Vec<ValueId>> = BTreeMap::new();
 
     for v in 0..f.values.len() {
@@ -277,10 +310,56 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
 
         // A buffer of the frame, alone in its group. Its first bytes never accessed and passed as text, it is a
         // string followed by other variables (char copy[32] then an int), not a struct
-        let aggregate = |v: ValueId| pointee(&types[v]).is_some_and(|p| matches!(ctx.resolve(p).unqualified(), CType::Struct(_) | CType::Union(_)));
+        // The structs of the callees the pointer is passed to: one whose fields cover the accesses is its type,
+        // else their fields are part of a struct of the function with its own accesses (its callers use that one)
+        let mut callee_structs: Vec<String> = group.iter().filter_map(|&v| match pointee(&types[v]) {
+            Some(CType::Struct(name)) if ctx.imported.contains_key(name) => Some(name.clone()),
+            _ => None,
+        }).collect();
+        callee_structs.extend(passed.get(&find(&mut parent, group[0])).into_iter().flatten().cloned());
+        callee_structs.sort();
+        callee_structs.dedup();
+        let callee_struct = callee_structs.first().cloned();
+
+        let frame_size = match group.as_slice() {
+            [v] => match f.allocated.get(v) {
+                Some(Allocated::Bytes(size)) => Some(*size),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        if let [name] = callee_structs.as_slice() {
+            let known = &ctx.imported[name];
+            let field = |a: &Access| known.fields.iter().any(|f| f.offset as i64 == a.offset && !matches!(f.ty, CType::Array(..)) && ctx.size_of(&f.ty) == Some(a.bytes));
+
+            if found.iter().all(|a| field(a)) && frame_size.is_none_or(|size| size == known.size) {
+                continue;
+            }
+        }
+
+        for name in callee_structs.iter() {
+            let fits = |offset: u64, bytes: u64| frame_size.is_none_or(|size| offset + bytes <= size);
+            let fields = ctx.imported[name].fields.iter().filter(|f| !matches!(f.ty, CType::Array(..))).map(|f| (f, ctx.size_of(&f.ty).unwrap_or(1))).filter(|(f, bytes)| fits(f.offset, *bytes));
+            let extra: Vec<Access> = fields.map(|(f, bytes)| Access { offset: f.offset as i64, bytes, value: group[0], address: false, known: Some(f.ty.clone()) }).collect();
+            found.extend(extra);
+        }
+
+        // The structs of the headers (a callee's struct is one of the function too)
+        let aggregate = |v: ValueId| callee_struct.is_none() && pointee(&types[v]).is_some_and(|p| matches!(ctx.resolve(p).unqualified(), CType::Struct(_) | CType::Union(_)));
+
+        // A struct of the headers of the buffer's size is its type, a smaller one (passed to a function) is its
+        // first field
+        let header = |v: ValueId| pointee(&types[v]).filter(|_| aggregate(v)).cloned();
 
         let frame = match (group.as_slice(), group.iter().find_map(|v| f.allocated.get(v))) {
-            ([v], Some(Allocated::Bytes(size))) if !indexed.contains(v) && !aggregate(*v) => Some(*size),
+            ([v], Some(Allocated::Bytes(size))) if !indexed.contains(v) && header(*v).is_none_or(|h| ctx.size_of(&h).is_some_and(|s| s < *size)) => {
+                if let Some(h) = header(*v) {
+                    found.push(Access { offset: 0, bytes: ctx.size_of(&h).unwrap_or(1), value: *v, address: false, known: Some(h) });
+                }
+
+                Some(*size)
+            }
             (_, Some(_)) => continue,
             _ => None,
         };
@@ -430,7 +509,7 @@ fn passed_as_text(f: &Func, ctx: &Context, v: ValueId) -> bool {
         .iter()
         .flat_map(|&value| f.values[value].uses.iter().map(move |&u| (value, u)))
         .filter_map(|(value, user)| match &f.values[user].kind {
-            ValueKind::Inst { op: Op::Call, operands, callee: Some(callee), .. } => Some((value, operands, ctx.prototypes.get(callee)?)),
+            ValueKind::Inst { op: Op::Call, operands, callee: Some(callee), .. } => Some((value, operands, ctx.prototype(callee)?)),
             _ => None,
         })
         .flat_map(|(value, operands, prototype)| operands.iter().zip(prototype.ty.params.iter()).filter(move |(arg, _)| **arg == value).filter_map(|(_, param)| pointee(&ctx.resolve(&param.ty)).map(|p| ctx.resolve(p).unqualified().clone())))
@@ -475,10 +554,10 @@ mod tests {
         let program = execdump_core::program::Program { pointer_size: 8, ..Default::default() };
         let typedb = crate::typedb::TypeDb::bundled(crate::typedb::Platform::Unix, crate::types::DataModel::new(execdump_core::disasm::Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
 
         let types = vec![CType::ptr(CType::Char), CType::int(32), CType::int(64), CType::int(16), CType::int(128)];
-        let access = |offset, bytes, value| Access { offset, bytes, value, address: false };
+        let access = |offset, bytes, value| Access { offset, bytes, value, address: false, known: None };
         let names = |aggregate: &Aggregate| -> Vec<(String, u64)> { aggregate.fields.iter().map(|f| (f.name.clone(), f.offset)).collect() };
 
         // The widest access at an offset, unless narrower ones are the fields it covers (a copy of two fields)

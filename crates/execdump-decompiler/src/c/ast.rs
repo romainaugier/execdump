@@ -684,6 +684,35 @@ pub fn struct_tags(text: &str) -> Vec<String> {
     return tags;
 }
 
+/// The definitions of the recovered structs a printed function starts with (by name), and the text without
+/// them: a source tree or a translation unit defines them once, before the functions using them
+pub fn split_struct_definitions(text: &str) -> (Vec<(String, String)>, String) {
+    let mut definitions = Vec::new();
+    let mut rest = String::with_capacity(text.len());
+    let mut current: Option<(String, String)> = None;
+
+    for line in text.split_inclusive('\n') {
+        if let Some((name, definition)) = current.as_mut() {
+            definition.push_str(line);
+
+            if line.starts_with('}') {
+                definitions.push((std::mem::take(name), std::mem::take(definition)));
+                current = None;
+            }
+
+            continue;
+        }
+
+        match line.strip_prefix("struct st_").and_then(|l| l.strip_suffix(" {\n")) {
+            Some(name) if !name.contains(' ') => current = Some((format!("st_{}", name), line.to_string())),
+            _ if line == "\n" && rest.is_empty() => {}
+            _ => rest.push_str(line),
+        }
+    }
+
+    return (definitions, rest);
+}
+
 /// C definition of a recovered struct (its fields and paddings are at their offsets)
 pub fn struct_definition(name: &str, aggregate: &Aggregate) -> Vec<String> {
     let mut lines = vec![format!("struct {} {{", name)];

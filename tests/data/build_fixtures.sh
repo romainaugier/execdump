@@ -41,6 +41,9 @@ gcc -m32 -O0 -fno-pie -fno-stack-protector -fcf-protection=none -c src/pointer_i
 gcc -O2 -fPIC -shared -nostdlib -fno-stack-protector -Wl,-soname,libc.so.6 src/libc_stub.c -o "$TMP"/libc_x86_64.so.6
 gcc -O2 -fstack-protector-strong -fcf-protection=none -fno-pie -no-pie -nostdlib -Wl,--dynamic-linker,/lib64/ld-linux-x86-64.so.2 \
     -Wl,--build-id=none src/quality.c "$TMP"/libc_x86_64.so.6 -o elf_x86_64_quality
+# Structs passed between functions
+gcc -O1 -fno-pie -no-pie -nostdlib -fno-stack-protector -fcf-protection=none -Wl,--dynamic-linker,/lib64/ld-linux-x86-64.so.2 \
+    -Wl,--build-id=none src/structs.c "$TMP"/libc_x86_64.so.6 -o elf_x86_64_structs
 clang --target=i386-linux-gnu -nostdlib -fPIC -shared -fuse-ld=lld -Wl,-soname,libc.so.6 src/libc_stub.c -o "$TMP"/libc_i386.so.6
 clang --target=i386-linux-gnu -O2 -fstack-protector-strong -fno-pic -no-pie -nostdlib -fuse-ld=lld -Wl,--dynamic-linker,/lib/ld-linux.so.2 \
     -Wl,--build-id=none src/quality.c "$TMP"/libc_i386.so.6 -o elf_i386_quality

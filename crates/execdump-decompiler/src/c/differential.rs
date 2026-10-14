@@ -227,7 +227,7 @@ fn decompile(blocks: &[Block], machine: &TargetMachine) -> CFunction {
 
     let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
     let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-    let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
+    let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
 
     return super::decompile(&module, function, &ctx, None, 0);
 }
@@ -348,6 +348,7 @@ impl Interpreter<'_> {
                     self.eval(b)
                 }
             }
+            Expr::Name(name) if name == "true" || name == "false" => self.eval(&Expr::Int((name == "true") as i128)),
             other => panic!("expression {:?}", other),
         };
     }

@@ -427,11 +427,19 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
     return Ok(frame);
 }
 
-/// Whether a caller reads the result register after a call (or returns it), following
-/// the single successors of the block for a few blocks
-pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg) -> bool {
+/// What the instructions after a call do with its result (the register it is returned in)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultUse {
+    Read,
+    /// Left in the register until the caller returns: the result of the caller
+    Returned,
+    Unused,
+}
+
+/// Whether the instructions after a call read the register its result is in before writing it
+pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg) -> ResultUse {
     let Some(mut block) = caller.block_containing(call) else {
-        return true;
+        return ResultUse::Read;
     };
 
     let mut start = call;
@@ -439,26 +447,31 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
     for _ in 0..4 {
         for insn in block.insns.iter().filter(|i| i.addr > start) {
             let Some(bytes) = env.program.read(insn.addr, insn.size as usize) else {
-                return true;
+                return ResultUse::Read;
             };
 
             let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr) else {
-                return true;
+                return ResultUse::Read;
             };
 
+            if insn.flow == Flow::Ret {
+                return ResultUse::Returned;
+            }
+
             match decoded.register_access(reg) {
-                Some(read) => return read,
+                Some(true) => return ResultUse::Read,
+                Some(false) => return ResultUse::Unused,
                 None => {}
             }
 
-            if matches!(insn.flow, Flow::Ret | Flow::IndirectJump) {
-                return true;
+            if insn.flow == Flow::IndirectJump {
+                return ResultUse::Read;
             }
         }
 
         // Calls to functions that do not return, or blocks that end the function
         if block.succs.is_empty() {
-            return !matches!(block.last().flow, Flow::Call(_));
+            return if matches!(block.last().flow, Flow::Call(_)) { ResultUse::Unused } else { ResultUse::Read };
         }
 
         match block.succs.as_slice() {
@@ -467,13 +480,13 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
                     block = next;
                     start = 0;
                 }
-                None => return true,
+                None => return ResultUse::Read,
             },
-            _ => return true,
+            _ => return ResultUse::Read,
         }
     }
 
-    return true;
+    return ResultUse::Read;
 }
 
 /// Address a register holds at a call, when the instruction that last writes it before the call computes

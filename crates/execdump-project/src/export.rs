@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 const COMMON: &str = "execdump.h";
+const STRUCTS: &str = "structs.h";
 const IMPORTS: &str = "execdump_imports.h";
 const GLOBALS: &str = "execdump_globals.h";
 
@@ -64,6 +65,7 @@ pub fn export(project: &mut Project, dir: &Path) -> Result<Report, String> {
     let mut module_of: HashMap<String, String> = HashMap::new();
     let mut texts: BTreeMap<String, Vec<(String, String, bool)>> = BTreeMap::new();
     let mut imports: BTreeSet<String> = BTreeSet::new();
+    let mut structs: BTreeMap<String, String> = BTreeMap::new();
     let mut globals: BTreeMap<String, u64> = BTreeMap::new();
     let mut calls: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
@@ -86,7 +88,9 @@ pub fn export(project: &mut Project, dir: &Path) -> Result<Report, String> {
             imports.extend(rendered.meta.decls.iter().cloned());
             globals.extend(rendered.meta.globals.iter().cloned());
             calls.entry(module.clone()).or_default().extend(rendered.meta.calls.iter().chain(rendered.meta.others.iter()).cloned());
-            texts.entry(module.clone()).or_default().push((rendered.meta.signature.clone(), rendered.text.clone(), rendered.ok));
+            let (definitions, body) = execdump_decompiler::c::ast::split_struct_definitions(&rendered.text);
+            structs.extend(definitions);
+            texts.entry(module.clone()).or_default().push((rendered.meta.signature.clone(), body, rendered.ok));
             report.functions += 1;
         }
     }
@@ -97,8 +101,17 @@ pub fn export(project: &mut Project, dir: &Path) -> Result<Report, String> {
     let mut common = String::from("#pragma once\n\n#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n\n");
     common.push_str("typedef uint8_t undefined;\ntypedef uint8_t undefined1;\ntypedef uint16_t undefined2;\ntypedef uint32_t undefined4;\ntypedef uint64_t undefined8;\n");
     common.push_str("typedef struct { uint8_t bytes[16]; } undefined16;\n\n");
-    common.push_str(&format!("#include \"{}\"\n#include \"{}\"\n", IMPORTS, GLOBALS));
+    common.push_str(&format!("#include \"{}\"\n#include \"{}\"\n#include \"{}\"\n", STRUCTS, IMPORTS, GLOBALS));
     write(dir, &format!("include/{}", COMMON), &common, &mut report.files)?;
+
+    // The structs recovered from the accesses, used by the functions of every module
+    let mut text = String::from("#pragma once\n\n");
+    structs.keys().for_each(|name| text.push_str(&format!("struct {};\n", name)));
+    structs.values().for_each(|definition| {
+        text.push('\n');
+        text.push_str(definition);
+    });
+    write(dir, &format!("include/{}", STRUCTS), &text, &mut report.files)?;
 
     let mut text = String::from("#pragma once\n\n");
     imports.iter().for_each(|d| text.push_str(&format!("{}\n", d)));

@@ -54,6 +54,11 @@ pub struct Context<'a> {
     pub function: Box<dyn Fn(u64) -> Option<String> + 'a>,
     /// Structs recovered from the accesses of the function
     pub structs: RefCell<BTreeMap<String, Aggregate>>,
+    /// Prototypes of the functions it calls as they were decompiled (the structs they take and return), before
+    /// the discovered ones
+    pub callees: HashMap<String, Prototype>,
+    /// Structs of those prototypes, recovered by other functions
+    pub imported: BTreeMap<String, Aggregate>,
 }
 
 impl Context<'_> {
@@ -63,7 +68,7 @@ impl Context<'_> {
 
     pub fn size_of(&self, ty: &CType) -> Option<u64> {
         if let CType::Struct(name) = self.resolve(ty).unqualified() {
-            if let Some(aggregate) = self.structs.borrow().get(name) {
+            if let Some(aggregate) = self.structs.borrow().get(name).or(self.imported.get(name)) {
                 return Some(aggregate.size);
             }
         }
@@ -71,9 +76,14 @@ impl Context<'_> {
         return self.typedb.size_of(ty);
     }
 
-    /// A struct or union of the headers or recovered from the accesses
+    /// A struct or union of the headers, recovered from the accesses of the function or by its callees
     pub fn aggregate(&self, name: &str) -> Option<Aggregate> {
-        return self.typedb.aggregates.get(name).or(self.structs.borrow().get(name)).cloned();
+        return self.typedb.aggregates.get(name).or(self.structs.borrow().get(name)).or(self.imported.get(name)).cloned();
+    }
+
+    /// Prototype of a function: as its code was decompiled, else as it was discovered or declared
+    pub fn prototype(&self, name: &str) -> Option<&Prototype> {
+        return self.callees.get(name).or(self.prototypes.get(name));
     }
 
     pub fn size_bits(&self, ty: &CType) -> u32 {
@@ -175,7 +185,56 @@ fn return_type(f: &ir::Func, types: &[CType], prototype: Option<&Prototype>) -> 
         return (*pointer).clone();
     }
 
+    // Only 0, 1 and conditions returned, both values: a boolean
+    let values: Vec<ir::ValueId> = f.blocks.iter().filter_map(|b| b.insts.last()).filter_map(|&i| match f.inst(i) {
+        Some((ir::Op::Ret, [value])) => Some(*value),
+        _ => None,
+    }).collect();
+
+    let mut seen = (false, false, false);
+
+    if declared.as_ref().is_none_or(|d| matches!(d, CType::Int { .. })) && !values.is_empty() && values.iter().all(|&v| boolean(f, v, &mut seen, MAX_BOOLEAN_DEPTH)) && (seen.2 || seen.0 && seen.1) {
+        return CType::Bool;
+    }
+
     return declared.or(returned.first().map(|t| (*t).clone())).unwrap_or(CType::Void);
+}
+
+/// Phis followed to know whether a returned value is a boolean
+const MAX_BOOLEAN_DEPTH: usize = 4;
+
+/// A value that is 0 or 1: the constants (seen: a 0, a 1, a condition), a condition extended, the phis of them
+fn boolean(f: &ir::Func, v: ir::ValueId, seen: &mut (bool, bool, bool), depth: usize) -> bool {
+    match f.int(v) {
+        Some(0) => {
+            seen.0 = true;
+            return true;
+        }
+        Some(1) => {
+            seen.1 = true;
+            return true;
+        }
+        Some(_) => return false,
+        None => {}
+    }
+
+    return match f.inst(v) {
+        _ if f.values[v].ty == ir::Ty::Int(1) => {
+            seen.2 = true;
+            true
+        }
+        Some((ir::Op::ZExt, [x])) if f.values[*x].ty == ir::Ty::Int(1) => {
+            seen.2 = true;
+            true
+        }
+        Some((ir::Op::Phi, incoming)) if depth > 0 => incoming.iter().all(|&x| boolean(f, x, seen, depth - 1)),
+        // A bit of a value: (flags >> 2) & 1
+        Some((ir::Op::And, [_, one])) if f.int(*one) == Some(1) => {
+            seen.2 = true;
+            true
+        }
+        _ => false,
+    };
 }
 
 #[cfg(test)]
@@ -198,7 +257,7 @@ mod tests {
 
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
 
         assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
         assert_eq!(ctx.string_at(0x2003, false).as_deref(), Some("pi"));
@@ -225,7 +284,7 @@ mod tests {
         let prototypes: HashMap<String, Prototype> =
             module.get_functions().filter_map(|f| f.get_name().to_str().ok().and_then(|name| Some((name.to_string(), typedb.function(name)?)))).collect();
         let (globals, noreturn) = (HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
 
         return decompile(&module, function, &ctx, None, 0).print().text;
     }

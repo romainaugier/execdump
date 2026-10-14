@@ -66,7 +66,7 @@ impl Hints {
                     return;
                 };
 
-                let Some(prototype) = ctx.prototypes.get(name) else {
+                let Some(prototype) = ctx.prototype(name) else {
                     return;
                 };
 
@@ -143,7 +143,7 @@ pub fn name(function: &mut CFunction, ctx: &Context) {
         let mut name = base.to_string();
         let mut n = 2;
 
-        while taken.contains(&name) || ctx.prototypes.contains_key(&name) || ctx.globals.contains_key(&name) {
+        while taken.contains(&name) || ctx.prototype(&name).is_some() || ctx.globals.contains_key(&name) {
             name = format!("{}{}", base, n);
             n += 1;
         }

@@ -74,6 +74,8 @@ impl Inference<'_> {
             None => true,
             Some(CType::Void) | Some(CType::Unknown(_)) => !matches!(to, CType::Void | CType::Unknown(_)),
             Some(current) if is_pointer(&to) && !is_pointer(current) && matches!(current, CType::Int { bits: 64, .. }) => true,
+            // A struct a callee recovered is the type of what is pointed to (its fields are the accesses)
+            Some(current) if matches!(&to, CType::Struct(name) if name.starts_with("st_")) && !matches!(current, CType::Struct(_) | CType::Union(_)) => true,
             // A pointer to anything becomes a pointer to something (void ** to const char **)
             Some(CType::Pointer(inner)) if matches!(**inner, CType::Void) => pointee(&to).is_some_and(|p| !matches!(p.unqualified(), CType::Void) && !p.is_unknown()),
             _ => false,
@@ -296,7 +298,7 @@ impl Inference<'_> {
                     }
                 }
                 (Op::Call, args) => {
-                    let Some(prototype) = callee.as_ref().and_then(|c| self.ctx.prototypes.get(c)) else {
+                    let Some(prototype) = callee.as_ref().and_then(|c| self.ctx.prototype(c)) else {
                         continue;
                     };
 
@@ -329,7 +331,7 @@ impl Inference<'_> {
                     if f.values[id].ty.bits() > 0 && !ret.is_unknown() && ret != CType::Void {
                         match pointee(&ret) {
                             Some(to) => self.set_pointer(id, to.clone()),
-                            None if f.values[id].ty.bits() == self.ctx.size_bits(&ret) => self.set(id, prototype.ty.ret.clone()),
+                            None if f.values[id].ty.bits() == self.ctx.size_bits(&ret) || ret == CType::Bool => self.set(id, prototype.ty.ret.clone()),
                             None => {}
                         }
                     }

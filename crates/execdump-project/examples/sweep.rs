@@ -179,12 +179,14 @@ fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Repor
         let texts: Mutex<Vec<(usize, Rendered, Globals)>> = Mutex::new(Vec::new());
         let types: Mutex<Option<String>> = Mutex::new(None);
 
+        let shared = execdump_decompiler::decompiler::SharedSignatures::default();
+
         std::thread::scope(|scope| {
             for _ in 0..workers {
                 let stack = std::env::var("SWEEP_STACK").ok().and_then(|s| s.parse().ok()).unwrap_or(crash::STACK_SIZE);
 
                 std::thread::Builder::new().stack_size(stack).spawn_scoped(scope, || {
-                    let mut decompiler = Decompiler::new(&program, &analysis);
+                    let mut decompiler = Decompiler::new(&program, &analysis).map(|d| d.with_shared_signatures(shared.clone()));
 
                     if let (Ok(decompiler), Some(_)) = (decompiler.as_ref(), compiler) {
                         types.lock().unwrap().get_or_insert_with(|| decompiler.typedb.to_c());
@@ -226,7 +228,7 @@ fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Repor
                                 report.failed += 1;
                                 report.panics.entry(panic).or_insert((0, format!("{} {:#x}", name, addr))).0 += 1;
                                 drop(report);
-                                decompiler = Decompiler::new(&program, &analysis);
+                                decompiler = Decompiler::new(&program, &analysis).map(|d| d.with_shared_signatures(shared.clone()));
                             }
                         }
                     }
@@ -318,6 +320,12 @@ fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rende
     tags.iter().for_each(|tag| source.push_str(&format!("struct {};\n", tag)));
     decls.iter().for_each(|d| source.push_str(&format!("{}\n", d)));
 
+    // The structs are defined once before the functions: a function uses the ones of its callees
+    let split: Vec<(Vec<(String, String)>, String)> = texts.iter().map(|(_, r, _)| execdump_decompiler::c::ast::split_struct_definitions(&r.text)).collect();
+    let definitions: BTreeMap<&str, &str> = split.iter().flat_map(|(d, _)| d.iter().map(|(n, t)| (n.as_str(), t.as_str()))).collect();
+    definitions.keys().filter(|n| !tags.contains(**n)).for_each(|tag| source.push_str(&format!("struct {};\n", tag)));
+    definitions.values().for_each(|d| source.push_str(d));
+
     // Lines of each function (1 based, end excluded)
     let mut ranges = Vec::new();
 
@@ -343,7 +351,7 @@ fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rende
             source.push_str(&format!("#define {} {}\n", name, local));
         }
 
-        source.push_str(&rendered.text);
+        source.push_str(&split[number].1);
         source.push('\n');
         ranges.push((start, source.lines().count() + 1));
         globals.keys().for_each(|name| source.push_str(&format!("#undef {}\n", name)));

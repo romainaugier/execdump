@@ -265,7 +265,10 @@ Decompiler:
     `verify(a, b)` (x86 and x86_64). `main` has its standard prototype (`int main(int argc, char **argv)`, as many
     parameters as it reads), the functions the C runtime links in (`__libc_csu_init`, `frame_dummy`,
     `__do_global_dtors_aux`...) return nothing. A result is not read by a caller that clears the register
-    (`xor eax, eax`), and a function returning nothing does not end with `return;` (nor its last branches). The format string of a variadic call passed on the stack is found through the
+    (`xor eax, eax`), nor by one that only returns it to callers that do not read it (followed up the call graph),
+    and a function returning nothing does not end with `return;` (nor its last branches). A function returning only
+    0, 1 and tests (a bit of a value too: `(flags >> 2) & 1`) returns a `bool` (`return true;`), its callers test it
+    as one (`if (!named(n))`). The format string of a variadic call passed on the stack is found through the
     register it was computed in (`lea ecx, [fmt]; mov [esp], ecx`), so `printf` gets its extra arguments
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
     The branches join where their paths meet, the paths that return early left out; a loop whose exits all
@@ -313,7 +316,13 @@ Decompiler:
     is a field of that type (a `struct stat` at 0x58 passed to `fstat`, then read as `p->f58.st_size`). A wide
     access over narrower ones (a copy of two fields at once) does not hide them. The structs of the same layout in a
     function are one (the levels of a tree walked by unrolled code), they are named after the function
-    (`struct st_1aa40_0`) and printed before it. A buffer of the stack frame accessed at constant offsets is a struct
+    (`struct st_1aa40_0`) and printed before it. A struct goes from a function to its callers: the callees are
+    decompiled first (the functions calling each other aside, what each saw would depend on the one decompiled
+    first), a caller passing a pointer to a callee that recovered a struct for it uses that struct when its fields
+    cover the caller's accesses, otherwise the caller's struct has the fields of its callees' and its own, and its
+    own callers use that one; the callers take the booleans and the structs the callees return too. The other
+    types a callee guessed from its uses stay its own. A source tree has the structs in `include/structs.h`. The low
+    bytes of an integer field read are a conversion (`(char)p->flags`), not an access through a cast pointer. A buffer of the stack frame accessed at constant offsets is a struct
     of its size (`v20.f8`), accessed whole only it is a variable of that type (`char *endptr`, not
     `*(char **)&endptr[0]`)
   - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
