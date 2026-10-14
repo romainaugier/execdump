@@ -119,6 +119,31 @@ fn dominators(succs: &[Vec<usize>], entry: usize) -> Vec<Option<usize>> {
     return idom;
 }
 
+/// Natural loops of the back edges, merged by header: their header and their nodes
+fn natural_loops(succs: &[Vec<usize>], order: &[usize], idom: &[Option<usize>], preds: &[Vec<usize>]) -> HashMap<usize, HashSet<usize>> {
+    let mut loops: HashMap<usize, HashSet<usize>> = HashMap::new();
+    let reachable: HashSet<usize> = order.iter().copied().collect();
+
+    for &node in order.iter() {
+        for &target in succs[node].iter() {
+            if !dominates(idom, target, node) {
+                continue;
+            }
+
+            let body = loops.entry(target).or_insert_with(|| HashSet::from([target]));
+            let mut stack = vec![node];
+
+            while let Some(n) = stack.pop() {
+                if reachable.contains(&n) && body.insert(n) {
+                    stack.extend(preds[n].iter().copied());
+                }
+            }
+        }
+    }
+
+    return loops;
+}
+
 fn dominates(idom: &[Option<usize>], a: usize, mut b: usize) -> bool {
     loop {
         if a == b {
@@ -183,6 +208,9 @@ const MAX_GUARDED_REGION: usize = 48;
 /// Literals a guard can have (a longer one is less readable than a goto)
 const MAX_GUARD_LITERALS: usize = 4;
 
+/// Values of the switches that are tests instead
+const MAX_IF_CASES: usize = 2;
+
 /// Nodes given an exit when the left out tails cut them from it (each one costs a walk of the graph per
 /// candidate)
 const MAX_EXIT_LINKS: usize = 16;
@@ -206,6 +234,15 @@ impl<'a> Structurer<'a> {
             }
         }
 
+        let mut loops: HashMap<usize, Loop> = natural_loops(&succs, &order, &idom, &preds).into_iter().map(|(h, body)| (h, Loop { body, follow: None })).collect();
+
+        // Number of loops around each node
+        let mut depth = vec![0usize; count];
+
+        for l in loops.values() {
+            l.body.iter().for_each(|&n| depth[n] += 1);
+        }
+
         // Post dominators: dominators of the reversed graph from a virtual exit
         let post_dominators = |kept: &dyn Fn(usize) -> bool| -> Vec<Option<usize>> {
             let exit = count;
@@ -225,7 +262,8 @@ impl<'a> Structurer<'a> {
             }
 
             // The nodes left without a path to the exit (a loop whose exits were all left out) leave from
-            // one that led to the left out nodes: the one most of them reach, until they all reach one
+            // one that led to the left out nodes: the one in the most loops (the exit of the innermost loop
+            // is taken last), and that most of them reach, until they all reach one
             let mut reaches = vec![false; count + 1];
 
             // Marks what reaches a node, returns how many were not marked yet
@@ -255,7 +293,7 @@ impl<'a> Structurer<'a> {
 
             for _ in 0..MAX_EXIT_LINKS {
                 let candidates: Vec<usize> = (0..count).filter(|&n| kept(n) && !reaches[n] && succs[n].iter().any(|&t| !kept(t))).collect();
-                let best = candidates.iter().copied().max_by_key(|&c| (mark(&mut reaches, &reversed, c, false), usize::MAX - c));
+                let best = candidates.iter().copied().max_by_key(|&c| (depth[c], mark(&mut reaches, &reversed, c, false), usize::MAX - c));
 
                 let Some(best) = best else {
                     break;
@@ -281,27 +319,6 @@ impl<'a> Structurer<'a> {
 
         let pruned = post_dominators(&|n| !private[n]);
         let joins = (0..count).map(|n| if private[n] { ipdom[n] } else { pruned[n].or(ipdom[n]) }).collect();
-
-        // Natural loops of the back edges, merged by header
-        let mut loops: HashMap<usize, Loop> = HashMap::new();
-        let reachable: HashSet<usize> = order.iter().copied().collect();
-
-        for &node in order.iter() {
-            for &target in succs[node].iter() {
-                if !dominates(&idom, target, node) {
-                    continue;
-                }
-
-                let body = &mut loops.entry(target).or_insert_with(|| Loop { body: HashSet::from([target]), follow: None }).body;
-                let mut stack = vec![node];
-
-                while let Some(n) = stack.pop() {
-                    if reachable.contains(&n) && body.insert(n) {
-                        stack.extend(preds[n].iter().copied());
-                    }
-                }
-            }
-        }
 
         let position: HashMap<usize, usize> = order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
@@ -971,6 +988,45 @@ fn reads(e: &Expr) -> (HashSet<VarId>, bool, bool) {
 }
 
 /// Short circuit conditions: a branch to a block that only branches again to one of the same targets
+/// A switch of one or two values is tests of them (a break in its cases would leave the switch, not the
+/// loop around it), when the value can be read again
+fn small_switches(blocks: &mut Vec<SBlock>) {
+    for b in 0..blocks.len() {
+        let Term::Switch(value, cases, default) = &blocks[b].term else {
+            continue;
+        };
+
+        let mut calls = false;
+        value.visit(&mut |e| calls |= matches!(e, Expr::Call(..)));
+
+        if calls || cases.iter().map(|(values, _)| values.len()).sum::<usize>() > MAX_IF_CASES {
+            continue;
+        }
+
+        let test = |values: &[i128]| {
+            let equal = |v: &i128| Expr::binary(BinaryOp::Eq, value.clone(), Expr::Int(*v));
+            values.iter().skip(1).fold(equal(&values[0]), |e, v| Expr::binary(BinaryOp::LogicalOr, e, equal(v)))
+        };
+
+        let tests: Vec<(Expr, usize)> = cases.iter().filter(|(values, _)| !values.is_empty()).map(|(values, target)| (test(values), *target)).collect();
+        let (default, addr) = (*default, blocks[b].addr);
+
+        let Some(((first, target), rest)) = tests.split_first() else {
+            blocks[b].term = Term::Jump(default);
+            continue;
+        };
+
+        let mut next = default;
+
+        for (condition, target) in rest.iter().rev() {
+            blocks.push(SBlock { stmts: Vec::new(), term: Term::Branch(condition.clone(), *target, next), addr });
+            next = blocks.len() - 1;
+        }
+
+        blocks[b].term = Term::Branch(first.clone(), *target, next);
+    }
+}
+
 fn merge_conditions(blocks: &mut [SBlock]) {
     let mut changed = true;
 
@@ -1195,12 +1251,23 @@ fn shorter_exits_first(stmts: &mut Vec<Stmt>) {
 }
 
 /// The statements both branches of an if end with follow it: if (c) { x; s; } else { y; s; } -> if (c) { x; }
-/// else { y; } s;
+/// else { y; } s; (the jump an if ends with is the one after it)
 fn common_tails(stmts: &mut Vec<Stmt>) {
     let mut i = 0;
 
     while i < stmts.len() {
         let mut moved = Vec::new();
+
+        // if (c) { x; return a; } return a; -> if (c) { x; } return a;
+        if let (StmtKind::If(_, then, otherwise), Some(next)) = (&stmts[i].kind, stmts.get(i + 1)) {
+            let same = |a: &Stmt| a.is_jump() && !has_label(next) && without_addresses(std::slice::from_ref(a)) == without_addresses(std::slice::from_ref(next));
+
+            if otherwise.is_empty() && then.len() > 1 && then.last().is_some_and(same) {
+                if let StmtKind::If(_, then, _) = &mut stmts[i].kind {
+                    then.pop();
+                }
+            }
+        }
 
         if let StmtKind::If(_, then, otherwise) = &mut stmts[i].kind {
             while let (Some(a), Some(b)) = (then.last(), otherwise.last()) {
@@ -1467,6 +1534,7 @@ pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
         return Vec::new();
     }
 
+    small_switches(&mut blocks);
     merge_conditions(&mut blocks);
 
     let mut structurer = Structurer::new(blocks, vars);
@@ -2029,8 +2097,8 @@ mod tests {
             block(10, 1, Term::Jump(2)),
         ];
 
-        // The jump back to b1 from the switch of the inner loop
-        assert_eq!(gotos(blocks), 1);
+        // The switch of the inner loop is two tests, its jump back to b1 is a break
+        assert_eq!(gotos(blocks), 0);
     }
 
     #[test]
