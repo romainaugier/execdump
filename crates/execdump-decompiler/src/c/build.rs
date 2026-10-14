@@ -1190,7 +1190,7 @@ impl<'a> Builder<'a> {
                     Op::Sub => e(0)?.wrapping_sub(e(1)?),
                     Op::Mul => e(0)?.wrapping_mul(e(1)?),
                     Op::Shl => e(0)? << (e(1)? as u32 & 127),
-                    Op::LShr => mask(e(0)?, bits) >> (e(1)? as u32 & 127),
+                    Op::LShr => (mask(e(0)?, bits) as u128 >> (e(1)? as u32 & 127)) as i128,
                     Op::AShr => e(0)? >> (e(1)? as u32 & 127),
                     Op::And => e(0)? & e(1)?,
                     Op::Or => e(0)? | e(1)?,
