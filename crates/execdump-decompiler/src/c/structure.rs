@@ -1886,7 +1886,34 @@ pub fn loops_and_exits(stmts: &mut Vec<Stmt>) {
     walk(stmts, &mut for_loops);
     walk(stmts, &mut shorter_exits_first);
     walk(stmts, &mut common_tails);
+    walk(stmts, &mut empty_branches);
     walk(stmts, &mut nested_conditions);
+}
+
+/// if (c) { } else { x } -> if (!c) { x }, an if doing nothing goes away (its condition stays when it calls)
+fn empty_branches(stmts: &mut Vec<Stmt>) {
+    let mut i = 0;
+
+    while i < stmts.len() {
+        if let StmtKind::If(c, then, otherwise) = &mut stmts[i].kind {
+            if then.is_empty() && !otherwise.is_empty() {
+                *c = c.clone().not();
+                std::mem::swap(then, otherwise);
+            } else if then.is_empty() && otherwise.is_empty() {
+                let mut calls = false;
+                c.visit(&mut |e| calls |= matches!(e, Expr::Call(..)));
+
+                if calls {
+                    stmts[i].kind = StmtKind::Expr(c.clone());
+                } else {
+                    stmts.remove(i);
+                    continue;
+                }
+            }
+        }
+
+        i += 1;
+    }
 }
 
 /// Structured statements of the blocks (block 0 is the entry)

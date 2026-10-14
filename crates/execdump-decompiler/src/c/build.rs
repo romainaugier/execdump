@@ -744,8 +744,11 @@ impl<'a> Builder<'a> {
 
     /// base + offset bytes, in elements of the pointee when the offset allows it
     fn pointer_add(&self, base: ValueId, offset: Expr) -> Expr {
-        let size = self.pointee_size(base);
         let base_expr = self.expr(base);
+
+        // C scales by the type the base is written with (its variable can hold values of other types)
+        let written = self.written_type(&base_expr).unwrap_or_else(|| self.ty(base).clone());
+        let size = pointee(&written).and_then(|t| self.ctx.size_of(t)).filter(|&s| s > 0).unwrap_or(1) as i64;
 
         // Address in a buffer of the frame: &buf[i], &v.f8
         if let Some(var) = self.storage[base] {
@@ -761,7 +764,7 @@ impl<'a> Builder<'a> {
         }
 
         // Address of a field of a struct: &p->f58
-        if let (Expr::Int(c @ 1..), Some(pointee)) = (&offset, pointee(self.ty(base))) {
+        if let (Expr::Int(c @ 1..), Some(pointee)) = (&offset, pointee(&written)) {
             if let Some(field) = self.field_at(base_expr.clone(), pointee, *c, true) {
                 return Expr::unary(UnaryOp::AddrOf, field);
             }

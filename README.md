@@ -285,7 +285,8 @@ Decompiler:
     computed in a variable of its own (`t = i + 8; a[i] = 0; if (t >= n) break; i = t;`) is the variable stepped where
     it is first needed (`a[i] = 0; i += 8; if (i >= n) break;`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
     two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the blocks with labels,
-    their declarations would move out of them). The statements both branches of an if end
+    their declarations would move out of them). An if left with an empty branch is turned
+    around (`if (!c) { x }`), and goes away when both are empty. The statements both branches of an if end
     with follow it (and the jump an if ends with when it is the one after it), an if whose body is an if
     without else is one with both conditions (`if (a && b)`)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
