@@ -251,7 +251,10 @@ Decompiler:
     is not passed through it: what the callee may write is found from its instructions and its callees (compilers
     keep values in the other registers across calls to the functions they know, gcc's `-fipa-ra`), the imports
     and the indirect calls may write any. A call whose arguments are guessed passes the registers written on every
-    path to it, and a register only left as it was on some paths to a return is not a parameter
+    path to it, and a register only left as it was on some paths to a return is not a parameter. A register used
+    as an address (after adding constants to it, or joined with others that are) is a pointer, and so is a result
+    that is always one (a pointer, such a parameter, an offset from them, or null), what they point to comes from
+    the accesses of the function
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of
@@ -260,7 +263,12 @@ Decompiler:
     with the same body are grouped, the ones that do what the default does are left to it, and runs of values are
     GNU case ranges (`case 72 ... 137:`)
   - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
-  - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
+  - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes). The values joined by
+    phis share one pointer type (the one the most uses have), so they can be one variable. A pointer to unknown
+    data points to the type of the first field accessed at a constant offset from it, a pointer written through is
+    not const (a const comes from the prototype of a function it is passed to), a pointer used in an integer
+    operation is converted to an integer, and a global accessed as a pointer and as an integer of that size is a
+    pointer
   - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
     to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the

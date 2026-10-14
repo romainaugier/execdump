@@ -46,6 +46,8 @@ struct Inference<'a> {
     f: &'a Func,
     ctx: &'a Context<'a>,
     types: Vec<CType>,
+    /// Values joined by phis and selects, with each other (they become one variable)
+    webs: Vec<Vec<ValueId>>,
     /// (used as signed, used as unsigned)
     signs: Vec<(bool, bool)>,
     changed: bool,
@@ -145,6 +147,53 @@ impl Inference<'_> {
         }
     }
 
+    /// The values of a web share one pointer type. While inferring, the ones that do not know theirs get
+    /// the first known one, at the end all get the one of most uses among them (the first one for a tie),
+    /// else a pointer to void when one is a pointer.
+    fn unify(&mut self, end: bool) {
+        let known = |ty: &CType| pointee(ty).is_some_and(|p| !matches!(p, CType::Void | CType::Unknown(_)));
+
+        for w in 0..self.webs.len() {
+            let web = &self.webs[w];
+            let mut counts: Vec<(&CType, usize)> = Vec::new();
+
+            for &v in web.iter() {
+                let ty = &self.types[v];
+
+                if known(ty) {
+                    let uses = if end { self.f.values[v].uses.len() } else { 1 };
+
+                    match counts.iter_mut().find(|(t, _)| *t == ty) {
+                        Some((_, n)) => *n += uses,
+                        None => counts.push((ty, uses)),
+                    }
+
+                    if !end {
+                        break;
+                    }
+                }
+            }
+
+            let best = counts.iter().enumerate().max_by_key(|&(i, &(_, n))| (n, std::cmp::Reverse(i))).map(|(_, &(t, _))| t.clone());
+            let pointer = best.or_else(|| web.iter().any(|&v| is_pointer(&self.types[v])).then(|| CType::ptr(CType::Void)));
+
+            // A web is written through more often than not, it does not keep a const of one of its values
+            let Some(ty) = pointer.map(|ty| CType::ptr(pointee(&ty).map_or(CType::Void, |p| p.unqualified().clone()))) else {
+                continue;
+            };
+
+            for i in 0..self.webs[w].len() {
+                let v = self.webs[w][i];
+
+                if end && is_pointer(&self.types[v]) && known(&self.types[v]) {
+                    self.set(v, ty.clone());
+                } else {
+                    self.set_pointer(v, pointee(&ty).cloned().unwrap_or(CType::Void));
+                }
+            }
+        }
+    }
+
     fn round(&mut self) {
         let f = self.f;
 
@@ -171,31 +220,31 @@ impl Inference<'_> {
                         self.set_pointer(id, to);
                     }
                 }
-                (Op::Gep, [base, ..]) => {
+                // A field at a constant offset of a pointer to unknown data: the pointer is to that type
+                (Op::Gep, [base, rest @ ..]) => {
                     if !is_pointer(&self.types[*base]) {
                         self.set_pointer(*base, CType::Void);
                     }
+
+                    if rest.iter().all(|&i| f.int(i).is_some()) {
+                        if let Some(to) = pointee(&self.types[id]).cloned() {
+                            self.set_pointer(*base, to);
+                        }
+                    }
                 }
-                // Pointer plus or minus an offset is a pointer (to unknown data unless the offset is 0)
+                // Pointer plus or minus an offset is a pointer (to unknown data unless the offset is 0), a
+                // pointer to unknown data plus a constant offset points to the type of that field
                 (Op::Add | Op::Sub, [x, y]) => {
                     let (pointer, offset) = if is_pointer(&self.types[*x]) { (*x, *y) } else { (*y, *x) };
 
                     if is_pointer(&self.types[pointer]) && !is_pointer(&self.types[offset]) && (*op == Op::Add || pointer == *x) {
                         let to = pointee(&self.types[pointer]).cloned().unwrap_or(CType::Void);
                         self.set_pointer(id, to);
-                    } else if is_pointer(&self.types[id]) && f.int(*y).is_some() {
+                    }
+
+                    if is_pointer(&self.types[id]) && f.int(*y).is_some() {
                         let to = pointee(&self.types[id]).cloned().unwrap_or(CType::Void);
                         self.set_pointer(*x, to);
-                    }
-                }
-                (Op::Phi | Op::Select, values) => {
-                    let values = if *op == Op::Select { &values[1..] } else { values };
-                    let pointer = values.iter().chain(std::iter::once(&id)).find_map(|v| pointee(&self.types[*v]).cloned());
-
-                    if let Some(to) = pointer {
-                        for &v in values.iter().chain(std::iter::once(&id)) {
-                            self.set_pointer(v, to.clone());
-                        }
                     }
                 }
                 (Op::Call, args) => {
@@ -274,11 +323,11 @@ pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
     }
 
     for (&param, ty) in f.params.iter().zip(params.iter()) {
-        types[param] = ty.clone();
+        types[param] = if pointee(ty).is_some_and(|p| p.is_unknown()) { CType::ptr(CType::Void) } else { ty.clone() };
     }
 
     let signs = vec![(false, false); f.values.len()];
-    let mut inference = Inference { f, ctx, types, signs, changed: true };
+    let mut inference = Inference { f, ctx, types, webs: webs(f), signs, changed: true };
 
     for _ in 0..ROUNDS {
         if !inference.changed {
@@ -287,7 +336,12 @@ pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
 
         inference.changed = false;
         inference.round();
+        inference.unify(false);
     }
+
+    inference.unify(true);
+
+    writable(f, &mut inference.types);
 
     for (id, &(signed, unsigned)) in inference.signs.iter().enumerate() {
         if let CType::Int { bits, .. } = inference.types[id] {
@@ -297,12 +351,79 @@ pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
         }
     }
 
-    // Typed parameters keep their declared type
+    // Typed parameters keep their declared type (a discovered prototype only knows the integers and the
+    // pointers, what they point to comes from the accesses)
     for (&param, ty) in f.params.iter().zip(params.iter()) {
-        if !ty.is_unknown() && !matches!(ty, CType::Int { .. }) {
+        if !ty.is_unknown() && !matches!(ty, CType::Int { .. }) && pointee(ty).is_none_or(|p| !p.is_unknown()) {
             inference.types[param] = ty.clone();
         }
     }
 
     return inference.types;
+}
+
+/// The pointers stored through, and the ones they are computed from, do not point to const data (a const
+/// comes from the prototype of a function they are passed to)
+fn writable(f: &Func, types: &mut [CType]) {
+    let mut seen = vec![false; f.values.len()];
+
+    for value in f.values.iter() {
+        let ValueKind::Inst { op: Op::Store, operands, .. } = &value.kind else {
+            continue;
+        };
+
+        let mut stack = vec![operands[1]];
+
+        while let Some(id) = stack.pop() {
+            if std::mem::replace(&mut seen[id], true) {
+                continue;
+            }
+
+            if let Some(CType::Const(inner)) = pointee(&types[id]) {
+                types[id] = CType::ptr((**inner).clone());
+            }
+
+            match &f.values[id].kind {
+                ValueKind::Inst { op: Op::Add | Op::Sub | Op::Gep | Op::IntToPtr | Op::PtrToInt | Op::BitCast | Op::Freeze | Op::Phi, operands, .. } => stack.extend(operands.iter().copied()),
+                ValueKind::Inst { op: Op::Select, operands, .. } => stack.extend(operands[1..].iter().copied()),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Groups of values joined by phis and selects (the constants among them are left out)
+fn webs(f: &Func) -> Vec<Vec<ValueId>> {
+    let mut parent: Vec<ValueId> = (0..f.values.len()).collect();
+
+    fn find(parent: &mut [ValueId], mut v: ValueId) -> ValueId {
+        while parent[v] != v {
+            parent[v] = parent[parent[v]];
+            v = parent[v];
+        }
+
+        return v;
+    }
+
+    for (id, value) in f.values.iter().enumerate() {
+        let joined = match &value.kind {
+            ValueKind::Inst { op: Op::Phi, operands, .. } => &operands[..],
+            ValueKind::Inst { op: Op::Select, operands, .. } => &operands[1..],
+            _ => continue,
+        };
+
+        for &v in joined.iter().filter(|&&v| !f.is_constant(v)) {
+            let (a, b) = (find(&mut parent, id), find(&mut parent, v));
+            parent[a.max(b)] = a.min(b);
+        }
+    }
+
+    let mut groups: Vec<Vec<ValueId>> = vec![Vec::new(); f.values.len()];
+
+    for v in 0..f.values.len() {
+        let root = find(&mut parent, v);
+        groups[root].push(v);
+    }
+
+    return groups.into_iter().filter(|g| g.len() > 1).collect();
 }

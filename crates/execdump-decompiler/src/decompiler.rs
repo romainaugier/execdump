@@ -749,12 +749,13 @@ impl<'a> Decompiler<'a> {
         self.prototypes.borrow_mut().entry(prototype.name.clone()).or_insert(prototype);
     }
 
-    /// C prototype of a discovered signature: integers and floats of the register widths
+    /// C prototype of a discovered signature: integers and floats of the register widths, pointers to
+    /// what is not known (the function's own accesses give it)
     fn prototype_of(&self, sig: &Signature) -> Prototype {
         let ctype = |ty: LType| match ty {
             LType::Int(bits) => CType::int(bits as u16),
             LType::Float(bits) => CType::Float { bits: bits as u16 },
-            LType::Ptr => CType::ptr(CType::Void),
+            LType::Ptr => CType::ptr(CType::Unknown(0)),
         };
 
         let params = sig.params.iter().map(|p| Param { name: p.name.clone(), ty: ctype(p.ty) }).collect();
@@ -992,9 +993,10 @@ mod tests {
         assert_eq!(classify.params[0].ty, LType::Int(32));
         assert_eq!(classify.ret.as_ref().map(|r| r.ty), Some(LType::Int(32)));
 
+        // A string: the register is an address
         let count_chars = decompiler.signature(function(&analysis, "count_chars"));
         assert_eq!(count_chars.params.len(), 1);
-        assert_eq!(count_chars.params[0].ty, LType::Int(64));
+        assert_eq!(count_chars.params[0].ty, LType::Ptr);
 
         // argv is not used by the fixture
         let main = decompiler.signature(function(&analysis, "main"));
@@ -1097,6 +1099,24 @@ mod tests {
             let parse_opt = code("parse_opt");
             assert!(parse_opt.contains("return length_of(src); // forward"), "{}: {}", name, parse_opt);
             assert!(parse_opt.contains(if name == "elf_x86_64_quality" { "return 42; // answer" } else { "return 42;" }), "{}: {}", name, parse_opt);
+        }
+    }
+
+    #[test]
+    fn pointer_signatures() {
+        // A register used as an address is a pointer, a result that is always one is too
+        for name in ["elf_x86_64_quality", "elf_i386_quality", "elf_aarch64_quality"] {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+            let skip_spaces = function(&analysis, "skip_spaces");
+
+            let signature = decompiler.signature(skip_spaces);
+            assert_eq!(signature.params.iter().map(|p| p.ty).collect::<Vec<_>>(), vec![LType::Ptr], "{}", name);
+            assert_eq!(signature.ret.as_ref().map(|r| r.ty), Some(LType::Ptr), "{}", name);
+
+            let code = decompiler.c_code(skip_spaces).unwrap();
+            assert!(code.starts_with("char *skip_spaces(char *a1)"), "{}: {}", name, code);
         }
     }
 

@@ -281,14 +281,23 @@ impl<'a> Builder<'a> {
         };
     }
 
-    /// A global accessed with a type (unknown: only its address is used)
+    /// A global accessed with a type (unknown: only its address is used). Accessed as a pointer and as
+    /// an integer of its size, it is a pointer.
     fn accessed(&self, name: &str, ty: CType) {
         let mut globals = self.globals.borrow_mut();
         let known = globals.entry(name.to_string()).or_insert_with(|| Some(ty.clone()));
+        let pointer_sized = |t: &CType| is_pointer(t) || matches!(t, CType::Int { .. }) && self.ctx.size_of(t) == self.ctx.size_of(&CType::ptr(CType::Void));
 
-        if known.as_ref() != Some(&ty) || ty.is_unknown() {
-            *known = None;
-        }
+        *known = match known.take() {
+            _ if ty.is_unknown() => None,
+            Some(k) if k == ty => Some(k),
+            Some(k) if pointer_sized(&k) && pointer_sized(&ty) && (is_pointer(&k) || is_pointer(&ty)) => match (is_pointer(&k), is_pointer(&ty)) {
+                (true, true) if pointee(&k) == Some(&CType::Void) => Some(ty),
+                (true, _) => Some(k),
+                _ => Some(ty),
+            },
+            _ => None,
+        };
     }
 
     fn is_array(&self, var: VarId) -> bool {
@@ -395,6 +404,17 @@ impl<'a> Builder<'a> {
 
         return match written {
             CType::Int { signed: s, .. } if s != signed && !matches!(expr, Expr::Int(_)) && bits > 0 => Expr::cast(CType::Int { bits, signed }, expr),
+            ty if is_pointer(&ty) && bits > 0 => Expr::cast(CType::Int { bits, signed }, expr),
+            _ => expr,
+        };
+    }
+
+    /// Operand of an integer operation: a value typed as a pointer is cast to the integer it is
+    fn integer(&self, id: ValueId) -> Expr {
+        let expr = self.expr(id);
+
+        return match self.f.values[id].ty {
+            Ty::Int(bits) if is_pointer(self.ty(id)) || self.written_type(&expr).is_some_and(|ty| is_pointer(&ty)) => Expr::cast(CType::int(bits as u16), expr),
             _ => expr,
         };
     }
@@ -405,6 +425,7 @@ impl<'a> Builder<'a> {
         return match e {
             Expr::Var(v) => Some(self.vars[*v].ty.clone()),
             Expr::Cast(ty, _) => Some(ty.clone()),
+            Expr::Index(base, _) | Expr::Unary(UnaryOp::Deref, base) => self.written_type(base).and_then(|ty| pointee(&ty).cloned()),
             Expr::Unary(UnaryOp::Neg | UnaryOp::Not, inner) => self.written_type(inner).map(promoted),
             Expr::Unary(UnaryOp::LogicalNot, _) => Some(CType::int(32)),
             Expr::Binary(op, ..) if op.is_comparison() || matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) => Some(CType::int(32)),
@@ -434,19 +455,21 @@ impl<'a> Builder<'a> {
         let o = operands.as_slice();
         let boolean = f.values[id].ty == Ty::Int(1);
 
-        let binary = |op: BinaryOp| Expr::binary(op, self.expr(o[0]), self.expr(o[1]));
+        let binary = |op: BinaryOp| Expr::binary(op, self.integer(o[0]), self.integer(o[1]));
 
         return match (op, o) {
             (Op::Add | Op::Sub, [x, y]) if is_pointer(self.ty(id)) && (is_pointer(self.ty(*x)) || is_pointer(self.ty(*y))) => {
                 let (base, offset) = if is_pointer(self.ty(*x)) { (*x, *y) } else { (*y, *x) };
-                let offset = if *op == Op::Sub { Expr::unary(UnaryOp::Neg, self.expr(offset)) } else { self.expr(offset) };
+                let offset = if *op == Op::Sub { Expr::unary(UnaryOp::Neg, self.integer(offset)) } else { self.integer(offset) };
                 self.pointer_add(base, offset)
             }
             (Op::Add, [x, y]) => match f.int(*y) {
-                Some(c) if c < 0 => Expr::binary(BinaryOp::Sub, self.expr(*x), Expr::Int(-c)),
+                Some(c) if c < 0 => Expr::binary(BinaryOp::Sub, self.integer(*x), Expr::Int(-c)),
                 _ => binary(BinaryOp::Add),
             },
-            (Op::Sub, [x, y]) if f.int(*x) == Some(0) => Expr::unary(UnaryOp::Neg, self.expr(*y)),
+            (Op::Sub, [x, y]) if f.int(*x) == Some(0) => Expr::unary(UnaryOp::Neg, self.integer(*y)),
+            // The difference of two pointers to bytes is in bytes, other pointers are subtracted as integers
+            (Op::Sub, [x, y]) if self.pointee_size(*x) == 1 && is_pointer(self.ty(*x)) && self.ty(*x) == self.ty(*y) => Expr::binary(BinaryOp::Sub, self.expr(*x), self.expr(*y)),
             (Op::Sub, _) => binary(BinaryOp::Sub),
             (Op::Mul, _) => binary(BinaryOp::Mul),
             (Op::Shl, _) => binary(BinaryOp::Shl),
@@ -454,7 +477,7 @@ impl<'a> Builder<'a> {
             (Op::Or, _) if boolean => binary(BinaryOp::LogicalOr),
             (Op::Xor, [x, y]) if boolean && f.int(*y) == Some(-1) => self.expr(*x).not(),
             (Op::Xor, _) if boolean => binary(BinaryOp::Ne),
-            (Op::Xor, [x, y]) if f.int(*y) == Some(-1) => Expr::unary(UnaryOp::Not, self.expr(*x)),
+            (Op::Xor, [x, y]) if f.int(*y) == Some(-1) => Expr::unary(UnaryOp::Not, self.integer(*x)),
             (Op::And, _) => binary(BinaryOp::And),
             (Op::Or, _) => binary(BinaryOp::Or),
             (Op::Xor, _) => binary(BinaryOp::Xor),
@@ -472,7 +495,7 @@ impl<'a> Builder<'a> {
                     Op::SRem => BinaryOp::Rem,
                     _ => BinaryOp::Shr,
                 };
-                Expr::binary(op, self.signed_operand(*x, true), self.expr(*y))
+                Expr::binary(op, self.signed_operand(*x, true), self.integer(*y))
             }
             (Op::FAdd, _) => binary(BinaryOp::Add),
             (Op::FSub, _) => binary(BinaryOp::Sub),
@@ -518,7 +541,20 @@ impl<'a> Builder<'a> {
             (Op::Select, [c, a, b]) if boolean && f.int(*a) == Some(-1) => Expr::binary(BinaryOp::LogicalOr, self.expr(*c), self.expr(*b)),
             (Op::Select, [c, a, b]) if boolean && f.int(*b) == Some(0) => Expr::binary(BinaryOp::LogicalAnd, self.expr(*c), self.expr(*a)),
             (Op::Select, [c, a, b]) => Expr::Ternary(Box::new(self.expr(*c)), Box::new(self.expr(*a)), Box::new(self.expr(*b))),
-            (Op::Load, [address]) => self.constant_load(*address, id).unwrap_or_else(|| self.deref(*address, &self.types[id].clone())),
+            // A pointer loaded from memory typed otherwise and used in the expressions of its users is
+            // converted to its own type (the one they use it with)
+            (Op::Load, [address]) => {
+                let loaded = self.constant_load(*address, id).unwrap_or_else(|| self.deref(*address, &self.types[id].clone()));
+                let ty = self.ty(id);
+                let converted = |written: &CType| !pointee(ty).is_some_and(|p| matches!(p.unqualified(), CType::Void)) && written.unqualified() != ty.unqualified();
+
+                let address = f.values[id].uses.iter().any(|&u| matches!(f.op(u), Some(Op::IntToPtr | Op::Gep | Op::Load | Op::Store)));
+
+                match self.written_type(&loaded) {
+                    Some(written) if self.var_of[id].is_none() && is_pointer(ty) && (is_pointer(&written) || address) && converted(&written) => Expr::cast(ty.clone(), loaded),
+                    _ => loaded,
+                }
+            }
             (Op::Gep, [base, indices @ ..]) => {
                 let mut offset: Option<Expr> = None;
 
@@ -818,7 +854,9 @@ impl<'a> Builder<'a> {
             }
         }
 
-        let same_type = base_pointee.as_ref().is_some_and(|p| self.ctx.size_of(p).map(|s| s as i128) == Some(size));
+        // An access of the size of a struct is not the struct (its fields did not match)
+        let aggregate = |p: &CType| matches!(self.ctx.resolve(p).unqualified(), CType::Struct(_) | CType::Union(_)) && !matches!(ty.unqualified(), CType::Struct(_) | CType::Union(_));
+        let same_type = base_pointee.as_ref().is_some_and(|p| self.ctx.size_of(p).map(|s| s as i128) == Some(size) && !aggregate(p));
         let base_expr = self.expr(base);
 
         if same_type && offset % size == 0 && terms.iter().all(|(_, scale)| *scale == size) {

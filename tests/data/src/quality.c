@@ -92,11 +92,21 @@ __attribute__((noinline)) int joined(int a, int b)
     return x + y;
 }
 
+/* A pointer in and out */
+__attribute__((noinline)) char *skip_spaces(char *text)
+{
+    while (*text == ' ') {
+        text++;
+    }
+
+    return text;
+}
+
 int results;
 
 void _start(void)
 {
-    results = parse_opt(state, "abc") + joined(state, 3);
+    results = parse_opt(state, skip_spaces("  abc")) + joined(state, 3);
     for (;;) {
     }
 }

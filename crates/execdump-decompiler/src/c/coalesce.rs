@@ -184,10 +184,14 @@ impl Liveness {
 /// have the same type (a parameter keeps its variable)
 pub fn coalesce(f: &Func, var_of: &mut [Option<VarId>], vars: &[Var], params: &[VarId]) {
     let liveness = Liveness::new(f, var_of);
-    let var = |id: ValueId| -> Option<VarId> {
-        match f.values[id].kind {
-            ValueKind::Param(index) => params.get(index).copied(),
-            _ => var_of[id],
+    // The variable of a value, or of the value an inlined conversion is of (a pointer parameter as an integer)
+    let var = |mut id: ValueId| -> Option<VarId> {
+        loop {
+            match &f.values[id].kind {
+                ValueKind::Param(index) => return params.get(*index).copied(),
+                ValueKind::Inst { op: Op::PtrToInt | Op::IntToPtr | Op::BitCast | Op::Freeze, operands, .. } if var_of[id].is_none() => id = operands[0],
+                _ => return var_of[id],
+            }
         }
     };
 

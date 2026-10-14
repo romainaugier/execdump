@@ -9,7 +9,7 @@ use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_INT};
 use inkwell::module::Module;
 use inkwell::values::{AnyValue, AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Results of the width analyses by value (None while in progress, phi cycles stop there)
 type Memo = HashMap<usize, Option<u32>>;
@@ -23,7 +23,8 @@ const MAX_DEPTH: usize = 8;
 
 /// Final signature of a function from its optimized discovery lifting: the parameters that are
 /// used (the ABI registers in order up to the last used one), narrowed to the bits they are
-/// used with, and the return register defined when returning
+/// used with, and the return register defined when returning. Registers used as addresses, and
+/// a result that is always an address, are pointers.
 pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi) -> Signature {
     let mut memo = Memo::new();
     let used: Vec<Option<u32>> = function.get_param_iter().map(|p| demanded(p, 0, &mut memo)).collect();
@@ -56,6 +57,7 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
                 // Vector registers used as scalars are floats
                 (LType::Int(128), Some(bits)) if bits <= 32 => LType::Float(32),
                 (LType::Int(128), _) => LType::Float(64),
+                (LType::Int(full), Some(bits)) if bits >= full && used_as_address(function.get_nth_param(i as u32).unwrap(), 0, &mut HashSet::new()) => LType::Ptr,
                 (LType::Int(full), Some(bits)) => LType::Int(c_width(bits).min(full)),
                 (ty, None) => ty,
                 (ty, _) => ty,
@@ -65,7 +67,10 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         })
         .collect();
 
-    let int_ret = returned(module, RETURN_SINK_INT, function).map(|bits| Value { loc: Loc::Reg(abi.int_ret), ty: LType::Int(c_width(bits)), name: None });
+    let int_ret = returned(module, RETURN_SINK_INT, function).map(|bits| {
+        let ty = if returns_address(module, RETURN_SINK_INT) { LType::Ptr } else { LType::Int(c_width(bits)) };
+        Value { loc: Loc::Reg(abi.int_ret), ty, name: None }
+    });
     let float_ret = returned(module, RETURN_SINK_FLOAT, function).map(|bits| Value { loc: Loc::Reg(abi.float_ret), ty: LType::Float(if bits <= 32 { 32 } else { 64 }), name: None });
 
     return Signature { params, ret: int_ret.or(float_ret), ..discovery.clone() };
@@ -239,6 +244,121 @@ fn known_width_uncached(value: BasicValueEnum, function: FunctionValue, depth: u
         }
         _ => Some(width),
     };
+}
+
+/// Whether a value is used as an address: converted to a pointer, maybe after adding a constant to it, or
+/// joined with others that are
+fn used_as_address(value: BasicValueEnum, depth: usize, seen: &mut HashSet<usize>) -> bool {
+    if depth > MAX_DEPTH || !seen.insert(key(value)) {
+        return false;
+    }
+
+    let mut next = value.get_first_use();
+
+    while let Some(current) = next {
+        next = current.get_next_use();
+
+        let Some(user) = instruction(current.get_user()) else {
+            continue;
+        };
+
+        let follow = match user.get_opcode() {
+            InstructionOpcode::IntToPtr => return true,
+            InstructionOpcode::Add | InstructionOpcode::Sub => [0, 1].iter().any(|&i| int_operand(user, i).is_some_and(|v| v.is_const())),
+            InstructionOpcode::Phi => true,
+            InstructionOpcode::Select => operand(user, 0) != Some(value),
+            _ => false,
+        };
+
+        if follow {
+            if let Ok(result) = BasicValueEnum::try_from(user.as_any_value_enum()) {
+                if used_as_address(result, depth + 1, seen) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+/// Whether every value stored to a return sink is an address (a pointer converted to an integer, a
+/// parameter used as an address, a constant offset from one of them, or a join of addresses and null),
+/// one at least
+fn returns_address(module: &Module, sink: &str) -> bool {
+    /// Some(true) for an address, Some(false) for null (and a join already being looked at), None otherwise
+    fn address(value: BasicValueEnum, depth: usize, memo: &mut HashMap<usize, Option<bool>>) -> Option<bool> {
+        if let BasicValueEnum::IntValue(int) = value {
+            if int.is_const() {
+                return (int.get_zero_extended_constant() == Some(0)).then_some(false);
+            }
+        }
+
+        if depth > MAX_DEPTH {
+            return Some(false);
+        }
+
+        if let Some(&known) = memo.get(&key(value)) {
+            return known;
+        }
+
+        memo.insert(key(value), Some(false));
+
+        let result = match value.as_instruction_value() {
+            None => {
+                let parameter = matches!(value.as_any_value_enum(), AnyValueEnum::IntValue(int) if !int.is_const());
+                (parameter && used_as_address(value, 0, &mut HashSet::new())).then_some(true)
+            }
+            Some(instruction) => match instruction.get_opcode() {
+                InstructionOpcode::PtrToInt => Some(true),
+                InstructionOpcode::Add | InstructionOpcode::Sub => match (int_operand(instruction, 0), int_operand(instruction, 1)) {
+                    (Some(x), Some(c)) if c.is_const() && !x.is_const() => address(x.into(), depth + 1, memo),
+                    (Some(c), Some(x)) if c.is_const() && !x.is_const() && instruction.get_opcode() == InstructionOpcode::Add => address(x.into(), depth + 1, memo),
+                    _ => None,
+                },
+                InstructionOpcode::Phi | InstructionOpcode::Select => {
+                    let first = if instruction.get_opcode() == InstructionOpcode::Select { 1 } else { 0 };
+                    let mut any = Some(false);
+
+                    for i in first..instruction.get_num_operands() {
+                        any = match (any, operand(instruction, i).and_then(|o| address(o, depth + 1, memo))) {
+                            (Some(a), Some(b)) => Some(a || b),
+                            _ => None,
+                        };
+                    }
+
+                    any
+                }
+                _ => None,
+            },
+        };
+
+        memo.insert(key(value), result);
+        return result;
+    }
+
+    let Some(global) = module.get_global(sink) else {
+        return false;
+    };
+
+    let mut any = false;
+    let mut next = global.as_pointer_value().get_first_use();
+    let mut memo = HashMap::new();
+
+    while let Some(current) = next {
+        next = current.get_next_use();
+
+        let Some(value) = instruction(current.get_user()).and_then(|store| operand(store, 0)) else {
+            continue;
+        };
+
+        match address(value, 0, &mut memo) {
+            Some(found) => any |= found,
+            None => return false,
+        }
+    }
+
+    return any;
 }
 
 /// Width of the values stored to a return sink, None when nothing defined reaches it

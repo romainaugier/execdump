@@ -127,10 +127,15 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
 fn return_type(f: &ir::Func, types: &[CType], prototype: Option<&Prototype>) -> CType {
     let declared = prototype.map(|p| p.ty.ret.clone()).filter(|r| !r.is_unknown());
 
-    // Discovered prototypes only know the width of the result, an inferred pointer is better
-    if let Some(declared) = declared.as_ref().filter(|r| !matches!(r, CType::Int { bits: 32 | 64, .. })) {
+    // Discovered prototypes only know the width of the result or that it is a pointer, an inferred pointer
+    // is better
+    let discovered = |r: &CType| matches!(r, CType::Int { bits: 32 | 64, .. }) || typing::pointee(r).is_some_and(|p| p.is_unknown());
+
+    if let Some(declared) = declared.as_ref().filter(|r| !discovered(r)) {
         return declared.clone();
     }
+
+    let declared = declared.map(|r| if typing::pointee(&r).is_some_and(|p| p.is_unknown()) { CType::ptr(CType::Void) } else { r });
 
     // The type of the returned values (a pointer when one of them is)
     let returned: Vec<&CType> = f
