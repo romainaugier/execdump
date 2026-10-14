@@ -463,9 +463,29 @@ impl Printer<'_> {
                 self.line(depth, &text, addr);
 
                 for case in cases {
-                    for value in case.values.iter() {
-                        let text = format!("case {}:", self.expr(&Expr::Int(*value)));
-                        self.line(depth + 1, &text, None);
+                    // Runs of consecutive values are ranges (case 1 ... 9:, GNU C)
+                    let mut values = case.values.clone();
+                    values.sort();
+                    values.dedup();
+                    let mut start = 0;
+
+                    while start < values.len() {
+                        let mut end = start;
+
+                        while end + 1 < values.len() && values[end + 1] == values[end] + 1 {
+                            end += 1;
+                        }
+
+                        let first = self.expr(&Expr::Int(values[start]));
+
+                        if end - start >= 2 {
+                            let text = format!("case {} ... {}:", first, self.expr(&Expr::Int(values[end])));
+                            self.line(depth + 1, &text, None);
+                            start = end + 1;
+                        } else {
+                            self.line(depth + 1, &format!("case {}:", first), None);
+                            start += 1;
+                        }
                     }
 
                     self.block(&case.body, depth + 2);
@@ -675,6 +695,11 @@ mod tests {
 
         let printed = function.print();
         assert_eq!(printed.text, "int f(int n)\n{\n    int i;\n\n    i = 0;\n    while (i < n) {\n        i++;\n    }\n    return i;\n}\n");
+
+        // Consecutive case values are a range
+        let switch = Stmt::new(StmtKind::Switch(Expr::Var(0), vec![Case { values: vec![5, 1, 2, 3, 7], body: vec![Stmt::new(StmtKind::Return(Some(Expr::Int(1))), None)] }], Vec::new()), None);
+        let function = CFunction { body: vec![switch], ..function };
+        assert!(function.print().text.contains("case 1 ... 3:\n        case 5:\n        case 7:\n"), "{}", function.print().text);
         assert_eq!(printed.lines[0], Some(0x1000));
         assert_eq!(printed.lines[6], Some(3));
     }

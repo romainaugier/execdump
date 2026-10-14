@@ -1131,6 +1131,72 @@ fn for_loops(stmts: &mut Vec<Stmt>) {
     }
 }
 
+/// The statements without their addresses, to compare what they do
+fn without_addresses(stmts: &[Stmt]) -> Vec<Stmt> {
+    let strip = |list: &[Stmt]| without_addresses(list);
+
+    return stmts
+        .iter()
+        .map(|s| {
+            let kind = match &s.kind {
+                StmtKind::If(c, a, b) => StmtKind::If(c.clone(), strip(a), strip(b)),
+                StmtKind::While(c, body) => StmtKind::While(c.clone(), strip(body)),
+                StmtKind::DoWhile(body, c) => StmtKind::DoWhile(strip(body), c.clone()),
+                StmtKind::For(init, c, step, body) => StmtKind::For(Box::new(strip(std::slice::from_ref(init)).remove(0)), c.clone(), Box::new(strip(std::slice::from_ref(step)).remove(0)), strip(body)),
+                StmtKind::Switch(v, cases, default) => StmtKind::Switch(v.clone(), cases.iter().map(|c| Case { values: c.values.clone(), body: strip(&c.body) }).collect(), strip(default)),
+                other => other.clone(),
+            };
+
+            Stmt::new(kind, None)
+        })
+        .collect();
+}
+
+/// Cases with the same body are one, the cases that do what the default does are left to it. Only the
+/// cases that end with a jump, and that the case before does not fall into, move.
+fn merge_cases(stmts: &mut Vec<Stmt>) {
+    for stmt in stmts.iter_mut() {
+        let StmtKind::Switch(_, cases, default) = &mut stmt.kind else {
+            continue;
+        };
+
+        // What a body does, without the break that ends it (the default does not need one)
+        let action = |body: &[Stmt], last: bool| -> Option<Vec<Stmt>> {
+            if body.iter().any(has_label) || !(last || body.last().is_some_and(|s| s.is_jump())) {
+                return None;
+            }
+
+            let mut body = without_addresses(body);
+
+            if body.last().is_some_and(|s| s.kind == StmtKind::Break) {
+                body.pop();
+            }
+
+            return Some(body);
+        };
+
+        let default_action = action(default, true);
+        let mut merged: Vec<(Option<Vec<Stmt>>, Case)> = Vec::new();
+        let mut fallen_into = false;
+
+        for case in std::mem::take(cases) {
+            let this = action(&case.body, false).filter(|_| !fallen_into);
+            fallen_into = !case.body.last().is_some_and(|s| s.is_jump());
+
+            if this.is_some() && this == default_action {
+                continue;
+            }
+
+            match merged.iter_mut().find(|(other, _)| this.is_some() && *other == this) {
+                Some((_, existing)) => existing.values.extend(case.values),
+                None => merged.push((this, case)),
+            }
+        }
+
+        *cases = merged.into_iter().map(|(_, case)| case).collect();
+    }
+}
+
 /// Labels nobody jumps to, and gotos to the label right after them
 fn remove_labels(stmts: &mut Vec<Stmt>, gotos: &HashSet<String>) {
     stmts.retain(|s| !matches!(&s.kind, StmtKind::Label(l) if !gotos.contains(l)));
@@ -1248,6 +1314,7 @@ pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
         let gotos = collect_gotos(&mut stmts);
         walk(&mut stmts, &mut |list: &mut Vec<Stmt>| remove_labels(list, &gotos));
         walk(&mut stmts, &mut for_loops);
+        walk(&mut stmts, &mut merge_cases);
     }
 
     // A function that ends with return; does not need it
@@ -1810,6 +1877,30 @@ mod tests {
         // b3 is not guarded by a test of v1 after the arms
         assert!(!printed.contains("If(Binary(Eq, Var(1), Int(0)), [Label(\"label_3"), "{}", printed);
         gotos(blocks);
+    }
+
+    #[test]
+    fn identical_cases() {
+        // Cases 1 and 3 return 5, case 2 returns 7 like the default, cases 4 and 5 join after the switch
+        let ret = |value: i128| SBlock { stmts: Vec::new(), term: Term::Return(Some(Expr::Int(value))), addr: None };
+        let blocks = vec![
+            block(0, 1, Term::Switch(Expr::Var(0), vec![(vec![1], 1), (vec![2], 2), (vec![3], 3), (vec![4], 5), (vec![5], 6)], 4)),
+            ret(5),
+            ret(7),
+            ret(5),
+            ret(7),
+            block(5, 1, Term::Jump(6)),
+            block(6, 10, Term::Return(Some(Expr::Int(5)))),
+        ];
+
+        let stmts = structure(blocks, &mut Vec::new());
+        let Some(StmtKind::Switch(_, cases, default)) = stmts.iter().map(|s| &s.kind).find(|k| matches!(k, StmtKind::Switch(..))) else {
+            panic!("{:#?}", stmts);
+        };
+
+        let values: Vec<Vec<i128>> = cases.iter().map(|c| c.values.clone()).collect();
+        assert_eq!(values, vec![vec![1, 3], vec![4], vec![5]], "{:#?}", stmts);
+        assert_eq!(default.len(), 1);
     }
 
     #[test]

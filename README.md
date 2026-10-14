@@ -248,6 +248,12 @@ Decompiler:
   - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
   - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths)
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns)
+  - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
+    each other (a range check before a jump table, the sparse values tested before it, the search trees of
+    comparisons LLVM makes) are taken for every value of interest (the boundaries of the comparisons, the cases,
+    every value of the small ranges between them), the values that lead to the same place are one case. The cases
+    with the same body are grouped, the ones that do what the default does are left to it, and runs of values are
+    GNU case ranges (`case 72 ... 137:`)
   - :heavy_check_mark: Expression recovery (out of SSA, divisions by constants, struct fields from the type database)
   - :heavy_check_mark: Type recovery (pointers and their pointees, signedness, prototypes)
   - :heavy_check_mark: Variable recovery (loop variables coalescing, names from their use)

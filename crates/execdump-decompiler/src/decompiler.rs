@@ -987,6 +987,24 @@ mod tests {
     }
 
     #[test]
+    fn switches_split_by_the_compiler() {
+        // gcc: a test of the sparse values then a range check before a jump table, clang: a search tree
+        for name in ["elf_x86_64_quality", "elf_i386_quality", "elf_aarch64_quality"] {
+            let program = fixture(name);
+            let analysis = analyze(&program, None).unwrap();
+            let decompiler = Decompiler::new(&program, &analysis).unwrap();
+            let code = decompiler.c_code(function(&analysis, "parse_opt")).unwrap();
+
+            assert_eq!(code.matches("switch (").count(), 1, "{}: {}", name, code);
+            assert!(!code.contains("if ("), "{}: {}", name, code);
+
+            for case in ["case 97:", "case 99:", "case 112:", "case 0x1000003:", "case 0x1000005:", "default:\n            return 7;"] {
+                assert!(code.contains(case), "{}: {} is missing: {}", name, case, code);
+            }
+        }
+    }
+
+    #[test]
     fn printed_constants() {
         let cx = Context::create();
         let module = cx.create_module("constants");

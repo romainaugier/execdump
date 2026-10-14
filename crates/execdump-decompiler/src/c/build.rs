@@ -15,7 +15,7 @@ use super::Context;
 use crate::types::CType;
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
@@ -32,6 +32,19 @@ pub struct SBlock {
     pub term: Term,
     pub addr: Option<u64>,
 }
+
+/// The tests of one value that lead from a block to the blocks after them, as one switch: an edge
+/// (from the last test to a block after them) for each value and the edge of the others
+struct Decision {
+    value: ValueId,
+    cases: Vec<(i128, (usize, usize))>,
+    default: (usize, usize),
+    blocks: Vec<usize>,
+}
+
+/// Blocks of a decision, values of a switch
+const MAX_DECISION_BLOCKS: usize = 64;
+const MAX_CASES: usize = 4096;
 
 pub struct Built {
     pub blocks: Vec<SBlock>,
@@ -1176,8 +1189,48 @@ impl<'a> Builder<'a> {
 
                         address
                     }
+                    Op::ICmp => {
+                        let width = f.values[operands[0]].ty.bits().max(1);
+                        let (a, b) = (mask(e(0)?, width), mask(e(1)?, width));
+                        let signed = |v: i128| if width < 128 && v >> (width - 1) & 1 == 1 { v - (1i128 << width) } else { v };
+
+                        let ValueKind::Inst { pred: Some(pred), .. } = &f.values[id].kind else {
+                            return None;
+                        };
+
+                        let result = match pred {
+                            Pred::Eq => a == b,
+                            Pred::Ne => a != b,
+                            Pred::Ugt => a > b,
+                            Pred::Uge => a >= b,
+                            Pred::Ult => a < b,
+                            Pred::Ule => a <= b,
+                            Pred::Sgt => signed(a) > signed(b),
+                            Pred::Sge => signed(a) >= signed(b),
+                            Pred::Slt => signed(a) < signed(b),
+                            Pred::Sle => signed(a) <= signed(b),
+                            Pred::True => true,
+                            Pred::False => false,
+                            Pred::Float { .. } => return None,
+                        };
+
+                        result as i128
+                    }
+                    Op::Select => {
+                        if e(0)? & 1 == 1 {
+                            e(1)?
+                        } else {
+                            e(2)?
+                        }
+                    }
+                    // Only constant memory (jump tables) has a known value
                     Op::Load => {
                         let address = e(0)? as u64;
+
+                        if self.ctx.program.region_at(address).is_none_or(|r| r.perms.write) {
+                            return None;
+                        }
+
                         let bytes = self.ctx.program.read(address, (bits / 8) as usize)?;
                         let mut raw = [0u8; 16];
                         raw[..bytes.len()].copy_from_slice(bytes);
@@ -1190,6 +1243,366 @@ impl<'a> Builder<'a> {
             }
             _ => None,
         };
+    }
+
+    /*
+     * Switches split by the compilers: a range check before a jump table, sparse values tested before
+     * it, search trees of comparisons (LLVM lowers switches this way). The blocks that only test the
+     * same value after a first test are one decision, taken for every value of interest: the
+     * boundaries of the comparisons, the cases, every value of the small ranges between them.
+     */
+
+    /// The decisions of the function by their first block, the blocks of one are not the start of another
+    fn decisions(&self) -> HashMap<usize, Decision> {
+        let f = self.f;
+        let mut decisions = HashMap::new();
+        let mut taken: HashSet<usize> = HashSet::new();
+
+        // Reverse post order: the first test of a decision comes before the others
+        let mut order = Vec::new();
+        let mut visited = vec![false; f.blocks.len()];
+        let mut stack = vec![(0usize, 0usize)];
+
+        if f.blocks.is_empty() {
+            return decisions;
+        }
+
+        visited[0] = true;
+
+        while let Some((block, next)) = stack.pop() {
+            match f.blocks[block].succs.get(next) {
+                Some(&succ) => {
+                    stack.push((block, next + 1));
+
+                    if !visited[succ] {
+                        visited[succ] = true;
+                        stack.push((succ, 0));
+                    }
+                }
+                None => order.push(block),
+            }
+        }
+
+        for &block in order.iter().rev() {
+            if taken.contains(&block) {
+                continue;
+            }
+
+            if let Some(decision) = self.decision(block, &taken) {
+                taken.extend(decision.blocks.iter().copied());
+                decisions.insert(block, decision);
+            }
+        }
+
+        return decisions;
+    }
+
+    /// The value without the constant added to it: (x, c) for x + c (its extensions and truncations too)
+    fn linear(&self, mut id: ValueId) -> (ValueId, i128) {
+        let f = self.f;
+        let mut offset = 0i128;
+
+        loop {
+            match f.inst(id) {
+                Some((Op::Add, [x, c])) if f.int(*c).is_some() => {
+                    offset += f.int(*c).unwrap();
+                    id = *x;
+                }
+                Some((Op::Sub, [x, c])) if f.int(*c).is_some() => {
+                    offset -= f.int(*c).unwrap();
+                    id = *x;
+                }
+                Some((Op::ZExt | Op::SExt | Op::Trunc | Op::Freeze, [x])) => id = *x,
+                _ => return (id, offset),
+            }
+        }
+    }
+
+    /// The value a block tests: the operand of its comparison with a constant, of its switch
+    fn tested(&self, block: usize) -> Option<ValueId> {
+        let f = self.f;
+        let (op, operands) = f.inst(*f.blocks[block].insts.last()?)?;
+
+        let operand = match (op, operands) {
+            (Op::Br, [condition]) => match f.inst(*condition)? {
+                (Op::ICmp, [x, y]) if f.int(*y).is_some() => *x,
+                (Op::ICmp, [x, y]) if f.int(*x).is_some() => *y,
+                _ => return None,
+            },
+            (Op::Switch, [value, ..]) => *value,
+            _ => return None,
+        };
+
+        return Some(self.linear(operand).0);
+    }
+
+    /// A block that only tests the value: no effect, its values only used by the decision, a test of the value
+    fn is_test(&self, block: usize, value: ValueId, region: &HashSet<usize>) -> bool {
+        let f = self.f;
+        let Some((&last, body)) = f.blocks[block].insts.split_last() else {
+            return false;
+        };
+
+        if !matches!(f.op(last), Some(Op::Br | Op::Switch)) {
+            return false;
+        }
+
+        for &id in body {
+            if !matches!(f.op(id), Some(Op::Add | Op::Sub | Op::ICmp | Op::ZExt | Op::SExt | Op::Trunc | Op::Freeze | Op::Load | Op::Gep | Op::IntToPtr | Op::PtrToInt | Op::Shl | Op::Mul | Op::Select)) {
+                return false;
+            }
+
+            if !region.is_empty() && f.values[id].uses.iter().any(|&u| f.block_of(u).is_none_or(|b| !region.contains(&b) && b != block)) {
+                return false;
+            }
+        }
+
+        // A jump instead of a test (a block only jumping to the next test)
+        let condition = match f.inst(last) {
+            Some((Op::Br, [])) => return true,
+            Some((Op::Br, [condition])) => *condition,
+            Some((_, [switched, ..])) => *switched,
+            _ => return false,
+        };
+
+        return self.depends_only(condition, value, 12);
+    }
+
+    /// A value computed from another one, constants and constant memory only
+    fn depends_only(&self, id: ValueId, value: ValueId, depth: usize) -> bool {
+        let f = self.f;
+
+        if id == value {
+            return true;
+        }
+
+        return match &f.values[id].kind {
+            ValueKind::Int(_) | ValueKind::Global(_) => true,
+            ValueKind::Inst { op: Op::Phi | Op::Call | Op::Alloca, .. } => false,
+            ValueKind::Inst { operands, .. } if depth > 0 => operands.iter().all(|&o| self.depends_only(o, value, depth - 1)),
+            _ => false,
+        };
+    }
+
+    /// What an edge does: the block it goes to, the phi assignments or the value it returns
+    fn edge_key(&self, from: usize, to: usize) -> (usize, Vec<(VarId, Expr)>, Option<Option<Expr>>) {
+        let f = self.f;
+
+        if let Some(ret) = self.folded_return(from, to) {
+            return (usize::MAX, Vec::new(), Some(ret));
+        }
+
+        let mut copies = Vec::new();
+
+        for &id in f.blocks[to].insts.iter() {
+            let ValueKind::Inst { op: Op::Phi, operands, blocks, .. } = &f.values[id].kind else {
+                continue;
+            };
+
+            if let (Some(var), Some(position)) = (self.var_of[id], blocks.iter().position(|&b| b == from)) {
+                copies.push((var, self.expr(operands[position])));
+            }
+        }
+
+        return (to, copies, None);
+    }
+
+    /// The edge taken for a value of the tested value: the last test and the block after the decision
+    fn route(&self, head: usize, region: &HashSet<usize>, value: ValueId, x: i128) -> Option<(usize, usize)> {
+        let f = self.f;
+        let mut block = head;
+
+        for _ in 0..=region.len() {
+            let terminator = *f.blocks[block].insts.last()?;
+            let ValueKind::Inst { op, operands, blocks: targets, .. } = &f.values[terminator].kind else {
+                return None;
+            };
+
+            let next = match (op, operands.as_slice()) {
+                (Op::Br, []) => targets[0],
+                (Op::Br, [condition]) => targets[if self.evaluate(*condition, value, x)? & 1 == 1 { 0 } else { 1 }],
+                (Op::Switch, [switched, cases @ ..]) => {
+                    let bits = f.values[*switched].ty.bits().clamp(1, 127);
+                    let v = self.evaluate(*switched, value, x)? & ((1i128 << bits) - 1);
+                    let case = cases.iter().position(|&c| f.int(c).is_some_and(|c| c & ((1i128 << bits) - 1) == v));
+                    case.map_or(targets[0], |i| targets[i + 1])
+                }
+                _ => return None,
+            };
+
+            if !region.contains(&next) || next == head {
+                return Some((block, next));
+            }
+
+            block = next;
+        }
+
+        return None;
+    }
+
+    /// The decision starting at a block (with at least a switch after a test, or two switches)
+    fn decision(&self, head: usize, taken: &HashSet<usize>) -> Option<Decision> {
+        let f = self.f;
+        let value = self.tested(head)?;
+        let bits = match f.values[value].ty {
+            Ty::Int(bits @ 8..=64) => bits,
+            _ => return None,
+        };
+
+        // The tests after the head whose predecessors are all tests
+        let mut region: HashSet<usize> = HashSet::from([head]);
+        let mut changed = true;
+
+        while changed && region.len() < MAX_DECISION_BLOCKS {
+            changed = false;
+            let frontier: BTreeSet<usize> = region.iter().flat_map(|&b| f.blocks[b].succs.iter().copied()).filter(|b| !region.contains(b) && !taken.contains(b)).collect();
+
+            for block in frontier {
+                if f.blocks[block].preds.iter().all(|p| region.contains(p)) && self.is_test(block, value, &HashSet::new()) {
+                    region.insert(block);
+                    changed = true;
+                }
+            }
+        }
+
+        // Without the tests whose values are used after the decision, and the ones only they lead to
+        loop {
+            let kept: HashSet<usize> = region.iter().copied().filter(|&b| b == head || (self.is_test(b, value, &region) && f.blocks[b].preds.iter().all(|p| region.contains(p)))).collect();
+
+            if kept.len() == region.len() {
+                break;
+            }
+
+            region = kept;
+        }
+
+        let switches = region.iter().filter(|&&b| f.blocks[b].insts.last().is_some_and(|&t| f.op(t) == Some(Op::Switch))).count();
+
+        if region.len() < 2 || switches == 0 || (switches == 1 && region.len() < 2) {
+            return None;
+        }
+
+        // Values of interest: around the constants the tests compare with, the case values, where the
+        // tested value plus its constants wraps, the extremes
+        let modulus = 1i128 << bits;
+        let wrap = |v: i128| v.rem_euclid(modulus);
+        let mut points: BTreeSet<i128> = BTreeSet::from([0, 1, modulus - 1, modulus / 2 - 1, modulus / 2]);
+        let add = |points: &mut BTreeSet<i128>, v: i128| {
+            for d in [-1, 0, 1] {
+                points.insert(wrap(v + d));
+            }
+        };
+
+        for &block in region.iter() {
+            for &id in f.blocks[block].insts.iter() {
+                let Some((op, operands)) = f.inst(id) else { continue };
+
+                match (op, operands) {
+                    (Op::ICmp, [x, y]) => {
+                        let (compared, constant) = match (f.int(*x), f.int(*y)) {
+                            (None, Some(c)) => (*x, c),
+                            (Some(c), None) => (*y, c),
+                            _ => continue,
+                        };
+
+                        let (root, offset) = self.linear(compared);
+
+                        if root == value {
+                            add(&mut points, constant - offset);
+                            add(&mut points, -offset);
+                            add(&mut points, modulus / 2 - offset);
+                        }
+                    }
+                    (Op::Switch, [switched, cases @ ..]) => {
+                        let (root, offset) = self.linear(*switched);
+
+                        if root == value {
+                            cases.iter().filter_map(|&c| f.int(c)).for_each(|c| add(&mut points, c - offset));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // The edges that do the same thing are one (the same phi assignments to the same block)
+        let mut keys: Vec<(usize, Vec<(VarId, Expr)>, Option<Option<Expr>>)> = Vec::new();
+        let mut representatives: Vec<(usize, usize)> = Vec::new();
+        let mut known: HashMap<(usize, usize), usize> = HashMap::new();
+
+        let mut edge_of = |x: i128| -> Option<usize> {
+            let edge = self.route(head, &region, value, x)?;
+
+            if let Some(&id) = known.get(&edge) {
+                return Some(id);
+            }
+
+            let key = self.edge_key(edge.0, edge.1);
+            let id = keys.iter().position(|k| *k == key).unwrap_or_else(|| {
+                keys.push(key);
+                representatives.push(edge);
+                keys.len() - 1
+            });
+
+            known.insert(edge, id);
+            return Some(id);
+        };
+
+        // The edge of each value, then of the ranges between them (each value when they are small)
+        let mut edges: BTreeMap<i128, usize> = BTreeMap::new();
+        let mut ranges: Vec<usize> = Vec::new();
+        let points: Vec<i128> = points.into_iter().collect();
+
+        for (i, &x) in points.iter().enumerate() {
+            edges.insert(x, edge_of(x)?);
+
+            let next = points.get(i + 1).copied().unwrap_or(points[0] + modulus);
+            let gap = next - x - 1;
+
+            if gap <= 0 {
+                continue;
+            }
+
+            if gap <= MAX_CASES as i128 {
+                for v in x + 1..next {
+                    edges.insert(wrap(v), edge_of(wrap(v))?);
+                }
+
+                continue;
+            }
+
+            let samples: Vec<usize> = [x + 1, x + gap / 2, next - 1].iter().map(|&v| edge_of(wrap(v))).collect::<Option<_>>()?;
+
+            if samples.iter().any(|s| *s != samples[0]) {
+                return None;
+            }
+
+            ranges.push(samples[0]);
+        }
+
+        // The edge of the large ranges is the default, without them the most frequent one
+        let default = match ranges.first() {
+            Some(&edge) if ranges.iter().all(|&e| e == edge) => edge,
+            Some(_) => return None,
+            None => {
+                let mut counts: HashMap<usize, usize> = HashMap::new();
+                edges.values().for_each(|e| *counts.entry(*e).or_default() += 1);
+                *counts.iter().max_by_key(|(e, c)| (**c, std::cmp::Reverse(**e)))?.0
+            }
+        };
+
+        let signed = matches!(self.ty(value), CType::Int { signed: true, .. });
+        let cases: Vec<(i128, (usize, usize))> = edges
+            .into_iter()
+            .filter(|(_, edge)| *edge != default)
+            .map(|(x, edge)| (if signed && x >= modulus / 2 { x - modulus } else { x }, representatives[edge]))
+            .collect();
+
+        if cases.is_empty() || cases.len() > MAX_CASES {
+            return None;
+        }
+
+        return Some(Decision { value, cases, default: representatives[default], blocks: region.into_iter().collect() });
     }
 
     /// Phi assignments of an edge, in an order that reads every value before it is overwritten. They
@@ -1275,6 +1688,46 @@ impl<'a> Builder<'a> {
     }
 }
 
+/// The blocks made for the edges (after the blocks of the function): a folded return, or the phi
+/// assignments then a jump. The edges of a block that do the same thing are one block.
+struct Edges {
+    count: usize,
+    blocks: Vec<SBlock>,
+}
+
+impl Edges {
+    /// Target of an edge: the block it goes to, or a block made for it (the copies go to the statements
+    /// of the block when it has one successor)
+    fn edge(&mut self, builder: &mut Builder, from: usize, to: usize, addr: Option<u64>, multiple: bool, stmts: &mut Vec<Stmt>) -> usize {
+        let made = match builder.folded_return(from, to) {
+            Some(ret) => SBlock { stmts: Vec::new(), term: Term::Return(ret), addr },
+            None => {
+                let copies = builder.copies(from, to, addr);
+
+                if copies.is_empty() {
+                    return to;
+                }
+
+                if !multiple {
+                    stmts.extend(copies);
+                    return to;
+                }
+
+                SBlock { stmts: copies, term: Term::Jump(to), addr }
+            }
+        };
+
+        let same = |b: &SBlock| b.term == made.term && b.stmts.len() == made.stmts.len() && b.stmts.iter().zip(made.stmts.iter()).all(|(x, y)| x.kind == y.kind);
+
+        if let Some(existing) = self.blocks.iter().rposition(|b| b.addr == made.addr && same(b)) {
+            return self.count + existing;
+        }
+
+        self.blocks.push(made);
+        return self.count + self.blocks.len() - 1;
+    }
+}
+
 pub fn replace_var(expr: &Expr, from: VarId, to: VarId) -> Expr {
     let r = |e: &Expr| Box::new(replace_var(e, from, to));
 
@@ -1312,9 +1765,10 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
     builder.share_constants();
     builder.coalesce();
 
-    let mut blocks: Vec<SBlock> = Vec::new();
-    let mut edges: Vec<SBlock> = Vec::new();
     let count = f.blocks.len();
+    let decisions = builder.decisions();
+    let mut blocks: Vec<SBlock> = Vec::new();
+    let mut edges = Edges { count, blocks: Vec::new() };
 
     for block in 0..count {
         let stmts = builder.block_stmts(block);
@@ -1333,56 +1787,51 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         };
 
         let succs = f.blocks[block].succs.clone();
-        let multiple = succs.len() > 1;
-
-        // Edges to a successor: a folded return, the phi copies, or a direct jump
-        let mut edge = |builder: &mut Builder, to: usize, stmts: &mut Vec<Stmt>| -> usize {
-            if let Some(ret) = builder.folded_return(block, to) {
-                edges.push(SBlock { stmts: Vec::new(), term: Term::Return(ret), addr });
-                return count + edges.len() - 1;
-            }
-
-            let copies = builder.copies(block, to, addr);
-
-            if copies.is_empty() {
-                return to;
-            }
-
-            if multiple {
-                edges.push(SBlock { stmts: copies, term: Term::Jump(to), addr });
-                return count + edges.len() - 1;
-            }
-
-            stmts.extend(copies);
-            to
-        };
-
+        let multiple = succs.len() > 1 || decisions.contains_key(&block);
         let mut stmts = stmts;
 
         let term = match op {
+            _ if decisions.contains_key(&block) => {
+                let decision = &decisions[&block];
+                let value = builder.expr(decision.value);
+                let (from, to) = decision.default;
+                let default = edges.edge(&mut builder, from, to, addr, true, &mut stmts);
+                let mut cases: Vec<(Vec<i128>, usize)> = Vec::new();
+
+                for &(case, (from, to)) in decision.cases.iter() {
+                    let target = edges.edge(&mut builder, from, to, addr, true, &mut stmts);
+
+                    match cases.iter_mut().find(|(_, t)| *t == target) {
+                        Some((values, _)) => values.push(case),
+                        None => cases.push((vec![case], target)),
+                    }
+                }
+
+                Term::Switch(value, cases, default)
+            }
             Op::Ret => Term::Return(operands.first().map(|&v| builder.expr(v))),
             Op::Br if succs.len() == 1 => {
-                let target = edge(&mut builder, succs[0], &mut stmts);
+                let target = edges.edge(&mut builder, block, succs[0], addr, multiple, &mut stmts);
 
                 // A jump to a folded return is the return
-                match target.checked_sub(count).map(|e| edges[e].clone()) {
+                match target.checked_sub(count).map(|e| edges.blocks[e].clone()) {
                     Some(SBlock { stmts: s, term: Term::Return(ret), .. }) if s.is_empty() => Term::Return(ret),
                     _ => Term::Jump(target),
                 }
             }
             Op::Br => {
                 let condition = builder.expr(operands[0]);
-                let on_true = edge(&mut builder, succs[0], &mut stmts);
-                let on_false = edge(&mut builder, succs[1], &mut stmts);
+                let on_true = edges.edge(&mut builder, block, succs[0], addr, multiple, &mut stmts);
+                let on_false = edges.edge(&mut builder, block, succs[1], addr, multiple, &mut stmts);
                 Term::Branch(condition, on_true, on_false)
             }
             Op::Switch if builder.jump_table(block).is_some() => {
                 let (value, table, default_target) = builder.jump_table(block).unwrap();
-                let default = edge(&mut builder, default_target, &mut stmts);
+                let default = edges.edge(&mut builder, block, default_target, addr, multiple, &mut stmts);
                 let mut cases: Vec<(Vec<i128>, usize)> = Vec::new();
 
                 for (case, target) in table {
-                    let target = edge(&mut builder, target, &mut stmts);
+                    let target = edges.edge(&mut builder, block, target, addr, multiple, &mut stmts);
 
                     match cases.iter_mut().find(|(_, t)| *t == target) {
                         Some((values, _)) => values.push(case),
@@ -1394,12 +1843,12 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
             }
             Op::Switch => {
                 let value = builder.expr(operands[0]);
-                let default = edge(&mut builder, succs[0], &mut stmts);
+                let default = edges.edge(&mut builder, block, succs[0], addr, multiple, &mut stmts);
                 let mut cases: Vec<(Vec<i128>, usize)> = Vec::new();
 
                 for (i, &target) in succs[1..].iter().enumerate() {
                     let value = f.int(operands[i + 1]).unwrap_or(0);
-                    let target = edge(&mut builder, target, &mut stmts);
+                    let target = edges.edge(&mut builder, block, target, addr, multiple, &mut stmts);
 
                     match cases.iter_mut().find(|(_, t)| *t == target) {
                         Some((values, _)) => values.push(value),
@@ -1415,6 +1864,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         blocks.push(SBlock { stmts, term, addr });
     }
 
+    let edges = edges.blocks;
     blocks.extend(edges);
 
     let vars = std::mem::take(&mut builder.vars);
