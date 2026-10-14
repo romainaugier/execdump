@@ -263,11 +263,14 @@ Decompiler:
     The branches join where their paths meet, the paths that return early left out; a loop whose exits all
     return is left from the block of its innermost loop the most paths reach, so the branches before it still
     join there. A switch of one or two values is tests of them (`if (v == -1) break;`, a break in a case would
-    leave the switch, not the loop).
+    leave the switch, not the loop). A loop leaves to where the paths from its header join when that does not
+    end the function, else to its post dominator, else to its most targeted exit that is not a small tail (the
+    tails are repeated where they are reached: `return v;` inside the loop).
     Once the copies are gone the loops get their shape: the loops whose test is first or last are `while (c)` and
     `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
     counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
-    (`for (i = 0;; i++)`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
+    (`for (i = 0;; i++)`, a pointer walking a list or a buffer is `p`: `for (p = head; p != 0; p = *p)`), and a
+    loop tested before it is entered and after each iteration is a `while` (`if (c) { do { } while (c); }`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
     two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the blocks with labels,
     their declarations would move out of them). The statements both branches of an if end
     with follow it (and the jump an if ends with when it is the one after it), an if whose body is an if

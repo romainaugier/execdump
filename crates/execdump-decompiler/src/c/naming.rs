@@ -50,6 +50,8 @@ const KEYWORDS: &[&str] = &[
 struct Hints {
     names: HashMap<VarId, String>,
     loop_depth: usize,
+    /// Variables that are pointers (a for loop walking a list or a buffer moves a pointer, not a counter)
+    pointers: HashSet<VarId>,
 }
 
 impl Hints {
@@ -107,7 +109,8 @@ impl Hints {
                 }
                 StmtKind::For(init, c, _, body) => {
                     if let StmtKind::Assign(Expr::Var(var), _) = &init.kind {
-                        let counter = ["i", "j", "k", "l", "m", "n"].get(self.loop_depth).copied().unwrap_or("idx");
+                        let counters: &[&str] = if self.pointers.contains(var) { &["p", "q", "r"] } else { &["i", "j", "k", "l", "m", "n"] };
+                        let counter = counters.get(self.loop_depth).copied().unwrap_or("idx");
                         self.names.insert(*var, counter.to_string());
                     }
 
@@ -128,7 +131,8 @@ impl Hints {
 }
 
 pub fn name(function: &mut CFunction, ctx: &Context) {
-    let mut hints = Hints { names: HashMap::new(), loop_depth: 0 };
+    let pointers = function.vars.iter().enumerate().filter(|(_, v)| super::typing::is_pointer(&v.ty)).map(|(i, _)| i).collect();
+    let mut hints = Hints { names: HashMap::new(), loop_depth: 0, pointers };
     hints.stmts(&function.body, ctx);
 
     // The names of the program (functions and globals) are looked up in place, they are too many to copy

@@ -215,6 +215,11 @@ const MAX_IF_CASES: usize = 2;
 /// candidate)
 const MAX_EXIT_LINKS: usize = 16;
 
+/// A block that ends the function with at most a few statements
+fn is_tail(b: &SBlock) -> bool {
+    return matches!(b.term, Term::Return(_) | Term::Unreachable) && b.stmts.len() <= 3 && (b.stmts.len() < 3 || matches!(b.term, Term::Return(None)) || b.stmts.iter().all(|s| !matches!(s.kind, StmtKind::If(..))));
+}
+
 pub fn label(block: usize) -> String {
     return format!("label_{}", block);
 }
@@ -318,7 +323,7 @@ impl<'a> Structurer<'a> {
         }
 
         let pruned = post_dominators(&|n| !private[n]);
-        let joins = (0..count).map(|n| if private[n] { ipdom[n] } else { pruned[n].or(ipdom[n]) }).collect();
+        let joins: Vec<Option<usize>> = (0..count).map(|n| if private[n] { ipdom[n] } else { pruned[n].or(ipdom[n]) }).collect();
 
         let position: HashMap<usize, usize> = order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
@@ -326,20 +331,21 @@ impl<'a> Structurer<'a> {
             let mut exits: Vec<usize> = l.body.iter().flat_map(|&n| succs[n].iter().copied()).filter(|t| !l.body.contains(t)).collect();
             exits.sort_by_key(|t| position.get(t).copied().unwrap_or(usize::MAX));
 
-            // The post dominator of the header when it leaves the loop, else the most targeted exit
-            l.follow = match ipdom[header] {
-                Some(p) if exits.contains(&p) => Some(p),
-                _ => exits.iter().max_by_key(|t| (exits.iter().filter(|e| e == t).count(), usize::MAX - position.get(t).copied().unwrap_or(0))).copied(),
+            // Where the paths from the header join (without the early returns) when it leaves the loop and
+            // does not end the function, else its post dominator, else the most targeted exit that is not a
+            // small tail (those are repeated where they are reached)
+            l.follow = match (joins[header], ipdom[header]) {
+                (Some(j), _) if exits.contains(&j) && !private[j] && !is_tail(&blocks[j]) => Some(j),
+                (_, Some(p)) if exits.contains(&p) => Some(p),
+                _ => exits.iter().max_by_key(|&&t| (!is_tail(&blocks[t]), exits.iter().filter(|&&e| e == t).count(), usize::MAX - position.get(&t).copied().unwrap_or(0))).copied(),
             };
         }
 
         return Structurer { blocks, vars, preds, joins, loops, emitted: vec![false; count], copy_budget: None, copy_failed: false, stops: Vec::new() };
     }
 
-    /// A block that ends the function with at most a few statements
     fn is_tail(&self, block: usize) -> bool {
-        let b = &self.blocks[block];
-        return matches!(b.term, Term::Return(_) | Term::Unreachable) && b.stmts.len() <= 3 && (b.stmts.len() < 3 || matches!(b.term, Term::Return(None)) || b.stmts.iter().all(|s| !matches!(s.kind, StmtKind::If(..))));
+        return is_tail(&self.blocks[block]);
     }
 
     fn goto(&self, target: usize, addr: Option<u64>) -> Stmt {
@@ -1310,6 +1316,26 @@ fn common_tails(stmts: &mut Vec<Stmt>) {
     }
 }
 
+/// A loop tested before it is entered and after each iteration with the same condition is a while:
+/// if (c) { do { x } while (c); } -> while (c) { x }
+fn rotated_loops(stmts: &mut Vec<Stmt>) {
+    for stmt in stmts.iter_mut() {
+        let StmtKind::If(c, then, otherwise) = &mut stmt.kind else {
+            continue;
+        };
+
+        let [Stmt { kind: StmtKind::DoWhile(body, test), addr, .. }] = then.as_mut_slice() else {
+            continue;
+        };
+
+        if otherwise.is_empty() && test == c {
+            let addr = *addr;
+            stmt.kind = StmtKind::While(c.clone(), std::mem::take(body));
+            stmt.addr = addr.or(stmt.addr);
+        }
+    }
+}
+
 /// if (a) { if (b) { x } } -> if (a && b) { x }
 fn nested_conditions(stmts: &mut Vec<Stmt>) {
     for stmt in stmts.iter_mut() {
@@ -1518,10 +1544,12 @@ fn remove_goto_next(stmts: &mut Vec<Stmt>) {
 /// After the copies are gone: the loops counting a variable are for loops (the start of the count is the
 /// value it was copied from), the shorter exits go first
 pub fn loops_and_exits(stmts: &mut Vec<Stmt>) {
+    walk(stmts, &mut rotated_loops);
     walk(stmts, &mut for_loops);
     walk(stmts, &mut loop_conditions);
     walk(stmts, &mut jumps_first);
     walk(stmts, &mut loop_conditions);
+    walk(stmts, &mut rotated_loops);
     walk(stmts, &mut for_loops);
     walk(stmts, &mut shorter_exits_first);
     walk(stmts, &mut common_tails);
@@ -2131,6 +2159,13 @@ mod tests {
         let mut stmts = vec![stmt(StmtKind::If(test.clone(), vec![call("b"), call("d")], vec![call("e"), call("d")]))];
         loops_and_exits(&mut stmts);
         assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::If(_, a, b), .. }, d] if a[..] == [call("b")] && b[..] == [call("e")] && *d == call("d")), "{:?}", stmts);
+
+        // v0 = 0; if (v0 > 3) { do { b(v0); v0 += 1; } while (v0 > 3); } -> for (v0 = 0; v0 > 3; v0 += 1) { b(v0); }
+        let body = vec![stmt(StmtKind::Assign(Expr::Var(1), Expr::Var(0))), increment.clone()];
+        let rotated = stmt(StmtKind::If(test.clone(), vec![stmt(StmtKind::DoWhile(body, test.clone()))], Vec::new()));
+        let mut stmts = vec![stmt(StmtKind::Assign(Expr::Var(0), Expr::Int(0))), rotated];
+        loops_and_exits(&mut stmts);
+        assert!(matches!(&stmts[..], [Stmt { kind: StmtKind::For(_, c, _, body), .. }] if *c == test && body.len() == 1), "{:?}", stmts);
 
         // if (c) { if (v0 > 3) { b(); } } -> if (c && v0 > 3) { b(); }
         let mut stmts = vec![stmt(StmtKind::If(Expr::Var(1), vec![stmt(StmtKind::If(test.clone(), vec![call("b")], Vec::new()))], Vec::new()))];
