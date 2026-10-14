@@ -115,7 +115,8 @@ impl Context<'_> {
 
 /// C function of an optimized LLVM function, with its known prototype (parameter names and types)
 pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, prototype: Option<&Prototype>, addr: u64) -> CFunction {
-    let f = ir::read(module, function);
+    let mut f = ir::read(module, function);
+    f.sink();
 
     let declared: Vec<CType> = match prototype {
         Some(p) if p.ty.params.len() == f.params.len() => p.ty.params.iter().map(|p| p.ty.clone()).collect(),

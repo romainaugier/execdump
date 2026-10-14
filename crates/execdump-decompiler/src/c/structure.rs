@@ -1320,6 +1320,8 @@ fn common_tails(stmts: &mut Vec<Stmt>) {
 /// A loop tested before it is entered and after each iteration with the same condition is a while:
 /// if (c) { do { x } while (c); } -> while (c) { x }
 fn rotated_loops(stmts: &mut Vec<Stmt>) {
+    counted_loops(stmts);
+
     for stmt in stmts.iter_mut() {
         let StmtKind::If(c, then, otherwise) = &mut stmt.kind else {
             continue;
@@ -1335,6 +1337,335 @@ fn rotated_loops(stmts: &mut Vec<Stmt>) {
             stmt.addr = addr.or(stmt.addr);
         }
     }
+}
+
+/// The next value of a loop variable computed in its own variable is the variable stepped where it is first
+/// needed: while (1) { t = i + 8; a[i] = 0; if (t >= n) break; i = t; } -> while (1) { a[i] = 0; i += 8;
+/// if (i >= n) break; } (the next value is only used in the loop, i is not read once it is stepped)
+fn next_values(stmts: &mut Vec<Stmt>) {
+    let size = super::ast::mentioned(stmts).into_iter().max().map_or(0, |v| v + 1);
+    let (mut uses, mut assigns) = (vec![0; size], vec![0; size]);
+    super::simplify::count(stmts, &mut uses, &mut assigns);
+
+    walk(stmts, &mut |list: &mut Vec<Stmt>| {
+        for stmt in list.iter_mut() {
+            if let StmtKind::While(_, body) | StmtKind::DoWhile(body, _) = &mut stmt.kind {
+                step_where_needed(body, &uses, &assigns);
+            }
+        }
+    });
+}
+
+fn step_where_needed(body: &mut Vec<Stmt>, uses: &[usize], assigns: &[usize]) {
+    let Some(StmtKind::Assign(Expr::Var(var), Expr::Var(next))) = body.last().map(|s| s.kind.clone()) else {
+        return;
+    };
+
+    // next = var + c, the only assignment of next
+    let Some(at) = body.iter().position(|s| matches!(&s.kind, StmtKind::Assign(Expr::Var(n), Expr::Binary(BinaryOp::Add | BinaryOp::Sub, a, b)) if *n == next && **a == Expr::Var(var) && matches!(**b, Expr::Int(_)))) else {
+        return;
+    };
+
+    let end = body.len() - 1;
+
+    let mut written = HashSet::new();
+    assigned(&body[at + 1..end], &mut written);
+
+    // Every read of next is in the loop after its assignment, var is not written there
+    if assigns.get(next) != Some(&1) || uses.get(next) != Some(&reads_of(&body[at + 1..], next)) || written.contains(&var) || written.contains(&next) {
+        return;
+    }
+
+    let first = (at + 1..=end).find(|&i| reads_of(&body[i..=i], next) > 0).unwrap_or(end);
+
+    // var is not read once stepped (the final copy aside)
+    if reads_of(&body[first..end], var) > 0 {
+        return;
+    }
+
+    let StmtKind::Assign(_, step) = body[at].kind.clone() else {
+        return;
+    };
+
+    let addr = body[at].addr;
+    body.pop();
+
+    for stmt in body[first..].iter_mut() {
+        substitute_stmt(stmt, next, &Expr::Var(var));
+    }
+
+    body.insert(first, Stmt::new(StmtKind::Assign(Expr::Var(var), step), addr));
+    body.remove(at);
+}
+
+/// Reads of a variable in statements (an assignment to it is not one)
+fn reads_of(stmts: &[Stmt], var: VarId) -> usize {
+    let mut count = 0;
+    let mut expr = |e: &Expr| e.visit(&mut |e| count += (*e == Expr::Var(var)) as usize);
+
+    let mut stack: Vec<&Stmt> = stmts.iter().collect();
+
+    while let Some(stmt) = stack.pop() {
+        match &stmt.kind {
+            StmtKind::Expr(e) | StmtKind::NoReturn(e) | StmtKind::Return(Some(e)) => expr(e),
+            StmtKind::Assign(target, value) => {
+                if !matches!(target, Expr::Var(_)) {
+                    expr(target);
+                }
+
+                expr(value);
+            }
+            StmtKind::If(c, a, b) => {
+                expr(c);
+                stack.extend(a.iter().chain(b.iter()));
+            }
+            StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
+                expr(c);
+                stack.extend(body.iter());
+            }
+            StmtKind::For(init, c, step, body) => {
+                expr(c);
+                stack.extend([&**init, &**step].into_iter().chain(body.iter()));
+            }
+            StmtKind::Switch(c, cases, default) => {
+                expr(c);
+                stack.extend(cases.iter().flat_map(|c| c.body.iter()).chain(default.iter()));
+            }
+            _ => {}
+        }
+    }
+
+    return count;
+}
+
+/// A statement with every read of a variable replaced by an expression
+fn substitute_stmt(stmt: &mut Stmt, var: VarId, value: &Expr) {
+    let e = |x: &mut Expr| *x = simplify_substitute(x, value, var);
+
+    match &mut stmt.kind {
+        StmtKind::Expr(x) | StmtKind::NoReturn(x) | StmtKind::Return(Some(x)) => e(x),
+        StmtKind::Assign(target, x) => {
+            if *target != Expr::Var(var) {
+                e(target);
+            }
+
+            e(x);
+        }
+        StmtKind::If(c, a, b) => {
+            e(c);
+            a.iter_mut().chain(b.iter_mut()).for_each(|s| substitute_stmt(s, var, value));
+        }
+        StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
+            e(c);
+            body.iter_mut().for_each(|s| substitute_stmt(s, var, value));
+        }
+        StmtKind::For(init, c, step, body) => {
+            substitute_stmt(init, var, value);
+            e(c);
+            substitute_stmt(step, var, value);
+            body.iter_mut().for_each(|s| substitute_stmt(s, var, value));
+        }
+        StmtKind::Switch(c, cases, default) => {
+            e(c);
+            cases.iter_mut().flat_map(|c| c.body.iter_mut()).chain(default.iter_mut()).for_each(|s| substitute_stmt(s, var, value));
+        }
+        _ => {}
+    }
+}
+
+/// Variables assigned by statements
+fn assigned(stmts: &[Stmt], vars: &mut HashSet<VarId>) {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Assign(Expr::Var(v), _) => {
+                vars.insert(*v);
+            }
+            StmtKind::If(_, a, b) => {
+                assigned(a, vars);
+                assigned(b, vars);
+            }
+            StmtKind::While(_, body) | StmtKind::DoWhile(body, _) => assigned(body, vars),
+            StmtKind::For(init, _, step, body) => {
+                assigned(std::slice::from_ref(init), vars);
+                assigned(std::slice::from_ref(step), vars);
+                assigned(body, vars);
+            }
+            StmtKind::Switch(_, cases, default) => {
+                cases.iter().for_each(|c| assigned(&c.body, vars));
+                assigned(default, vars);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The step of a counted loop: v = v + k or v = v - k, its variable and its direction
+fn loop_step(stmt: &Stmt) -> Option<(VarId, i128)> {
+    let (var, value) = assigned_var(stmt)?;
+
+    return match value {
+        Expr::Binary(BinaryOp::Add, a, b) if **a == Expr::Var(var) => match **b {
+            Expr::Int(k) if k != 0 => Some((var, k)),
+            _ => None,
+        },
+        Expr::Binary(BinaryOp::Sub, a, b) if **a == Expr::Var(var) => match **b {
+            Expr::Int(k) if k != 0 => Some((var, -k)),
+            _ => None,
+        },
+        _ => None,
+    };
+}
+
+/// A bound of a loop that the loop does not change: a constant, an address, a variable it does not assign
+fn invariant(e: &Expr, written: &HashSet<VarId>) -> bool {
+    return match e {
+        Expr::Int(_) | Expr::Unary(UnaryOp::AddrOf, _) => true,
+        Expr::Var(v) => !written.contains(v),
+        Expr::Cast(_, inner) => invariant(inner, written),
+        _ => false,
+    };
+}
+
+/// Whether a comparison of constants holds: 3 != 10, &a != &b
+fn holds(test: &Expr) -> bool {
+    let Expr::Binary(op, a, b) = test else {
+        return false;
+    };
+
+    return match (&**a, &**b) {
+        (Expr::Int(x), Expr::Int(y)) => match op {
+            BinaryOp::Lt => x < y,
+            BinaryOp::Le => x <= y,
+            BinaryOp::Gt => x > y,
+            BinaryOp::Ge => x >= y,
+            BinaryOp::Ne => x != y,
+            BinaryOp::Eq => x == y,
+            _ => false,
+        },
+        (Expr::Unary(UnaryOp::AddrOf, x), Expr::Unary(UnaryOp::AddrOf, y)) => *op == BinaryOp::Ne && matches!((&**x, &**y), (Expr::Name(m), Expr::Name(n)) if m != n),
+        _ => false,
+    };
+}
+
+/// The loops compilers rotate are for loops again:
+/// - if (init < end) { v = init; do { ...; v++; } while (v != end); } -> for (v = init; v < end; v++) { ... }
+///   (the guard tests the first value, the loop the next ones: with a step of one, < and != leave at the same
+///   value)
+/// - v = &table[0]; do { ...; v += 24; } while (v != &table_end); -> for (...; v != &table_end; v += 24) when
+///   the test holds for the first value
+fn counted_loops(stmts: &mut Vec<Stmt>) {
+    let counted = |body: &[Stmt], test: &Expr, var: VarId| -> Option<i128> {
+        let (stepped, k) = loop_step(body.last()?)?;
+        let mut written = HashSet::new();
+        assigned(&body[..body.len() - 1], &mut written);
+
+        let Expr::Binary(_, a, b) = test else {
+            return None;
+        };
+
+        let bound = if **a == Expr::Var(var) { b } else if **b == Expr::Var(var) { a } else { return None };
+        let ok = stepped == var && !written.contains(&var) && invariant(bound, &written) && !has_loop_jump(body, &StmtKind::Continue);
+        return ok.then_some(k);
+    };
+
+    let mut i = 0;
+
+    while i < stmts.len() {
+        // if (guard) { v = init; do { ... } while (test); ... }: the guard is the first test of a for loop, the if
+        // goes away when it holds nothing else
+        if let StmtKind::If(guard, then, otherwise) = &mut stmts[i].kind {
+            if let [init, Stmt { kind: StmtKind::DoWhile(body, test), addr: loop_addr, .. }, ..] = then.as_slice() {
+                if let Some((var, value)) = assigned_var(init) {
+                    let condition = oriented(replaced(guard, value, &Expr::Var(var)), var);
+                    let test = oriented(test.clone(), var);
+                    let same_bound = |x: &Expr, y: &Expr| matches!((x, y), (Expr::Binary(_, _, b), Expr::Binary(_, _, d)) if b == d);
+
+                    let unit = counted(body, &test, var).is_some_and(|k| match (&condition, &test) {
+                        (Expr::Binary(BinaryOp::Lt, x, _), Expr::Binary(BinaryOp::Ne, y, _)) => k == 1 && **x == Expr::Var(var) && **y == Expr::Var(var),
+                        (Expr::Binary(BinaryOp::Gt, x, _), Expr::Binary(BinaryOp::Ne, y, _)) => k == -1 && **x == Expr::Var(var) && **y == Expr::Var(var),
+                        _ => false,
+                    });
+
+                    if condition.uses(var) && (condition == test && counted(body, &test, var).is_some() || unit && same_bound(&condition, &test)) && !value.uses(var) {
+                        let mut body = body.clone();
+                        let step = body.pop().unwrap();
+                        let for_loop = Stmt::new(StmtKind::For(Box::new(init.clone()), condition, Box::new(step), body), *loop_addr);
+
+                        if then.len() == 2 && otherwise.is_empty() {
+                            let addr = stmts[i].addr;
+                            stmts[i] = Stmt { addr: for_loop.addr.or(addr), ..for_loop };
+                        } else {
+                            then.splice(0..2, [for_loop]);
+                        }
+                    }
+                }
+            }
+        }
+
+        // v = init; do { ... } while (test); with the test holding for init
+        if i + 1 < stmts.len() {
+            if let (Some((var, value)), StmtKind::DoWhile(body, test)) = (assigned_var(&stmts[i]), &stmts[i + 1].kind) {
+                if counted(body, test, var).is_some() && holds(&simplify_substitute(test, value, var)) {
+                    let mut body = body.clone();
+                    let (test, step) = (test.clone(), body.pop().unwrap());
+                    let addr = stmts[i + 1].addr;
+                    let init = stmts.remove(i);
+                    stmts[i] = Stmt::new(StmtKind::For(Box::new(init), test, Box::new(step), body), addr);
+                }
+            }
+        }
+
+        i += 1;
+    }
+}
+
+/// A comparison with a variable on its left: n > i is i < n
+fn oriented(e: Expr, var: VarId) -> Expr {
+    let flipped = |op: BinaryOp| match op {
+        BinaryOp::Lt => Some(BinaryOp::Gt),
+        BinaryOp::Gt => Some(BinaryOp::Lt),
+        BinaryOp::Le => Some(BinaryOp::Ge),
+        BinaryOp::Ge => Some(BinaryOp::Le),
+        BinaryOp::Eq | BinaryOp::Ne => Some(op),
+        _ => None,
+    };
+
+    return match e {
+        Expr::Binary(op, a, b) if *b == Expr::Var(var) && *a != Expr::Var(var) && flipped(op).is_some() => Expr::Binary(flipped(op).unwrap(), b, a),
+        other => other,
+    };
+}
+
+/// An expression with a subexpression replaced by another (the first value of a loop by its variable)
+fn replaced(e: &Expr, from: &Expr, to: &Expr) -> Expr {
+    let s = |e: &Expr| Box::new(replaced(e, from, to));
+
+    return match e {
+        e if e == from => to.clone(),
+        Expr::Unary(op, a) => Expr::Unary(*op, s(a)),
+        Expr::Binary(op, a, b) => Expr::Binary(*op, s(a), s(b)),
+        Expr::Cast(ty, a) => Expr::Cast(ty.clone(), s(a)),
+        Expr::Index(a, b) => Expr::Index(s(a), s(b)),
+        Expr::Member(a, field, arrow) => Expr::Member(s(a), field.clone(), *arrow),
+        Expr::Ternary(a, b, c) => Expr::Ternary(s(a), s(b), s(c)),
+        other => other.clone(),
+    };
+}
+
+/// An expression with every use of a variable replaced by a value
+fn simplify_substitute(e: &Expr, value: &Expr, var: VarId) -> Expr {
+    let s = |e: &Expr| Box::new(simplify_substitute(e, value, var));
+
+    return match e {
+        Expr::Var(v) if *v == var => value.clone(),
+        Expr::Unary(op, a) => Expr::Unary(*op, s(a)),
+        Expr::Binary(op, a, b) => Expr::Binary(*op, s(a), s(b)),
+        Expr::Cast(ty, a) => Expr::Cast(ty.clone(), s(a)),
+        Expr::Index(a, b) => Expr::Index(s(a), s(b)),
+        Expr::Member(a, field, arrow) => Expr::Member(s(a), field.clone(), *arrow),
+        Expr::Ternary(a, b, c) => Expr::Ternary(s(a), s(b), s(c)),
+        other => other.clone(),
+    };
 }
 
 /// if (a) { if (b) { x } } -> if (a && b) { x }
@@ -1545,6 +1876,7 @@ fn remove_goto_next(stmts: &mut Vec<Stmt>) {
 /// After the copies are gone: the loops counting a variable are for loops (the start of the count is the
 /// value it was copied from), the shorter exits go first
 pub fn loops_and_exits(stmts: &mut Vec<Stmt>) {
+    next_values(stmts);
     walk(stmts, &mut rotated_loops);
     walk(stmts, &mut for_loops);
     walk(stmts, &mut loop_conditions);
@@ -2128,6 +2460,28 @@ mod tests {
 
         // The switch of the inner loop is two tests, its jump back to b1 is a break
         assert_eq!(gotos(blocks), 0);
+    }
+
+    #[test]
+    fn next_values_stepped_where_needed() {
+        let stmt = |kind: StmtKind| Stmt::new(kind, None);
+        let call = |arg: Expr| stmt(StmtKind::Expr(Expr::Call(Box::new(Expr::Name("f".to_string())), vec![arg])));
+
+        // v0 = 0; while (1) { v1 = v0 + 8; f(v0); if (v1 >= 16) break; v0 = v1; } -> do { f(v0); v0 += 8; } while (v0 < 16),
+        // a for loop since the test holds for the first value
+        let body = vec![
+            stmt(StmtKind::Assign(Expr::Var(1), Expr::binary(BinaryOp::Add, Expr::Var(0), Expr::Int(8)))),
+            call(Expr::Var(0)),
+            stmt(StmtKind::If(Expr::binary(BinaryOp::Ge, Expr::Var(1), Expr::Int(16)), vec![stmt(StmtKind::Break)], Vec::new())),
+            stmt(StmtKind::Assign(Expr::Var(0), Expr::Var(1))),
+        ];
+        let mut stmts = vec![stmt(StmtKind::Assign(Expr::Var(0), Expr::Int(0))), stmt(StmtKind::While(Expr::Int(1), body))];
+        loops_and_exits(&mut stmts);
+
+        let step = stmt(StmtKind::Assign(Expr::Var(0), Expr::binary(BinaryOp::Add, Expr::Var(0), Expr::Int(8))));
+        let init = stmt(StmtKind::Assign(Expr::Var(0), Expr::Int(0)));
+        let expected = StmtKind::For(Box::new(init), Expr::binary(BinaryOp::Lt, Expr::Var(0), Expr::Int(16)), Box::new(step), vec![call(Expr::Var(0))]);
+        assert_eq!(stmts.iter().map(|s| &s.kind).collect::<Vec<_>>(), vec![&expected], "{:?}", stmts);
     }
 
     #[test]

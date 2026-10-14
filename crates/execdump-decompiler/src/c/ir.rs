@@ -118,6 +118,12 @@ pub enum Op {
     Other,
 }
 
+impl Op {
+    pub fn is_terminator(self) -> bool {
+        return matches!(self, Op::Ret | Op::Br | Op::Switch | Op::Unreachable);
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum ValueKind {
     Param(usize),
@@ -193,6 +199,42 @@ pub struct Note {
 }
 
 impl Func {
+    /// Moves the pure computations of each block down to their first use in it (to its end when they are used
+    /// by other blocks only): a value computed early is alive with the ones it is computed from, which then
+    /// cannot share its variable (t = i + 8; a[i] = 0; ... i = t; instead of a[i] = 0; i += 8;)
+    pub fn sink(&mut self) {
+        let pure = |op: Op| !matches!(op, Op::Phi | Op::Load | Op::Store | Op::Call | Op::Alloca | Op::UDiv | Op::SDiv | Op::URem | Op::SRem | Op::Other | Op::ExtractValue) && !op.is_terminator();
+
+        for block in 0..self.blocks.len() {
+            let mut insts = std::mem::take(&mut self.blocks[block].insts);
+            let mut index = insts.len();
+
+            while index > 0 {
+                index -= 1;
+                let id = insts[index];
+
+                // A value of a load stays next to it, the load is inlined in it when nothing is between them
+                let reads_memory = self.inst(id).is_some_and(|(_, operands)| operands.iter().any(|o| matches!(self.op(*o), Some(Op::Load | Op::Call)) && insts.contains(o)));
+
+                if !self.op(id).is_some_and(pure) || reads_memory {
+                    continue;
+                }
+
+                // Before its first user in the block, else before the terminator
+                let first_user = insts[index + 1..].iter().position(|i| self.values[id].uses.contains(i) && self.op(*i) != Some(Op::Phi)).map(|p| p + index + 1);
+                let terminator = insts.iter().rposition(|&i| self.op(i).is_some_and(|op| op.is_terminator())).unwrap_or(insts.len());
+                let target = first_user.unwrap_or(terminator);
+
+                if target > index + 1 {
+                    insts.remove(index);
+                    insts.insert(target - 1, id);
+                }
+            }
+
+            self.blocks[block].insts = insts;
+        }
+    }
+
     pub fn inst(&self, id: ValueId) -> Option<(Op, &[ValueId])> {
         return match &self.values[id].kind {
             ValueKind::Inst { op, operands, .. } => Some((*op, operands.as_slice())),

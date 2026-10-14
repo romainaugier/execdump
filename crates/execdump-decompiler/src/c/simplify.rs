@@ -13,7 +13,7 @@ fn addressed(e: &Expr) -> Option<VarId> {
     };
 }
 
-fn count(stmts: &[Stmt], uses: &mut [usize], assigns: &mut [usize]) {
+pub(super) fn count(stmts: &[Stmt], uses: &mut [usize], assigns: &mut [usize]) {
     // A variable whose address is taken is read through it: it is never inlined
     let expr = |e: &Expr, uses: &mut [usize]| {
         e.visit(&mut |e| match e {

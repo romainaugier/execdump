@@ -278,7 +278,12 @@ Decompiler:
     `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
     counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
     (`for (i = 0;; i++)`, a pointer walking a list or a buffer is `p`: `for (p = head; p != 0; p = *p)`), and a
-    loop tested before it is entered and after each iteration is a `while` (`if (c) { do { } while (c); }`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
+    loop tested before it is entered and after each iteration is a `while` (`if (c) { do { } while (c); }`). The
+    counted loops compilers rotate are `for` loops again: `if (a < n) { i = a; do { ...; i++; } while (i != n); }` is
+    `for (i = a; i < n; i++)` (with a step of one, `<` and `!=` leave at the same value), and so is a `do` loop whose
+    test holds for the first value (`for (p = &table; p != &table_end; p += 24)`). The next value of a loop variable
+    computed in a variable of its own (`t = i + 8; a[i] = 0; if (t >= n) break; i = t;`) is the variable stepped where
+    it is first needed (`a[i] = 0; i += 8; if (i >= n) break;`). The branches that jump away go first (`if (!c) { break; } x`), and the shorter of
     two exits ending a list goes first (`if (!c) { return 0; } long; return 1;`, not in the blocks with labels,
     their declarations would move out of them). The statements both branches of an if end
     with follow it (and the jump an if ends with when it is the one after it), an if whose body is an if
@@ -314,7 +319,8 @@ Decompiler:
     to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the
     end of the blocks they come from) share one variable, so the copies between them disappear (a parameter keeps
-    its variable)
+    its variable). The computations without effect are moved down to their first use in their block first, a value
+    computed early being alive with the ones it is computed from (the values of loads stay next to them)
   - :heavy_check_mark: Declarations in the narrowest block: a local variable is declared at the start of the
     narrowest block that holds all its uses, when entering it always writes the variable before reading it (a
     value carried from one iteration to the next stays declared around the loop; blocks with labels are left
