@@ -950,6 +950,17 @@ mod tests {
     }
 
     #[test]
+    fn conditional_tail_calls() {
+        let program = fixture("elf_x86_64_quality");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = decompiler.c_code(function(&analysis, "length_of")).unwrap();
+
+        // gcc moves the unlikely path to a cold part reached by a conditional jump, the rest follows it
+        assert!(code.contains("if (") && code.contains("length_of_cold();") && code.contains("strlen("), "{}", code);
+    }
+
+    #[test]
     fn printed_constants() {
         let cx = Context::create();
         let module = cx.create_module("constants");

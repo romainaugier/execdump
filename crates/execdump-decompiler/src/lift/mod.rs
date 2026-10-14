@@ -800,7 +800,8 @@ impl<'ctx> Lifter<'ctx, '_> {
             Flow::Trap => {
                 llvm!(self.builder.build_unreachable());
             }
-            _ if tail.is_some() => {
+            // Conditional tail calls are branches (below)
+            _ if tail.is_some() && !matches!(last.flow, Flow::CondJump(_)) => {
                 let site = tail.unwrap();
                 self.call(&site.target, self.jump)?;
                 self.build_return()?;
