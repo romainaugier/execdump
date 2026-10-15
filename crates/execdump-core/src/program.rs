@@ -283,6 +283,79 @@ impl Program {
  * ELF
  */
 
+/// What the loader writes in the slot of a relocation
+#[derive(Clone, Copy, PartialEq)]
+enum Relocated {
+    /// The load address plus the addend
+    Relative,
+    /// The address of the symbol, plus the addend for the absolute ones
+    Symbol { absolute: bool },
+}
+
+fn relocated(machine: u16, r_type: u32) -> Option<Relocated> {
+    use crate::elf::ELFTargetISA;
+
+    let symbol = |absolute: bool| Some(Relocated::Symbol { absolute });
+
+    return match (ELFTargetISA::from_repr(machine)?, r_type) {
+        (ELFTargetISA::AMDX86_64 | ELFTargetISA::X86, 8) | (ELFTargetISA::Arm64bits, 1027) | (ELFTargetISA::Arm, 23) => Some(Relocated::Relative),
+        (ELFTargetISA::AMDX86_64 | ELFTargetISA::X86, 1) | (ELFTargetISA::Arm64bits, 257) | (ELFTargetISA::Arm, 2) => symbol(true),
+        (ELFTargetISA::AMDX86_64 | ELFTargetISA::X86, 6 | 7) | (ELFTargetISA::Arm64bits, 1025 | 1026) | (ELFTargetISA::Arm, 21 | 22) => symbol(false),
+        _ => None,
+    };
+}
+
+/// Writes the pointers the loader writes at the load address of the file: the relative ones (PIE pointer
+/// tables, the GOT slots of the local functions) and the ones to the symbols the file defines. The slots of
+/// the imports stay as they are.
+fn apply_relocations(program: &mut Program, elf: &ELF) {
+    let size = program.pointer_size as usize;
+
+    for table in elf.relocation_tables.iter() {
+        for reloc in table.relocations.iter() {
+            let Some(kind) = relocated(table.machine, reloc.relocation_type(&table.class)) else {
+                continue;
+            };
+
+            let Some(region) = program.regions.iter_mut().find(|r| r.contains(reloc.r_offset) && !r.data.is_empty()) else {
+                continue;
+            };
+
+            let offset = (reloc.r_offset - region.vaddr) as usize;
+
+            let Some(slot) = region.data.get_mut(offset..offset + size) else {
+                continue;
+            };
+
+            let in_place = match size {
+                4 if program.big_endian => u32::from_be_bytes(slot.try_into().unwrap()) as i64,
+                4 => u32::from_le_bytes(slot.try_into().unwrap()) as i32 as i64,
+                _ if program.big_endian => u64::from_be_bytes(slot.try_into().unwrap()) as i64,
+                _ => u64::from_le_bytes(slot.try_into().unwrap()) as i64,
+            };
+
+            // The relocations without addend have it in place
+            let addend = reloc.r_addend.unwrap_or(in_place);
+
+            let value = match kind {
+                Relocated::Relative => addend as u64,
+                Relocated::Symbol { absolute } => match reloc.symbol_value {
+                    Some(value) if absolute => value.wrapping_add(addend as u64),
+                    Some(value) => value.wrapping_add(reloc.r_addend.unwrap_or(0) as u64),
+                    None => continue,
+                },
+            };
+
+            match size {
+                4 if program.big_endian => slot.copy_from_slice(&(value as u32).to_be_bytes()),
+                4 => slot.copy_from_slice(&(value as u32).to_le_bytes()),
+                _ if program.big_endian => slot.copy_from_slice(&value.to_be_bytes()),
+                _ => slot.copy_from_slice(&value.to_le_bytes()),
+            }
+        }
+    }
+}
+
 fn program_from_elf(elf: &ELF) -> Program {
     let mut program = Program::default();
 
@@ -399,6 +472,8 @@ fn program_from_elf(elf: &ELF) -> Program {
                 }
             }
         }
+
+        apply_relocations(&mut program, elf);
 
         let imports: HashSet<&str> = elf.imported_symbols().iter().map(|s| s.name.as_str()).collect();
 
@@ -766,6 +841,23 @@ mod tests {
 
     fn fixture(name: &str) -> PathBuf {
         return PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data").join(name);
+    }
+
+    #[test]
+    fn elf_relocations_applied() {
+        let elf = parse_elf(&fixture("elf_x86_64_rust")).unwrap();
+        let program = programs_from_exec(&Exec::ELF(elf.clone())).remove(0);
+        let relative: Vec<_> = elf.relocation_tables.iter().flat_map(|t| t.relocations.iter()).filter(|r| r.relocation_type(&crate::elf::ELFClass::ELF64) == 8).collect();
+
+        // The GOT slot of core::str::from_utf8 holds its address, as the loader writes it
+        assert!(!relative.is_empty());
+
+        for reloc in relative {
+            assert_eq!(program.read_pointer(reloc.r_offset), reloc.r_addend.map(|a| a as u64));
+        }
+
+        let from_utf8 = program.symbols.values().find(|s| s.name.contains("from_utf8")).unwrap().addr;
+        assert!(elf.relocation_tables.iter().flat_map(|t| t.relocations.iter()).any(|r| program.read_pointer(r.r_offset) == Some(from_utf8)));
     }
 
     #[test]

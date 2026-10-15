@@ -154,6 +154,8 @@ pub struct Decompiler<'a> {
     pub model: DataModel,
     pub typedb: TypeDb,
     classes: HashSet<String>,
+    /// C names of the functions with a mangled symbol
+    demangled: HashMap<u64, String>,
     signatures: RefCell<HashMap<u64, Signature>>,
     in_progress: RefCell<HashSet<u64>>,
     /// Names given to the globals, and the C prototypes of the functions, for the C backend
@@ -210,6 +212,7 @@ impl<'a> Decompiler<'a> {
 
         let symbols: Vec<_> = program.symbols.values().filter_map(|s| demangle_symbol(&s.name)).collect();
         let classes = cxx::known_classes(symbols.iter());
+        let demangled = demangled_names(program, analysis, &model, &classes);
 
         return Ok(Decompiler {
             program,
@@ -219,6 +222,7 @@ impl<'a> Decompiler<'a> {
             model,
             typedb,
             classes,
+            demangled,
             signatures: RefCell::new(HashMap::new()),
             in_progress: RefCell::new(HashSet::new()),
             globals: RefCell::new(HashMap::new()),
@@ -911,11 +915,11 @@ impl<'a> Decompiler<'a> {
             return import_name(import);
         }
 
-        if let Some(symbol) = self.program.symbol_at(addr) {
-            if let Some(prototype) = demangle_symbol(&symbol.name).and_then(|s| cxx::prototype(&s, &self.model, &self.classes)) {
-                return prototype.name;
-            }
+        if let Some(name) = self.demangled.get(&addr) {
+            return name.clone();
+        }
 
+        if let Some(symbol) = self.program.symbol_at(addr) {
             return sanitize(&symbol.name);
         }
 
@@ -1464,6 +1468,59 @@ fn target_machine(program: &Program) -> Result<TargetMachine, String> {
 }
 
 /// Import name without its decorations (__imp_, symbol versions, stdcall suffixes)
+/// C names of the functions with a mangled symbol: the name of their C++ prototype, or the C identifier of
+/// their demangled name (core::fmt::Arguments::new_v1 is core_fmt_Arguments_new_v1). The names given to
+/// several functions (the instances of a Rust generic function, C++ overloads) end with their address.
+fn demangled_names(program: &Program, analysis: &Analysis, model: &DataModel, classes: &HashSet<String>) -> HashMap<u64, String> {
+    let mut names: HashMap<u64, String> = HashMap::new();
+    let mut plain: HashSet<String> = HashSet::new();
+
+    for function in analysis.functions.values().filter(|f| f.thunk.is_none()) {
+        let Some(symbol) = program.symbol_at(function.addr) else {
+            continue;
+        };
+
+        let Some(demangled) = demangle_symbol(&symbol.name) else {
+            plain.insert(sanitize(&symbol.name));
+            continue;
+        };
+
+        let name = match cxx::prototype(&demangled, model, classes) {
+            Some(prototype) => prototype.name,
+            None => cxx::identifier(&demangled.name),
+        };
+
+        if !name.is_empty() {
+            names.insert(function.addr, name);
+        }
+    }
+
+    let mut count: HashMap<&str, usize> = HashMap::new();
+
+    for name in names.values() {
+        *count.entry(name.as_str()).or_default() += 1;
+    }
+
+    let shared: HashSet<String> = count.into_iter().filter(|&(name, n)| n > 1 || plain.contains(name)).map(|(name, _)| name.to_string()).collect();
+
+    for (addr, name) in names.iter_mut() {
+        if shared.contains(name.as_str()) {
+            *name = format!("{}_{:x}", name, addr);
+        }
+    }
+
+    return names;
+}
+
+/// C names of the functions with a mangled symbol, for the tools that find a function by its C name
+pub fn function_names(program: &Program, analysis: &Analysis) -> HashMap<u64, String> {
+    let windows = program.format == Format::Pe;
+    let model = DataModel::new(program.architecture(), windows);
+    let symbols: Vec<_> = program.symbols.values().filter_map(|s| demangle_symbol(&s.name)).collect();
+
+    return demangled_names(program, analysis, &model, &cxx::known_classes(symbols.iter()));
+}
+
 fn import_name(name: &str) -> String {
     let name = name.strip_prefix("__imp_").unwrap_or(name);
     let name = name.split('@').next().unwrap_or(name);
@@ -1694,6 +1751,29 @@ mod tests {
         // gcc moves the unlikely path to a cold part reached by a conditional jump, the rest follows it (the
         // cold part only calls fatal, which only calls abort)
         assert!(code.contains("if (") && code.contains("abort(); // length_of_cold") && code.contains("strlen("), "{}", code);
+    }
+
+    #[test]
+    fn rust_names_and_got_calls() {
+        let program = fixture("elf_x86_64_rust");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let parse = function(&analysis, "rust::checks::parse");
+        let scale = function(&analysis, "rust::checks::scale");
+        let from_utf8 = function(&analysis, "core::str::converts::from_utf8");
+
+        // The demangled paths joined with underscores, legacy (the crate) and v0 (core) manglings
+        assert_eq!(decompiler.function_name(parse), "rust_checks_parse");
+        assert_eq!(decompiler.function_name(from_utf8), "core_str_converts_from_utf8");
+        assert_eq!(function_names(&program, &analysis).get(&scale).map(String::as_str), Some("rust_checks_scale"));
+
+        // core is called through a GOT slot the loader fills with its address
+        assert!(analysis.functions[&parse].calls.iter().any(|c| c.target == CallTarget::Function(from_utf8)));
+        assert!(decompiler.c_code(parse).unwrap().contains("core_str_converts_from_utf8(&"));
+
+        // A parameter only used to compute the result is a parameter
+        let code = decompiler.c_code(scale).unwrap();
+        assert!(code.contains("int64_t rust_checks_scale(int64_t a1)") && code.contains("return a1 * 7 + 3;"), "{}", code);
     }
 
     #[test]

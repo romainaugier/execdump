@@ -183,7 +183,7 @@ Sections:
 
 - :heavy_check_mark: Symbol Tables (.symtab, .dynsym)
 - :heavy_check_mark: Dynamic Section
-- :heavy_check_mark: Relocations (.rel, .rela)
+- :heavy_check_mark: Relocations (.rel, .rela), the pointers the loader writes applied to the memory map of the program (the relative ones of a PIE, the GOT slots of the functions it defines)
 - :heavy_check_mark: Imports (needed libraries and imported symbols)
 - :heavy_check_mark: Notes (build-id, ABI tag, GNU properties)
 - :x: Symbol Versioning (.gnu.version, .gnu.version_r)
@@ -237,7 +237,8 @@ Analysis:
   - :heavy_check_mark: Functions split by the compiler (hot and cold parts): the jumps between the parts do not create
     functions in the middle of others, the code reached only from a cold part is a fragment that stops at the code
     already recovered (no copies of the rest of the function)
-  - :heavy_check_mark: Noreturn functions (known names and propagation)
+  - :heavy_check_mark: Noreturn functions (known names and propagation, the Rust panics of `core::panicking` and the
+    ones of `std::panicking` that panic, not `set_hook`)
   - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking)
   - :heavy_check_mark: Call graph and cross references
   - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
@@ -247,12 +248,19 @@ Decompiler:
   - :heavy_check_mark: CFG recovery
   - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
   - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
+  - :heavy_check_mark: Names of the functions with a mangled symbol (C++, Rust legacy and v0): their demangled path joined
+    with underscores (`std::vector<int>::push_back` is `std_vector_int_push_back`, `core::fmt::Arguments::new_v1`
+    is `core_fmt_Arguments_new_v1`, `<alloc::string::String as core::ops::deref::Deref>::deref` is
+    `alloc_string_String_as_core_ops_deref_Deref_deref`), the names several functions share (the instances of a
+    generic, overloads) end with their address (`core_ptr_drop_in_place_17cf0`)
   - :heavy_check_mark: Signature recovery (C headers, demangled C++ symbols, then used argument registers and their widths).
     After a call the registers the callee does not preserve hold nothing known, so a register the function received
     is not passed through it: what the callee may write is found from its instructions and its callees (compilers
     keep values in the other registers across calls to the functions they know, gcc's `-fipa-ra`), the imports
     and the indirect calls may write any. A call whose arguments are guessed passes the registers written on every
-    path to it, and a register only left as it was on some paths to a return is not a parameter. A register used
+    path to it, and a register only left as it was on some paths to a return is not a parameter. A parameter
+    reaching the return register is the result (`return p + 1;`, `mov rax, rdi`), except a return register
+    received and left as it is (`xmm0` on x86_64, `x0` on aarch64). A register used
     as an address (after adding constants to it, or joined with others that are) is a pointer, and so is a result
     that is always one (a pointer, such a parameter, an offset from them, or null), what they point to comes from
     the accesses of the function. A function whose address is passed to a parameter of a known function that is
@@ -262,7 +270,9 @@ Decompiler:
     arguments passed on the stack are not followed). A global holding one function (every instruction of the
     program writing it writes the address of that function, and its address is never taken) is called as that
     function, with its arguments: `static void (*check)(...); check = verify; check(a, b);` gives
-    `verify(a, b)` (x86 and x86_64). `main` has its standard prototype (`int main(int argc, char **argv)`, as many
+    `verify(a, b)` (x86 and x86_64), and so is a global no instruction writes holding a function from the start
+    (the GOT slot the loader fills for a call to a function of the binary: Rust calls the functions of the other
+    crates through them, `call [rip + slot]` is `std_io_stdio__print(&args)`). `main` has its standard prototype (`int main(int argc, char **argv)`, as many
     parameters as it reads), the functions the C runtime links in (`__libc_csu_init`, `frame_dummy`,
     `__do_global_dtors_aux`...) return nothing. A result is not read by a caller that clears the register
     (`xor eax, eax`), nor by one that only returns it to callers that do not read it (followed up the call graph),
@@ -542,7 +552,7 @@ Commands:
 
 | Command | Action |
 |---|---|
-| `:0x401000`, `:main` | Go to an address, a function or a symbol |
+| `:0x401000`, `:main` | Go to an address, a function or a symbol, by its name in the C code too (`:core_fmt_Arguments_new_v1`, `:sub_401000`, `:g_4c8b8`) |
 | `:c [function]` | C code of the module of a function |
 | `:source <module>` | C code of a module |
 | `:callgraph [function]`, `:depth <n>`, `:up` | Call graph from a function (or the entry point), its depth, its parent |

@@ -109,11 +109,12 @@ fn field_type(ctx: &Context, ty: &CType, bytes: u64) -> CType {
     return if bytes == 1 { CType::Char } else { CType::int(bytes as u16 * 8) };
 }
 
-/// The fields of a struct: the accesses that do not overlap the ones at a lower offset (the widest first)
+/// The fields of a struct: the accesses that do not overlap the ones at a lower offset (the widest first), the ones
+/// before its start (container_of) are not fields
 fn layout(ctx: &Context, accesses: &[Access], types: &[CType]) -> Aggregate {
     // At an offset the widest access, of the most precise type: a pointer to a struct, to something else,
     // a number, a pointer to anything
-    let mut sorted: Vec<&Access> = accesses.iter().collect();
+    let mut sorted: Vec<&Access> = accesses.iter().filter(|a| a.offset >= 0).collect();
     let precision = |a: &Access| match pointee(&a.ty(types)) {
         Some(CType::Struct(_)) => 0,
         Some(p) if !p.is_unknown() && !matches!(p, CType::Void) => 1,

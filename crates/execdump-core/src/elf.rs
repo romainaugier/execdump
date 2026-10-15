@@ -1729,6 +1729,8 @@ pub struct ELFRelocation {
     pub r_info: u64,
     pub r_addend: Option<i64>,
     pub symbol_name: String,
+    /// Value of the symbol when it is defined by the file
+    pub symbol_value: Option<u64>,
 }
 
 impl ELFRelocation {
@@ -2057,6 +2059,7 @@ impl ELF {
 
                 if let Some(symbol) = symbols.get(reloc.symbol_index(&self.class())) {
                     reloc.symbol_name = symbol.name.clone();
+                    reloc.symbol_value = (symbol.st_shndx != SHN_UNDEF).then_some(symbol.st_value);
                 }
 
                 table.relocations.push(reloc);

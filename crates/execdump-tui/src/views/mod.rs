@@ -208,7 +208,12 @@ impl App {
             }
         }
 
-        return self.programs[program].symbols.values().find(|s| s.name == text || s.demangled == text).map(|s| s.addr);
+        if let Some(symbol) = self.programs[program].symbols.values().find(|s| s.name == text || s.demangled == text) {
+            return Some(symbol.addr);
+        }
+
+        // The names of the C code for the functions and the globals without symbol
+        return ["sub_", "g_", "s_"].iter().find_map(|prefix| text.strip_prefix(prefix).and_then(|hex| u64::from_str_radix(hex, 16).ok()));
     }
 
     /// Function shown by the current view (graph, linear disassembly or C code)

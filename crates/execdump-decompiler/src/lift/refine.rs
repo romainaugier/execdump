@@ -14,6 +14,9 @@ use std::collections::{HashMap, HashSet};
 /// Results of the width analyses by value (None while in progress, phi cycles stop there)
 type Memo = HashMap<usize, Option<u32>>;
 
+/// Demanded widths by value and whether it was computed from the parameter
+type DemandMemo = HashMap<(usize, bool), Option<u32>>;
+
 fn key(value: BasicValueEnum) -> usize {
     return value.as_value_ref() as usize;
 }
@@ -26,8 +29,16 @@ const MAX_DEPTH: usize = 8;
 /// used with, and the return register defined when returning. Registers used as addresses, and
 /// a result that is always an address, are pointers.
 pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi) -> Signature {
-    let mut memo = Memo::new();
-    let used: Vec<Option<u32>> = function.get_param_iter().map(|p| demanded(p, 0, &mut memo)).collect();
+    let mut memo = DemandMemo::new();
+    let returns = [abi.int_ret, abi.float_ret];
+
+    // A return register received as a parameter reaches the return sink as it was when the function does not
+    // write it, the other parameters reaching it are the result (mov rax, rdi)
+    let used: Vec<Option<u32>> = function
+        .get_param_iter()
+        .zip(discovery.params.iter())
+        .map(|(p, param)| demanded(p, 0, !matches!(param.loc, Loc::Reg(r) if returns.contains(&r)), &mut memo))
+        .collect();
     let mut keep = vec![false; discovery.params.len()];
 
     // Registers are assigned in order, a used register means the previous ones are parameters too
@@ -67,11 +78,18 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         })
         .collect();
 
-    let int_ret = returned(module, RETURN_SINK_INT, function).map(|bits| {
+    let kept: Vec<BasicValueEnum> = function
+        .get_param_iter()
+        .zip(discovery.params.iter())
+        .filter(|(_, param)| matches!(param.loc, Loc::Reg(r) if returns.contains(&r)))
+        .map(|(p, _)| p)
+        .collect();
+
+    let int_ret = returned(module, RETURN_SINK_INT, &kept).map(|bits| {
         let ty = if returns_address(module, RETURN_SINK_INT) { LType::Ptr } else { LType::Int(c_width(bits)) };
         Value { loc: Loc::Reg(abi.int_ret), ty, name: None }
     });
-    let float_ret = returned(module, RETURN_SINK_FLOAT, function).map(|bits| Value { loc: Loc::Reg(abi.float_ret), ty: LType::Float(if bits <= 32 { 32 } else { 64 }), name: None });
+    let float_ret = returned(module, RETURN_SINK_FLOAT, &kept).map(|bits| Value { loc: Loc::Reg(abi.float_ret), ty: LType::Float(if bits <= 32 { 32 } else { 64 }), name: None });
 
     return Signature { params, ret: int_ret.or(float_ret), ..discovery.clone() };
 }
@@ -127,19 +145,21 @@ fn is_return_sink(instruction: InstructionValue) -> bool {
 }
 
 /// Low bits of a value its users depend on, None when nothing uses it
-fn demanded(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Option<u32> {
-    if let Some(&known) = memo.get(&key(value)) {
+/// Bits of a value its users need. A value stored to a return sink is the result once computed from the
+/// parameter.
+fn demanded(value: BasicValueEnum, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
+    if let Some(&known) = memo.get(&(key(value), computed)) {
         return known;
     }
 
-    memo.insert(key(value), None);
-    let result = demanded_uncached(value, depth, memo);
-    memo.insert(key(value), result);
+    memo.insert((key(value), computed), None);
+    let result = demanded_uncached(value, depth, computed, memo);
+    memo.insert((key(value), computed), result);
 
     return result;
 }
 
-fn demanded_uncached(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Option<u32> {
+fn demanded_uncached(value: BasicValueEnum, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
     let width = int_width(value);
 
     if depth > MAX_DEPTH {
@@ -158,24 +178,24 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Op
         };
 
         let bits = match user.get_opcode() {
-            InstructionOpcode::Store if is_return_sink(user) => continue,
+            InstructionOpcode::Store if is_return_sink(user) && !computed => continue,
             InstructionOpcode::Trunc => Some(int_width(user.as_any_value_enum().try_into().unwrap_or(value))),
             InstructionOpcode::And => {
                 let mask = int_operand(user, 0).filter(|v| v.is_const()).or(int_operand(user, 1).filter(|v| v.is_const()));
                 let mask_bits = mask.and_then(constant_bits).unwrap_or(width);
-                let result_bits = user_demanded(user, depth, memo);
+                let result_bits = user_demanded(user, depth, true, memo);
                 result_bits.map(|r| r.min(mask_bits))
             }
             InstructionOpcode::Shl => {
                 let shift = int_operand(user, 1).and_then(|v| v.get_zero_extended_constant()).unwrap_or(0) as u32;
-                user_demanded(user, depth, memo).map(|r| r.saturating_sub(shift).max(1))
+                user_demanded(user, depth, true, memo).map(|r| r.saturating_sub(shift).max(1))
             }
             // The low bits of these results only depend on the low bits of their operands
-            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, memo),
+            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, true, memo),
             // A value joined with others is used where the join is (a register left as it was on some paths
             // only reaching the return sinks is not a parameter)
-            InstructionOpcode::Phi => user_demanded(user, depth, memo),
-            InstructionOpcode::Select if operand(user, 0) != Some(value) => user_demanded(user, depth, memo),
+            InstructionOpcode::Phi => user_demanded(user, depth, computed, memo),
+            InstructionOpcode::Select if operand(user, 0) != Some(value) => user_demanded(user, depth, computed, memo),
             _ => Some(width),
         };
 
@@ -187,25 +207,25 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, memo: &mut Memo) -> Op
     return result;
 }
 
-fn user_demanded(user: InstructionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
+fn user_demanded(user: InstructionValue, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
     let value: BasicValueEnum = user.as_any_value_enum().try_into().ok()?;
-    return demanded(value, depth + 1, memo);
+    return demanded(value, depth + 1, computed, memo);
 }
 
 /// Bits a value can have set (zero extended i32 values have 32)
-fn known_width(value: BasicValueEnum, function: FunctionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
+fn known_width(value: BasicValueEnum, kept: &[BasicValueEnum], depth: usize, memo: &mut Memo) -> Option<u32> {
     if let Some(&known) = memo.get(&key(value)) {
         return known;
     }
 
     memo.insert(key(value), None);
-    let result = known_width_uncached(value, function, depth, memo);
+    let result = known_width_uncached(value, kept, depth, memo);
     memo.insert(key(value), result);
 
     return result;
 }
 
-fn known_width_uncached(value: BasicValueEnum, function: FunctionValue, depth: usize, memo: &mut Memo) -> Option<u32> {
+fn known_width_uncached(value: BasicValueEnum, kept: &[BasicValueEnum], depth: usize, memo: &mut Memo) -> Option<u32> {
     let BasicValueEnum::IntValue(int) = value else {
         return Some(int_width(value));
     };
@@ -221,15 +241,15 @@ fn known_width_uncached(value: BasicValueEnum, function: FunctionValue, depth: u
     let width = int.get_type().get_bit_width();
 
     let Some(instruction) = int.as_instruction() else {
-        // A parameter returned as it is does not make a return value
-        return if function.get_param_iter().any(|p| p == value) { None } else { Some(width) };
+        // A return register received as a parameter and left as it is does not make a return value
+        return if kept.contains(&value) { None } else { Some(width) };
     };
 
     if depth > MAX_DEPTH {
         return Some(width);
     }
 
-    let mut operand_width = |index| operand(instruction, index).and_then(|v| known_width(v, function, depth + 1, memo));
+    let mut operand_width = |index| operand(instruction, index).and_then(|v| known_width(v, kept, depth + 1, memo));
 
     return match instruction.get_opcode() {
         InstructionOpcode::ZExt => operand(instruction, 0).map(int_width),
@@ -362,7 +382,7 @@ fn returns_address(module: &Module, sink: &str) -> bool {
 }
 
 /// Width of the values stored to a return sink, None when nothing defined reaches it
-fn returned(module: &Module, sink: &str, function: FunctionValue) -> Option<u32> {
+fn returned(module: &Module, sink: &str, kept: &[BasicValueEnum]) -> Option<u32> {
     let global = module.get_global(sink)?;
     let mut widest: Option<u32> = None;
     let mut memo = Memo::new();
@@ -377,8 +397,8 @@ fn returned(module: &Module, sink: &str, function: FunctionValue) -> Option<u32>
 
         // Vector registers: the scalar is in the low bits
         let bits = match value {
-            BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 128 => known_width(value, function, 0, &mut memo).map(|b| b.min(64)),
-            _ => known_width(value, function, 0, &mut memo),
+            BasicValueEnum::IntValue(v) if v.get_type().get_bit_width() == 128 => known_width(value, kept, 0, &mut memo).map(|b| b.min(64)),
+            _ => known_width(value, kept, 0, &mut memo),
         };
 
         if let Some(bits) = bits {
@@ -387,4 +407,58 @@ fn returned(module: &Module, sink: &str, function: FunctionValue) -> Option<u32>
     }
 
     return widest;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lift::discovery_signature;
+    use crate::lift::regs::RegisterFile;
+
+    use execdump_core::disasm::Architecture;
+    use inkwell::context::Context;
+    use inkwell::memory_buffer::MemoryBuffer;
+
+    use std::collections::BTreeSet;
+
+    const ARGS: &str = "i64 %0, i64 %1, i64 %2, i64 %3, i64 %4, i64 %5, i128 %6, i128 %7, i128 %8, i128 %9, i128 %10, i128 %11, i128 %12, i128 %13";
+
+    /// Signature refined from the optimized discovery body of a function
+    fn refined(body: &str) -> Signature {
+        let ir = format!("@__return_int = external global i64\n@__return_float = external global i128\ndefine void @f({}) {{\n{}\n  ret void\n}}\n", ARGS, body);
+        let cx = Context::create();
+        let module = cx.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "f")).unwrap();
+        let regs = RegisterFile::new(Architecture::X86_64);
+        let abi = Abi::new(&regs, false);
+        let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new());
+
+        return refine(&module, module.get_function("f").unwrap(), &discovery, &abi);
+    }
+
+    #[test]
+    fn parameters_making_the_result() {
+        let regs = RegisterFile::new(Architecture::X86_64);
+        let reg = |sig: &Signature, i: usize| match sig.params[i].loc {
+            Loc::Reg(r) => regs.regs[r].name,
+            Loc::Stack(_) => "stack",
+        };
+
+        // return p + 1: the parameter only reaches the result
+        let sig = refined("  %15 = add i64 %0, 1\n  store i64 %15, ptr @__return_int\n  store i128 %6, ptr @__return_float");
+        assert_eq!((sig.params.len(), reg(&sig, 0)), (1, "rdi"));
+        assert!(matches!(sig.ret, Some(Value { loc: Loc::Reg(r), .. }) if r == abi_int_ret(&regs)));
+
+        // mov rax, rsi: returned as it is, after an unused first parameter
+        let sig = refined("  store i64 %1, ptr @__return_int\n  store i128 %6, ptr @__return_float");
+        assert_eq!(sig.params.len(), 2);
+        assert!(sig.ret.is_some());
+
+        // xmm0 left as it was is neither a parameter nor a result
+        let sig = refined("  store i128 %6, ptr @__return_float");
+        assert!(sig.params.is_empty() && sig.ret.is_none());
+    }
+
+    fn abi_int_ret(regs: &RegisterFile) -> usize {
+        return Abi::new(regs, false).int_ret;
+    }
 }

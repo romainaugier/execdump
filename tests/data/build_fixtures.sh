@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rebuilds the test fixtures, requires clang and lld (ld.lld, ld64.lld, lld-link, llvm-lipo), and gcc for x86_64
+# Rebuilds the test fixtures, requires clang and lld (ld.lld, ld64.lld, lld-link, llvm-lipo), gcc for x86_64 and rustc
 
 set -e
 
@@ -70,3 +70,9 @@ clang++ --target=x86_64-apple-macos11 -O1 -c src/main.cpp -o "$TMP"/main_x86_64.
 # Mach-O fat object (arm64 + x86_64)
 clang++ --target=arm64-apple-macos11 -O1 -c src/main.cpp -o "$TMP"/main_arm64.o
 "$LLVM_BIN"/llvm-lipo -create "$TMP"/main_arm64.o "$TMP"/main_x86_64.o -output macho_fat.o
+
+# ELF x86_64 PIE in Rust without std: legacy and v0 mangled names, a call to core through a GOT slot the loader
+# fills (R_X86_64_RELATIVE)
+RUSTC_BOOTSTRAP=1 rustc -O --edition 2021 -C panic=abort -C relocation-model=pie -C strip=debuginfo -Z unstable-options \
+    -C symbol-mangling-version=legacy -C link-arg=-nostartfiles -C link-arg=-nostdlib -C link-arg=-Wl,--build-id=none \
+    src/rust.rs -o elf_x86_64_rust

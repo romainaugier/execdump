@@ -157,8 +157,17 @@ pub fn is_noreturn_name(name: &str) -> bool {
         "ZSt19__throw_logic_errorPKc" | "ZSt20__throw_out_of_rangePKc" | "ZSt25__throw_bad_function_callv" |
         "ZSt28__throw_bad_array_new_lengthv" | "ZSt16__throw_bad_castv" | "ZSt21__throw_bad_variant_accessPKc"
     ) || name.starts_with("ZN4core9panicking") || name.starts_with("ZN3std7process4exit") || name.starts_with("ZN5alloc5alloc18handle_alloc_error")
-      || name.starts_with("rust_panic") || name.starts_with("rust_begin_unwind") || name.starts_with("ZN3std9panicking")
+      || name.starts_with("rust_panic") || name.starts_with("rust_begin_unwind") || RUST_STD_PANICS.iter().any(|p| name.starts_with(p))
 }
+
+/// The functions of std::panicking that panic (set_hook, take_hook, panic_count::... return)
+const RUST_STD_PANICS: &[&str] = &[
+    "ZN3std9panicking11begin_panic",
+    "ZN3std9panicking15begin_panic_fmt",
+    "ZN3std9panicking19begin_panic_handler",
+    "ZN3std9panicking20rust_panic_with_hook",
+    "ZN3std9panicking23rust_panic_without_hook",
+];
 
 /// Context shared by all function recoveries
 pub struct RecoveryContext<'a> {
@@ -689,6 +698,15 @@ fn compute_noreturn(ctx: &RecoveryContext, function: &Function) -> bool {
 mod tests {
     use super::*;
     use execdump_core::program::{Perms, Region};
+
+    #[test]
+    fn rust_panics_never_return() {
+        assert!(is_noreturn_name("_ZN3std9panicking20rust_panic_with_hook17h0123456789abcdefE"));
+        assert!(is_noreturn_name("_ZN3std9panicking19begin_panic_handler17h0123456789abcdefE"));
+        assert!(is_noreturn_name("_ZN4core9panicking9panic_fmt17h0123456789abcdefE"));
+        assert!(!is_noreturn_name("_ZN3std9panicking8set_hook17hdba0096e3f6ed0afE"));
+        assert!(!is_noreturn_name("_ZN3std9panicking11panic_count17is_zero_slow_path17h0123456789abcdefE"));
+    }
 
     fn program(arch: Architecture, code: &[u8]) -> Program {
         let mut program = Program::default();

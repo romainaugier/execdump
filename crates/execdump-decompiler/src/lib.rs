@@ -10,4 +10,4 @@ pub mod storage;
 pub mod typedb;
 pub mod types;
 
-pub use decompiler::{Decompiler, SharedSignatures};
+pub use decompiler::{function_names, Decompiler, SharedSignatures};

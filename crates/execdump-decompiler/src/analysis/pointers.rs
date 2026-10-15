@@ -1,6 +1,6 @@
 /*
  * Globals that hold one function: every instruction of the program that writes one writes the address of the
- * same function, and its address is never taken. A call through such a global calls that function, with its
+ * same function, or none writes it and it holds a function from the start, and its address is never taken. A call through such a global calls that function, with its
  * parameters (static void (*check)(...) = verify; check(a, b) is verify(a, b)).
  */
 
@@ -88,16 +88,15 @@ pub fn resolve(program: &Program, decoder: &Decoder, analysis: &mut Analysis) {
     }
 
     for (function, index, global) in sites {
-        let Some(&Held::Function(target)) = held.get(&global) else {
-            continue;
-        };
-
         // The initial value is the function or nothing
-        let initial = program.read_pointer(global).unwrap_or(0);
+        let initial = program.read_pointer(global).unwrap_or(0) & mask;
 
-        if initial != 0 && initial != target {
-            continue;
-        }
+        let target = match held.get(&global) {
+            Some(&Held::Function(target)) if initial == 0 || initial == target => target,
+            // Never written by the code: the value written by the loader (the GOT slot of a local function)
+            Some(Held::Nothing) if analysis.functions.contains_key(&initial) => initial,
+            _ => continue,
+        };
 
         if let Some(function) = analysis.functions.get_mut(&function) {
             function.calls[index].target = CallTarget::Function(target);

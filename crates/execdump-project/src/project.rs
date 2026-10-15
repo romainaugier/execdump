@@ -23,6 +23,7 @@ use execdump_decompiler::llm::{check_rewrite, parse_type, valid_identifier, Assi
 use execdump_decompiler::notes::parse_prototype;
 use execdump_decompiler::typedb::{Platform, TypeDb};
 use execdump_decompiler::types::DataModel;
+use execdump_decompiler::function_names;
 
 use serde::{Deserialize, Serialize};
 
@@ -218,6 +219,11 @@ impl Project {
             for &(_, target) in function.refs.iter() {
                 referrers.entry(target).or_default().push(function.addr);
             }
+        }
+
+        // The names of the C code (core_fmt_Arguments_new_v1, std_vector_int_push_back)
+        for (addr, name) in function_names(&program, &analysis) {
+            names.entry(name).or_insert(addr);
         }
 
         referrers.values_mut().for_each(|v| {
