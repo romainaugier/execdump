@@ -4,7 +4,7 @@
  */
 
 use super::regs::Abi;
-use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_INT};
+use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_HIGH, RETURN_SINK_INT};
 
 use inkwell::module::Module;
 use inkwell::values::{AnyValue, AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
@@ -14,8 +14,8 @@ use std::collections::{HashMap, HashSet};
 /// Results of the width analyses by value (None while in progress, phi cycles stop there)
 type Memo = HashMap<usize, Option<u32>>;
 
-/// Demanded widths by value and whether it was computed from the parameter
-type DemandMemo = HashMap<(usize, bool), Option<u32>>;
+/// Demanded widths by value and the return sink of the parameter it is (while it is not computed with)
+type DemandMemo = HashMap<(usize, Option<&'static str>), Option<u32>>;
 
 fn key(value: BasicValueEnum) -> usize {
     return value.as_value_ref() as usize;
@@ -28,17 +28,14 @@ const MAX_DEPTH: usize = 8;
 /// used (the ABI registers in order up to the last used one), narrowed to the bits they are
 /// used with, and the return register defined when returning. Registers used as addresses, and
 /// a result that is always an address, are pointers.
-pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi) -> Signature {
+pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi, high_read: &dyn Fn() -> bool) -> Signature {
     let mut memo = DemandMemo::new();
-    let returns = [abi.int_ret, abi.float_ret];
+    let sinks = [(RETURN_SINK_INT, Some(abi.int_ret)), (RETURN_SINK_FLOAT, Some(abi.float_ret)), (RETURN_SINK_HIGH, abi.int_ret_high)];
+    let own = |loc: Loc| sinks.iter().find(|(_, reg)| matches!(loc, Loc::Reg(r) if *reg == Some(r))).map(|(sink, _)| *sink);
 
-    // A return register received as a parameter reaches the return sink as it was when the function does not
-    // write it, the other parameters reaching it are the result (mov rax, rdi)
-    let used: Vec<Option<u32>> = function
-        .get_param_iter()
-        .zip(discovery.params.iter())
-        .map(|(p, param)| demanded(p, 0, !matches!(param.loc, Loc::Reg(r) if returns.contains(&r)), &mut memo))
-        .collect();
+    // A return register received as a parameter reaches its return sink as it was when the function does not
+    // write it, the other parameters reaching a sink are the result (mov rax, rdi)
+    let used: Vec<Option<u32>> = function.get_param_iter().zip(discovery.params.iter()).map(|(p, param)| demanded(p, 0, own(param.loc), &mut memo)).collect();
     let mut keep = vec![false; discovery.params.len()];
 
     // Registers are assigned in order, a used register means the previous ones are parameters too
@@ -78,18 +75,24 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         })
         .collect();
 
-    let kept: Vec<BasicValueEnum> = function
-        .get_param_iter()
-        .zip(discovery.params.iter())
-        .filter(|(_, param)| matches!(param.loc, Loc::Reg(r) if returns.contains(&r)))
-        .map(|(p, _)| p)
-        .collect();
+    let kept = |sink: &str| -> Vec<BasicValueEnum> {
+        return function.get_param_iter().zip(discovery.params.iter()).filter(|(_, param)| own(param.loc) == Some(sink)).map(|(p, _)| p).collect();
+    };
 
-    let int_ret = returned(module, RETURN_SINK_INT, &kept).map(|bits| {
+    let int_ret = returned(module, RETURN_SINK_INT, &kept(RETURN_SINK_INT)).map(|bits| {
         let ty = if returns_address(module, RETURN_SINK_INT) { LType::Ptr } else { LType::Int(c_width(bits)) };
         Value { loc: Loc::Reg(abi.int_ret), ty, name: None }
     });
-    let float_ret = returned(module, RETURN_SINK_FLOAT, &kept).map(|bits| Value { loc: Loc::Reg(abi.float_ret), ty: LType::Float(if bits <= 32 { 32 } else { 64 }), name: None });
+    let float_ret = returned(module, RETURN_SINK_FLOAT, &kept(RETURN_SINK_FLOAT)).map(|bits| Value { loc: Loc::Reg(abi.float_ret), ty: LType::Float(if bits <= 32 { 32 } else { 64 }), name: None });
+
+    // Results twice as wide as a register (rdx:rax), when a caller reads the high half
+    let high = abi.int_ret_high.is_some() && returned(module, RETURN_SINK_HIGH, &kept(RETURN_SINK_HIGH)).is_some();
+    let register_bits = module.get_global(RETURN_SINK_INT).map(|g| g.get_value_type().into_int_type().get_bit_width());
+
+    let int_ret = match (int_ret, register_bits) {
+        (Some(low), Some(bits)) if high && high_read() => Some(Value { ty: LType::Int(2 * bits), ..low }),
+        (low, _) => low,
+    };
 
     return Signature { params, ret: int_ret.or(float_ret), ..discovery.clone() };
 }
@@ -134,32 +137,36 @@ fn constant_bits(value: IntValue) -> Option<u32> {
     return Some(64 - constant.leading_zeros());
 }
 
-fn is_return_sink(instruction: InstructionValue) -> bool {
+/// The return sink an instruction stores to
+fn return_sink(instruction: InstructionValue) -> Option<&'static str> {
+    if instruction.get_opcode() != InstructionOpcode::Store {
+        return None;
+    }
+
     let Some(BasicValueEnum::PointerValue(pointer)) = operand(instruction, 1) else {
-        return false;
+        return None;
     };
 
-    let name = pointer.get_name().to_string_lossy().to_string();
+    let name = pointer.get_name().to_string_lossy();
 
-    return name == RETURN_SINK_INT || name == RETURN_SINK_FLOAT;
+    return [RETURN_SINK_INT, RETURN_SINK_FLOAT, RETURN_SINK_HIGH].into_iter().find(|sink| *sink == name);
 }
 
-/// Low bits of a value its users depend on, None when nothing uses it
-/// Bits of a value its users need. A value stored to a return sink is the result once computed from the
-/// parameter.
-fn demanded(value: BasicValueEnum, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
-    if let Some(&known) = memo.get(&(key(value), computed)) {
+/// Bits of a value its users need, None when nothing uses it. A value stored to a return sink is a result,
+/// except the parameter of its register left as it is (own is its sink until it is computed with).
+fn demanded(value: BasicValueEnum, depth: usize, own: Option<&'static str>, memo: &mut DemandMemo) -> Option<u32> {
+    if let Some(&known) = memo.get(&(key(value), own)) {
         return known;
     }
 
-    memo.insert((key(value), computed), None);
-    let result = demanded_uncached(value, depth, computed, memo);
-    memo.insert((key(value), computed), result);
+    memo.insert((key(value), own), None);
+    let result = demanded_uncached(value, depth, own, memo);
+    memo.insert((key(value), own), result);
 
     return result;
 }
 
-fn demanded_uncached(value: BasicValueEnum, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
+fn demanded_uncached(value: BasicValueEnum, depth: usize, own: Option<&'static str>, memo: &mut DemandMemo) -> Option<u32> {
     let width = int_width(value);
 
     if depth > MAX_DEPTH {
@@ -178,24 +185,24 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, computed: bool, memo: 
         };
 
         let bits = match user.get_opcode() {
-            InstructionOpcode::Store if is_return_sink(user) && !computed => continue,
+            InstructionOpcode::Store if own.is_some() && return_sink(user) == own => continue,
             InstructionOpcode::Trunc => Some(int_width(user.as_any_value_enum().try_into().unwrap_or(value))),
             InstructionOpcode::And => {
                 let mask = int_operand(user, 0).filter(|v| v.is_const()).or(int_operand(user, 1).filter(|v| v.is_const()));
                 let mask_bits = mask.and_then(constant_bits).unwrap_or(width);
-                let result_bits = user_demanded(user, depth, true, memo);
+                let result_bits = user_demanded(user, depth, None, memo);
                 result_bits.map(|r| r.min(mask_bits))
             }
             InstructionOpcode::Shl => {
                 let shift = int_operand(user, 1).and_then(|v| v.get_zero_extended_constant()).unwrap_or(0) as u32;
-                user_demanded(user, depth, true, memo).map(|r| r.saturating_sub(shift).max(1))
+                user_demanded(user, depth, None, memo).map(|r| r.saturating_sub(shift).max(1))
             }
             // The low bits of these results only depend on the low bits of their operands
-            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, true, memo),
+            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, None, memo),
             // A value joined with others is used where the join is (a register left as it was on some paths
             // only reaching the return sinks is not a parameter)
-            InstructionOpcode::Phi => user_demanded(user, depth, computed, memo),
-            InstructionOpcode::Select if operand(user, 0) != Some(value) => user_demanded(user, depth, computed, memo),
+            InstructionOpcode::Phi => user_demanded(user, depth, own, memo),
+            InstructionOpcode::Select if operand(user, 0) != Some(value) => user_demanded(user, depth, own, memo),
             _ => Some(width),
         };
 
@@ -207,9 +214,9 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, computed: bool, memo: 
     return result;
 }
 
-fn user_demanded(user: InstructionValue, depth: usize, computed: bool, memo: &mut DemandMemo) -> Option<u32> {
+fn user_demanded(user: InstructionValue, depth: usize, own: Option<&'static str>, memo: &mut DemandMemo) -> Option<u32> {
     let value: BasicValueEnum = user.as_any_value_enum().try_into().ok()?;
-    return demanded(value, depth + 1, computed, memo);
+    return demanded(value, depth + 1, own, memo);
 }
 
 /// Bits a value can have set (zero extended i32 values have 32)
@@ -432,7 +439,7 @@ mod tests {
         let abi = Abi::new(&regs, false);
         let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new());
 
-        return refine(&module, module.get_function("f").unwrap(), &discovery, &abi);
+        return refine(&module, module.get_function("f").unwrap(), &discovery, &abi, &|| true);
     }
 
     #[test]

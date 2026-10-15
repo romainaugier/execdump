@@ -260,7 +260,10 @@ Decompiler:
     and the indirect calls may write any. A call whose arguments are guessed passes the registers written on every
     path to it, and a register only left as it was on some paths to a return is not a parameter. A parameter
     reaching the return register is the result (`return p + 1;`, `mov rax, rdi`), except a return register
-    received and left as it is (`xmm0` on x86_64, `x0` on aarch64). A register used
+    received and left as it is (`xmm0` on x86_64, `x0` on aarch64). A result twice as wide as a register is
+    returned in two (`rdx:rax`, `edx:eax`, `x1:x0`: the 16 bytes structs of C, `long long` on x86, the `u128`,
+    `&str` and `Option<u32>` of Rust) when a caller reads the high half after the call, it is an `__int128` whose
+    halves the callers take (`(int)v`, `(const char *)(v >> 64)`). A register used
     as an address (after adding constants to it, or joined with others that are) is a pointer, and so is a result
     that is always one (a pointer, such a parameter, an offset from them, or null), what they point to comes from
     the accesses of the function. A function whose address is passed to a parameter of a known function that is

@@ -151,6 +151,8 @@ impl fmt::Display for CType {
             CType::Char => write!(f, "char"),
             CType::Int { bits: 32, signed: true } => write!(f, "int"),
             CType::Int { bits: 32, signed: false } => write!(f, "unsigned int"),
+            CType::Int { bits: 128, signed: true } => write!(f, "__int128"),
+            CType::Int { bits: 128, signed: false } => write!(f, "unsigned __int128"),
             CType::Int { bits, signed: true } => write!(f, "int{}_t", bits),
             CType::Int { bits, signed: false } => write!(f, "uint{}_t", bits),
             CType::Float { bits: 32 } => write!(f, "float"),

@@ -9,7 +9,7 @@
 use crate::analysis::function::CallTarget;
 use crate::analysis::Analysis;
 use crate::cxx;
-use crate::lift::regs::{Abi, RegisterFile};
+use crate::lift::regs::{Abi, Reg, RegisterFile};
 use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
 use crate::typedb::{Aggregate, Platform, TypeDb};
 use crate::analysis::insn::{Decoder, Flow};
@@ -1194,16 +1194,18 @@ impl<'a> Decompiler<'a> {
     /// (a function without callers in the program is called from elsewhere)
     fn result_read_by_callers(&self, addr: u64) -> bool {
         let mut visited = HashSet::new();
-        return self.result_read(addr, &mut visited, MAX_RESULT_DEPTH);
+        return self.result_read(addr, self.abi.int_ret, true, &mut visited, MAX_RESULT_DEPTH);
     }
 
-    fn result_read(&self, addr: u64, visited: &mut HashSet<u64>, depth: usize) -> bool {
+    /// Whether a caller reads a return register of a function, unknown is the answer for the functions whose callers
+    /// are not known
+    fn result_read(&self, addr: u64, reg: Reg, unknown: bool, visited: &mut HashSet<u64>, depth: usize) -> bool {
         if !visited.insert(addr) {
             return false;
         }
 
         let Some(callers) = self.analysis.callers.get(&addr).filter(|_| depth > 0) else {
-            return true;
+            return unknown;
         };
 
         let signature = |target: &CallTarget| self.call_signature(target);
@@ -1215,11 +1217,13 @@ impl<'a> Decompiler<'a> {
             for call in caller.calls.iter().filter(|c| c.target == CallTarget::Function(addr)) {
                 sites += 1;
 
-                let used = if call.tail { lift::ResultUse::Returned } else { lift::result_used(&env, &self.cs, caller, call.addr, self.abi.int_ret) };
+                // The return register is read when unsure, the high half of a result only when it is seen read
+                let unsure = if unknown { lift::ResultUse::Read } else { lift::ResultUse::Unused };
+                let used = if call.tail { lift::ResultUse::Returned } else { lift::result_used(&env, &self.cs, caller, call.addr, reg, unsure) };
 
                 let read = match used {
                     lift::ResultUse::Read => true,
-                    lift::ResultUse::Returned => self.result_read(caller.addr, visited, depth - 1),
+                    lift::ResultUse::Returned => self.result_read(caller.addr, reg, unknown, visited, depth - 1),
                     lift::ResultUse::Unused => false,
                 };
 
@@ -1229,7 +1233,7 @@ impl<'a> Decompiler<'a> {
             }
         }
 
-        return sites == 0;
+        return sites == 0 && unknown;
     }
 
     /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used
@@ -1249,7 +1253,8 @@ impl<'a> Decompiler<'a> {
         let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
         self.optimize(&module, false, &saved)?;
 
-        return Ok(refine(&module, llvm, &discovery, &self.abi));
+        let high_read = || self.abi.int_ret_high.is_some_and(|high| self.result_read(addr, high, false, &mut HashSet::new(), MAX_RESULT_DEPTH));
+        return Ok(refine(&module, llvm, &discovery, &self.abi, &high_read));
     }
 
     /// Stack frame of a function, decoded once for its discovery and its final lift
@@ -1774,6 +1779,11 @@ mod tests {
         // A parameter only used to compute the result is a parameter
         let code = decompiler.c_code(scale).unwrap();
         assert!(code.contains("int64_t rust_checks_scale(int64_t a1)") && code.contains("return a1 * 7 + 3;"), "{}", code);
+
+        // Option<u32> is returned in eax (some) and edx (the value), its caller reads both
+        assert!(decompiler.c_code(parse).unwrap().contains("__int128 rust_checks_parse("));
+        let start = decompiler.c_code(function(&analysis, "_start")).unwrap();
+        assert!(start.contains("__int128 v1 = rust_checks_parse(") && start.contains("(int64_t)(v1 >> 64)"), "{}", start);
     }
 
     #[test]

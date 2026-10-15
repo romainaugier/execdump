@@ -217,6 +217,9 @@ pub struct Abi {
     /// Integer and floating point arguments share their slots (Win64)
     pub positional: bool,
     pub int_ret: Reg,
+    /// High half of the integer results twice as wide as a register (rdx of __int128 and of the Rust slices, edx of
+    /// long long on x86)
+    pub int_ret_high: Option<Reg>,
     pub float_ret: Reg,
     pub stack_pointer: Reg,
     /// Offset of the first stack argument from the stack pointer at the function entry
@@ -239,6 +242,7 @@ impl Abi {
                 float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3"]),
                 positional: true,
                 int_ret: regs.reg("rax"),
+                int_ret_high: None,
                 float_ret: regs.reg("xmm0"),
                 stack_pointer: regs.reg("rsp"),
                 stack_args: 40,
@@ -251,6 +255,7 @@ impl Abi {
                 float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"]),
                 positional: false,
                 int_ret: regs.reg("rax"),
+                int_ret_high: Some(regs.reg("rdx")),
                 float_ret: regs.reg("xmm0"),
                 stack_pointer: regs.reg("rsp"),
                 stack_args: 8,
@@ -263,6 +268,7 @@ impl Abi {
                 float_args: Vec::new(),
                 positional: false,
                 int_ret: regs.reg("eax"),
+                int_ret_high: Some(regs.reg("edx")),
                 float_ret: regs.reg("xmm0"),
                 stack_pointer: regs.reg("esp"),
                 stack_args: 4,
@@ -275,6 +281,7 @@ impl Abi {
                 float_args: r(&["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"]),
                 positional: false,
                 int_ret: regs.reg("x0"),
+                int_ret_high: Some(regs.reg("x1")),
                 float_ret: regs.reg("v0"),
                 stack_pointer: regs.reg("sp"),
                 stack_args: 0,

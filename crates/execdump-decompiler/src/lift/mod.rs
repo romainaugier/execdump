@@ -49,6 +49,16 @@ use std::num::NonZeroU32;
 /// Name of the globals the discovery functions store their return registers to
 pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
+pub(crate) const RETURN_SINK_HIGH: &str = "__return_high";
+
+/// The register of the high half of a result twice as wide as the return register (rdx:rax)
+pub fn high_half(abi: &Abi, regs: &RegisterFile, value: &Value) -> Option<Reg> {
+    let (Loc::Reg(reg), LType::Int(bits)) = (value.loc, value.ty) else {
+        return None;
+    };
+
+    return abi.int_ret_high.filter(|_| reg == abi.int_ret && bits == 2 * regs.regs[reg].bits);
+}
 
 /// Values followed back to the constant stored as a format string (casts, registers)
 const MAX_STORED_TEXT_STEPS: usize = 8;
@@ -436,10 +446,11 @@ pub enum ResultUse {
     Unused,
 }
 
-/// Whether the instructions after a call read the register its result is in before writing it
-pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg) -> ResultUse {
+/// Whether the instructions after a call read the register its result is in before writing it, unsure is the
+/// answer when they cannot be followed (a branch, an instruction not decoded)
+pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg, unsure: ResultUse) -> ResultUse {
     let Some(mut block) = caller.block_containing(call) else {
-        return ResultUse::Read;
+        return unsure;
     };
 
     let mut start = call;
@@ -447,15 +458,20 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
     for _ in 0..4 {
         for insn in block.insns.iter().filter(|i| i.addr > start) {
             let Some(bytes) = env.program.read(insn.addr, insn.size as usize) else {
-                return ResultUse::Read;
+                return unsure;
             };
 
             let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr) else {
-                return ResultUse::Read;
+                return unsure;
             };
 
             if insn.flow == Flow::Ret {
                 return ResultUse::Returned;
+            }
+
+            // A call writes the other return registers (the high half of a result) when it does not read them
+            if matches!(insn.flow, Flow::Call(_) | Flow::IndirectCall) && reg != env.abi.int_ret && decoded.register_access(reg) != Some(true) {
+                return ResultUse::Unused;
             }
 
             match decoded.register_access(reg) {
@@ -465,13 +481,13 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
             }
 
             if insn.flow == Flow::IndirectJump {
-                return ResultUse::Read;
+                return unsure;
             }
         }
 
         // Calls to functions that do not return, or blocks that end the function
         if block.succs.is_empty() {
-            return if matches!(block.last().flow, Flow::Call(_)) { ResultUse::Unused } else { ResultUse::Read };
+            return if matches!(block.last().flow, Flow::Call(_)) { ResultUse::Unused } else { unsure };
         }
 
         match block.succs.as_slice() {
@@ -480,13 +496,13 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
                     block = next;
                     start = 0;
                 }
-                None => return ResultUse::Read,
+                None => return unsure,
             },
-            _ => return ResultUse::Read,
+            _ => return unsure,
         }
     }
 
-    return ResultUse::Read;
+    return unsure;
 }
 
 /// Address a register holds at a call, when the instruction that last writes it before the call computes
@@ -1150,7 +1166,9 @@ impl<'ctx> Lifter<'ctx, '_> {
     fn build_return(&mut self) -> Result<(), String> {
         if self.discovery {
             // The return registers go to sinks, the decompiler looks at what reaches them
-            for (sink, reg) in [(RETURN_SINK_INT, self.env.abi.int_ret), (RETURN_SINK_FLOAT, self.env.abi.float_ret)] {
+            let sinks = [(RETURN_SINK_INT, Some(self.env.abi.int_ret)), (RETURN_SINK_FLOAT, Some(self.env.abi.float_ret)), (RETURN_SINK_HIGH, self.env.abi.int_ret_high)];
+
+            for (sink, reg) in sinks.into_iter().filter_map(|(sink, reg)| Some((sink, reg?))) {
                 let value = self.read(self.env.regs.full(reg))?;
                 let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
                 llvm!(self.builder.build_store(global.as_pointer_value(), value));
@@ -1162,7 +1180,11 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         match self.sig.ret.clone() {
             Some(ret) => {
-                let value = self.read_value(&ret, 0)?;
+                let value = match high_half(self.env.abi, self.env.regs, &ret) {
+                    Some(high) => self.pair(high)?.into(),
+                    None => self.read_value(&ret, 0)?,
+                };
+
                 llvm!(self.builder.build_return(Some(&value)));
             }
             None => {
@@ -1171,6 +1193,18 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         return Ok(());
+    }
+
+    /// The return register and the register of its high half as one integer (rdx:rax)
+    fn pair(&self, high: Reg) -> Result<IntValue<'ctx>, String> {
+        let low = self.read_reg(self.env.abi.int_ret)?;
+        let bits = low.get_type().get_bit_width();
+        let wide = self.int(2 * bits);
+        let low = llvm!(self.builder.build_int_z_extend(low, wide, ""));
+        let high = llvm!(self.builder.build_int_z_extend(self.read_reg(high)?, wide, ""));
+        let high = llvm!(self.builder.build_left_shift(high, wide.const_int(bits as u64, false), ""));
+
+        return Ok(llvm!(self.builder.build_or(high, low, "")));
     }
 
     /*
@@ -1699,6 +1733,13 @@ impl<'ctx> Lifter<'ctx, '_> {
         if let (Some(ret), Some(value)) = (&sig.ret, call.try_as_basic_value().basic()) {
             if let Loc::Reg(reg) = ret.loc {
                 let bits = self.env.regs.regs[reg].bits;
+
+                if let Some(high) = high_half(self.env.abi, self.env.regs, ret) {
+                    let wide = value.into_int_value();
+                    let upper = llvm!(self.builder.build_right_shift(wide, wide.get_type().const_int(bits as u64, false), false, ""));
+                    self.write_reg(high, self.resize(upper, bits, false)?)?;
+                }
+
                 let value = self.to_int(value, bits)?;
                 self.write_reg(reg, value)?;
             }
