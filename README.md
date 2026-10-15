@@ -243,6 +243,8 @@ Analysis:
   - :heavy_check_mark: Call graph and cross references
   - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
   - :x: aarch64 jump tables
+  - :x: Rust fat-pointers for strings
+  - :x: Go binaries
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
