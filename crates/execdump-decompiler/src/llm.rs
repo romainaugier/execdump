@@ -15,6 +15,8 @@ use crate::types::CType;
 
 use crate::chat::Chat;
 
+use anyhow::{bail, Context, Result};
+
 use serde::Deserialize;
 
 use std::collections::{HashMap, HashSet};
@@ -111,68 +113,68 @@ pub struct Assistant {
 
 impl Assistant {
     /// Assistant improving the names and types of a function
-    pub fn new(config: &LlmConfig) -> Result<Self, String> {
+    pub fn new(config: &LlmConfig) -> Result<Self> {
         return Assistant::for_task(config, SYSTEM, "suggestions", schema());
     }
 
     /// Assistant rewriting the code of a function as clear C
-    pub fn rewrite(config: &LlmConfig) -> Result<Self, String> {
+    pub fn rewrite(config: &LlmConfig) -> Result<Self> {
         return Assistant::for_task(config, REWRITE_SYSTEM, "rewrite", rewrite_schema());
     }
 
     /// Asks the model to rewrite a function, with the prototypes of what it uses
-    pub fn rewrite_code(&self, code: &str, declarations: &[String]) -> Result<String, String> {
+    pub fn rewrite_code(&self, code: &str, declarations: &[String]) -> Result<String> {
         let prototypes = if declarations.is_empty() { String::new() } else { format!("Prototypes:\n\n```c\n{}\n```\n\n", declarations.join("\n")) };
         let text = self.ask(format!("{}Decompiled function:\n\n```c\n{}```", prototypes, code))?;
-        let start = text.find('{').ok_or("no JSON object in the answer")?;
-        let end = text.rfind('}').ok_or("no JSON object in the answer")?;
-        let rewrite: Rewrite = serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string())?;
+        let start = text.find('{').context("no JSON object in the answer")?;
+        let end = text.rfind('}').context("no JSON object in the answer")?;
+        let rewrite: Rewrite = serde_json::from_str(&text[start..=end])?;
 
         // Models wrap code in fences out of habit
         let code = rewrite.code.trim().trim_start_matches("```c").trim_start_matches("```").trim_end_matches("```").trim();
 
         if code.is_empty() {
-            return Err("empty code in the answer".to_string());
+            bail!("empty code in the answer");
         }
 
         return Ok(format!("{}\n", code));
     }
 
     /// Assistant organizing functions into source files
-    pub fn modules(config: &LlmConfig) -> Result<Self, String> {
+    pub fn modules(config: &LlmConfig) -> Result<Self> {
         return Assistant::for_task(config, MODULES_SYSTEM, "files", modules_schema());
     }
 
-    fn for_task(config: &LlmConfig, system: &str, name: &str, schema: serde_json::Value) -> Result<Self, String> {
+    fn for_task(config: &LlmConfig, system: &str, name: &str, schema: serde_json::Value) -> Result<Self> {
         if !config.is_enabled() {
-            return Err("the [llm] section of the configuration needs a backend and a model".to_string());
+            bail!("the [llm] section of the configuration needs a backend and a model");
         }
 
         // A rewrite is the whole function: more tokens than the suggestions
         let max_tokens = if name == "rewrite" { config.max_tokens.max(8192) } else { config.max_tokens };
         let chat = Chat::new(config, system, name, schema, max_tokens)?;
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 
         return Ok(Assistant { chat, runtime });
     }
 
-    fn ask(&self, prompt: String) -> Result<String, String> {
+    fn ask(&self, prompt: String) -> Result<String> {
         return self.runtime.block_on(self.chat.ask(&prompt));
     }
 
     /// Asks the model for suggestions on a function (its printed C code)
-    pub fn suggest(&self, code: &str) -> Result<Suggestions, String> {
+    pub fn suggest(&self, code: &str) -> Result<Suggestions> {
         return parse(&self.ask(format!("Decompiled function:\n\n```c\n{}```", code))?);
     }
 
     /// Asks the model to place functions in source files, the listing gives one function per line
     /// (name, current file, called functions)
-    pub fn suggest_modules(&self, listing: &str) -> Result<ModuleSuggestions, String> {
+    pub fn suggest_modules(&self, listing: &str) -> Result<ModuleSuggestions> {
         let text = self.ask(format!("Functions (name | current file | calls):\n\n{}", listing))?;
-        let start = text.find('{').ok_or("no JSON object in the answer")?;
-        let end = text.rfind('}').ok_or("no JSON object in the answer")?;
+        let start = text.find('{').context("no JSON object in the answer")?;
+        let end = text.rfind('}').context("no JSON object in the answer")?;
 
-        return serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string());
+        return Ok(serde_json::from_str(&text[start..=end])?);
     }
 }
 
@@ -265,11 +267,11 @@ pub struct ModuleSuggestions {
 }
 
 /// Suggestions from the answer of the model (the first JSON object of the text)
-pub fn parse(text: &str) -> Result<Suggestions, String> {
-    let start = text.find('{').ok_or("no JSON object in the answer")?;
-    let end = text.rfind('}').ok_or("no JSON object in the answer")?;
+pub fn parse(text: &str) -> Result<Suggestions> {
+    let start = text.find('{').context("no JSON object in the answer")?;
+    let end = text.rfind('}').context("no JSON object in the answer")?;
 
-    return serde_json::from_str(&text[start..=end]).map_err(|e| e.to_string());
+    return Ok(serde_json::from_str(&text[start..=end])?);
 }
 
 const KEYWORDS: &[&str] = &[

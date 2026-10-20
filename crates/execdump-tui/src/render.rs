@@ -94,6 +94,10 @@ impl App {
             text.push_str("  [+]");
         }
 
+        if let Some(debug) = self.debug_status() {
+            text.push_str(&format!("  {}", debug));
+        }
+
         return text;
     }
 
@@ -112,6 +116,7 @@ impl App {
             View::Source(_) => "hjkl move  Enter/gd go to  i/a/o insert  dd/dw/cw  u/U undo/redo  cn rename  ct retype  cs signature  ; comment  M move  L LLM  :w save",
             View::Review(_) => "j/k move  n/p proposal  a accept  r reject  Enter open the code  :w save",
             View::Table(_) => "j/k move  Enter open  / filter  Esc clear  ^o back  ? help",
+            View::Debug(_) => "j/k move  Enter select the frame / show the breakpoint  F5 continue  F7 step  F8 over  F4 finish  F6 interrupt  F9 break",
             _ => "j/k scroll  ^d/^u page  g/G top/bottom  / search  ^o back  ? help",
         }
     }

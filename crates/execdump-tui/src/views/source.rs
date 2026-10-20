@@ -11,9 +11,12 @@
  */
 
 use crate::commands::{Command, Motion};
+use crate::debug::Marks;
 use crate::theme::Theme;
 use crate::views::View;
 use crate::{App, OpenMode, VERTICAL_STEP};
+
+use anyhow::{anyhow, bail, Context, Result};
 
 use execdump_project::{Priority, Project};
 
@@ -650,10 +653,7 @@ impl SourceView {
         };
 
         let line = match project.shown(self.functions[block]) {
-            Some((rendered, _)) => {
-                let best = rendered.lines.iter().enumerate().filter_map(|(i, a)| a.filter(|&a| a <= addr).map(|a| (i, a))).max_by_key(|(i, a)| (*a, usize::MAX - i));
-                best.map_or(0, |(i, _)| i)
-            }
+            Some((rendered, _)) => line_of(&rendered.lines, addr).unwrap_or(0),
             None => 0,
         };
 
@@ -731,11 +731,11 @@ impl SourceView {
      * Editing
      */
 
-    pub fn start_insert(&mut self, project: &mut Project, at: InsertWhere) -> Result<(), String> {
-        let addr = self.function().ok_or("no function here")?;
+    pub fn start_insert(&mut self, project: &mut Project, at: InsertWhere) -> Result<()> {
+        let addr = self.function().context("no function here")?;
 
         if project.shown(addr).is_none() {
-            return Err("this function is not decompiled yet".to_string());
+            bail!("this function is not decompiled yet");
         }
 
         let mut lines = self.block_lines(project, self.cursor.block);
@@ -783,7 +783,7 @@ impl SourceView {
     }
 
     /// Key in insert mode, false when it leaves the insert mode
-    pub fn insert_key(&mut self, project: &mut Project, key: KeyEvent) -> Result<bool, String> {
+    pub fn insert_key(&mut self, project: &mut Project, key: KeyEvent) -> Result<bool> {
         let Some(insert) = self.insert.as_mut() else {
             return Ok(false);
         };
@@ -862,7 +862,7 @@ impl SourceView {
         return Ok(true);
     }
 
-    fn finish_insert(&mut self, project: &mut Project) -> Result<(), String> {
+    fn finish_insert(&mut self, project: &mut Project) -> Result<()> {
         let Some(insert) = self.insert.take() else {
             return Ok(());
         };
@@ -882,9 +882,9 @@ impl SourceView {
     }
 
     /// Replaces the text of the function under the cursor (undoable)
-    pub fn replace(&mut self, project: &mut Project, text: &str) -> Result<(), String> {
-        let addr = self.function().ok_or("no function here")?;
-        let (rendered, _) = project.shown(addr).ok_or("this function is not decompiled yet")?;
+    pub fn replace(&mut self, project: &mut Project, text: &str) -> Result<()> {
+        let addr = self.function().context("no function here")?;
+        let (rendered, _) = project.shown(addr).context("this function is not decompiled yet")?;
         let before = rendered.text.clone();
 
         project.set_edit(addr, text)?;
@@ -897,7 +897,7 @@ impl SourceView {
     }
 
     /// Deletes the line under the cursor
-    pub fn delete_line(&mut self, project: &mut Project) -> Result<(), String> {
+    pub fn delete_line(&mut self, project: &mut Project) -> Result<()> {
         let mut lines = self.block_lines(project, self.cursor.block);
 
         if self.cursor.line >= lines.len() {
@@ -913,11 +913,11 @@ impl SourceView {
 
     /// Deletes what a motion goes over from the cursor (lines, or characters of the line), then starts the
     /// insert mode there when it changes it
-    pub fn operate(&mut self, project: &mut Project, reach: Reach, count: usize, change: bool) -> Result<(), String> {
-        let addr = self.function().ok_or("no function here")?;
+    pub fn operate(&mut self, project: &mut Project, reach: Reach, count: usize, change: bool) -> Result<()> {
+        let addr = self.function().context("no function here")?;
 
         if project.shown(addr).is_none() {
-            return Err("this function is not decompiled yet".to_string());
+            bail!("this function is not decompiled yet");
         }
 
         let mut lines = self.block_lines(project, self.cursor.block);
@@ -976,7 +976,7 @@ impl SourceView {
     }
 
     /// Adds a comment line above the cursor
-    pub fn comment(&mut self, project: &mut Project, text: &str) -> Result<(), String> {
+    pub fn comment(&mut self, project: &mut Project, text: &str) -> Result<()> {
         let mut lines = self.block_lines(project, self.cursor.block);
         let line = self.cursor.line.min(lines.len().saturating_sub(1));
         let indent: String = lines.get(line).map_or(String::new(), |l| l.chars().take_while(|c| c.is_whitespace()).collect());
@@ -985,9 +985,9 @@ impl SourceView {
         return self.replace(project, &format!("{}\n", lines.join("\n")));
     }
 
-    pub fn undo(&mut self, project: &mut Project, redo: bool) -> Result<(), String> {
+    pub fn undo(&mut self, project: &mut Project, redo: bool) -> Result<()> {
         let (from, to) = if redo { (&mut self.redo, &mut self.undo) } else { (&mut self.undo, &mut self.redo) };
-        let (addr, text) = from.pop().ok_or(if redo { "Already at the newest change" } else { "Already at the oldest change" })?;
+        let (addr, text) = from.pop().with_context(|| if redo { "Already at the newest change" } else { "Already at the oldest change" })?;
 
         if let Some((rendered, _)) = project.shown(addr) {
             to.push((addr, rendered.text.clone()));
@@ -1006,20 +1006,20 @@ impl SourceView {
     }
 
     /// Resolves the conflict under the cursor: keeps the edited side, the decompiled one, or both
-    pub fn resolve(&mut self, project: &mut Project, keep_edited: bool, keep_decompiled: bool) -> Result<(), String> {
+    pub fn resolve(&mut self, project: &mut Project, keep_edited: bool, keep_decompiled: bool) -> Result<()> {
         let lines = self.block_lines(project, self.cursor.block);
 
         if lines.is_empty() {
-            return Err("no conflict under the cursor".to_string());
+            bail!("no conflict under the cursor");
         }
 
         let line = self.cursor.line.min(lines.len() - 1);
-        let start = (0..=line).rev().find(|&i| lines[i].starts_with("<<<<<<<")).ok_or("no conflict under the cursor")?;
-        let middle = (start..lines.len()).find(|&i| lines[i].starts_with("=======")).ok_or("unterminated conflict")?;
-        let end = (middle..lines.len()).find(|&i| lines[i].starts_with(">>>>>>>")).ok_or("unterminated conflict")?;
+        let start = (0..=line).rev().find(|&i| lines[i].starts_with("<<<<<<<")).context("no conflict under the cursor")?;
+        let middle = (start..lines.len()).find(|&i| lines[i].starts_with("=======")).context("unterminated conflict")?;
+        let end = (middle..lines.len()).find(|&i| lines[i].starts_with(">>>>>>>")).context("unterminated conflict")?;
 
         if line > end {
-            return Err("no conflict under the cursor".to_string());
+            bail!("no conflict under the cursor");
         }
 
         let mut out: Vec<String> = lines[..start].to_vec();
@@ -1074,7 +1074,7 @@ impl SourceView {
      * Rendering
      */
 
-    pub fn render(&mut self, project: &mut Project, theme: &Theme, height: usize, width: usize) -> Vec<Line<'static>> {
+    pub fn render(&mut self, project: &mut Project, theme: &Theme, height: usize, width: usize, marks: &Marks) -> Vec<Line<'static>> {
         self.height = height.max(1);
         self.refresh(project);
         self.follow();
@@ -1086,6 +1086,7 @@ impl SourceView {
         let mut lines = Vec::with_capacity(height);
         let mut pos = self.top;
         let mut visible = Vec::new();
+        let pc_function = marks.pc.and_then(|pc| project.analysis.function_containing(pc)).map(|f| f.addr);
 
         while lines.len() < height && pos.block < self.functions.len() {
             let addr = self.functions[pos.block];
@@ -1101,6 +1102,7 @@ impl SourceView {
             };
 
             let block_height = count + 1;
+            let pc_line = marks.pc.filter(|_| pc_function == Some(addr) && self.insert.is_none()).and_then(|pc| line_of(addrs, pc));
 
             // A block comment opened above the first line shown
             let mut comment = match (self.insert.as_ref().filter(|i| i.addr == addr), shown.as_ref()) {
@@ -1135,6 +1137,22 @@ impl SourceView {
                     Span::styled(format!(" {} ", flag), Style::default().fg(flag_color)),
                 ];
 
+                // The line the program is stopped at, the breakpoints
+                let stopped = pc_line == Some(line);
+
+                if !marks.is_empty() {
+                    let breakpoint = addrs.get(line).copied().flatten().is_some_and(|a| marks.breakpoint(a));
+
+                    let (mark, color) = match (stopped, breakpoint) {
+                        (true, true) => ("◉", theme.breakpoint),
+                        (true, false) => ("▶", theme.node_selected),
+                        (false, true) => ("●", theme.breakpoint),
+                        (false, false) => (" ", theme.dim),
+                    };
+
+                    spans.insert(0, Span::styled(mark, Style::default().fg(color)));
+                }
+
                 let is_cursor = pos.block == self.cursor.block && line == self.cursor.line;
 
                 match content {
@@ -1149,6 +1167,8 @@ impl SourceView {
 
                 if is_cursor {
                     rendered = rendered.style(Style::default().bg(theme.cursor_bg));
+                } else if stopped {
+                    rendered = rendered.style(Style::default().bg(theme.stopped_bg));
                 }
 
                 lines.push(rendered);
@@ -1164,6 +1184,12 @@ impl SourceView {
 
         return lines;
     }
+}
+
+/// Line of an address in the lines of a function: the last line with the highest address at or before it
+pub fn line_of(lines: &[Option<u64>], addr: u64) -> Option<usize> {
+    let best = lines.iter().enumerate().filter_map(|(i, a)| a.filter(|&a| a <= addr).map(|a| (i, a))).max_by_key(|(i, a)| (*a, usize::MAX - i));
+    return best.map(|(i, _)| i);
 }
 
 fn placeholder(project: &Project, addr: u64) -> String {
@@ -1366,7 +1392,7 @@ impl App {
             }
             Command::Conflict { forward } => {
                 let forward = *forward;
-                self.with_source(|source, project| if source.jump_conflict(project, forward) { Ok(()) } else { Err("No conflict in this module".to_string()) });
+                self.with_source(|source, project| if source.jump_conflict(project, forward) { Ok(()) } else { Err(anyhow!("No conflict in this module")) });
                 return true;
             }
             _ => {}
@@ -1428,9 +1454,9 @@ impl App {
     }
 }
 
-pub(crate) fn render(view: &mut SourceView, f: &mut Frame, theme: &Theme, area: Rect, projects: &mut [Option<Project>]) {
+pub(crate) fn render(view: &mut SourceView, f: &mut Frame, theme: &Theme, area: Rect, projects: &mut [Option<Project>], marks: &Marks) {
     let lines = match projects[view.program].as_mut() {
-        Some(project) => view.render(project, theme, area.height as usize, area.width as usize),
+        Some(project) => view.render(project, theme, area.height as usize, area.width as usize, marks),
         None => vec![Line::from("Analysis in progress...")],
     };
 

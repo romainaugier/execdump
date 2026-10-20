@@ -4,6 +4,8 @@
  * function or global, so that the history stays readable and merges well.
  */
 
+use anyhow::Result;
+
 use execdump_decompiler::notes::VarNote;
 
 use serde::{Deserialize, Serialize};
@@ -52,8 +54,8 @@ impl FunctionNotes {
         return toml::to_string(self).unwrap_or_default();
     }
 
-    pub fn from_toml(text: &str) -> Result<Self, String> {
-        return toml::from_str(text).map_err(|e| e.to_string());
+    pub fn from_toml(text: &str) -> Result<Self> {
+        return Ok(toml::from_str(text)?);
     }
 
     /// The notes of the decompiler for the variables

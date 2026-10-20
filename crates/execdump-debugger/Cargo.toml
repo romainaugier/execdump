@@ -1,0 +1,14 @@
+[package]
+name = "execdump-debugger"
+description = "Runs a program under gdb (GDB/MI) or lldb, its breakpoints, steps, registers and memory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+execdump-core.workspace = true

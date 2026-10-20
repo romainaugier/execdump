@@ -9,6 +9,8 @@ use crate::llm::{parse_type, valid_identifier};
 use crate::typedb::TypeDb;
 use crate::types::{CType, FuncType, Param, Prototype};
 
+use anyhow::{bail, Context, Result};
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// New name and type of a parameter or a local variable
@@ -70,13 +72,13 @@ pub fn apply_summary(function: &mut CFunction, summary: &str) {
 
 /// Prototype typed by the user: "int parse(const char *text, size_t size)", parameters of the known
 /// types only (builtins, typedefs and structs of the type database, with const and pointers)
-pub fn parse_prototype(text: &str, typedb: &TypeDb) -> Result<Prototype, String> {
+pub fn parse_prototype(text: &str, typedb: &TypeDb) -> Result<Prototype> {
     let text = text.trim().trim_end_matches(';').trim();
-    let open = text.find('(').ok_or("expected a prototype such as int f(char *s)")?;
-    let close = text.rfind(')').filter(|&c| c > open).ok_or("missing )")?;
+    let open = text.find('(').context("expected a prototype such as int f(char *s)")?;
+    let close = text.rfind(')').filter(|&c| c > open).context("missing )")?;
 
     let (ret, name) = split_declaration(&text[..open])?;
-    let ret = if ret == "void" { CType::Void } else { parse_type(&ret, typedb).ok_or_else(|| format!("unknown type {}", ret))? };
+    let ret = if ret == "void" { CType::Void } else { parse_type(&ret, typedb).with_context(|| format!("unknown type {}", ret))? };
 
     let mut params = Vec::new();
     let mut variadic = false;
@@ -95,7 +97,7 @@ pub fn parse_prototype(text: &str, typedb: &TypeDb) -> Result<Prototype, String>
                 _ => (param.to_string(), None),
             };
 
-            let ty = parse_type(&ty, typedb).ok_or_else(|| format!("parameter {}: unknown type {}", index + 1, ty))?;
+            let ty = parse_type(&ty, typedb).with_context(|| format!("parameter {}: unknown type {}", index + 1, ty))?;
             params.push(Param { name, ty });
         }
     }
@@ -104,14 +106,14 @@ pub fn parse_prototype(text: &str, typedb: &TypeDb) -> Result<Prototype, String>
 }
 
 /// "const char *name" to ("const char *", "name")
-fn split_declaration(text: &str) -> Result<(String, String), String> {
+fn split_declaration(text: &str) -> Result<(String, String)> {
     let text = text.trim();
     let start = text.rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
     let name = &text[start..];
     let ty = text[..start].trim();
 
     if ty.is_empty() || !valid_identifier(name) {
-        return Err(format!("expected a type and a name in \"{}\"", text));
+        bail!("expected a type and a name in \"{}\"", text);
     }
 
     return Ok((ty.to_string(), name.to_string()));

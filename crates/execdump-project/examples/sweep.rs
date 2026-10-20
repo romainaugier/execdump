@@ -16,6 +16,8 @@
  * the ones of an earlier report: the totals that changed and the functions that got worse.
  */
 
+use anyhow::{anyhow, Context, Result};
+
 use execdump_core::crash;
 use execdump_core::elf::parse_elf;
 use execdump_core::exec::{guess_exectype, Exec, ExecType};
@@ -105,12 +107,12 @@ fn main() {
         let report = match crash::catch(|| sweep(path, workers, compiler.as_deref())) {
             Ok(Ok(report)) => report,
             Ok(Err(error)) => {
-                println!("{}: {}", path.display(), error);
+                println!("{}: {:#}", path.display(), error);
                 continue;
             }
             Err(panic) => {
                 println!("{}: {}", path.display(), panic);
-                total_report.panics.entry(panic).or_insert((0, path.display().to_string())).0 += 1;
+                total_report.panics.entry(panic.to_string()).or_insert((0, path.display().to_string())).0 += 1;
                 continue;
             }
         };
@@ -160,18 +162,18 @@ fn main() {
     }
 }
 
-fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Report, String> {
-    let exec = match guess_exectype(path).map_err(|e| e.to_string())? {
-        ExecType::PE => Exec::PE(parse_pe(path).map_err(|e| e.to_string())?),
-        ExecType::ELF => Exec::ELF(parse_elf(path).map_err(|e| e.to_string())?),
-        ExecType::MachO => Exec::MachO(parse_macho(path).map_err(|e| e.to_string())?),
+fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Report> {
+    let exec = match guess_exectype(path)? {
+        ExecType::PE => Exec::PE(parse_pe(path)?),
+        ExecType::ELF => Exec::ELF(parse_elf(path)?),
+        ExecType::MachO => Exec::MachO(parse_macho(path)?),
     };
 
     let report = Mutex::new(Report::default());
     let binary = path.display().to_string();
 
     for program in programs_from_exec(&exec) {
-        let analysis = analyze(&program, None).map_err(|e| e.to_string())?;
+        let analysis = analyze(&program, None)?;
         let functions: Vec<u64> = analysis.functions.keys().copied().collect();
         let next = AtomicUsize::new(0);
         let trace = std::env::var_os("SWEEP_TRACE").is_some();
@@ -202,11 +204,11 @@ fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Repor
                         }
 
                         let result = crash::catch(|| {
-                            let decompiler = decompiler.as_ref().map_err(|e| e.clone())?;
+                            let decompiler = decompiler.as_ref().map_err(|e| anyhow!("{:#}", e))?;
                             let function = decompiler.c_function(addr)?;
                             let rendered = render_function(decompiler, function.clone(), &FunctionNotes::default(), None);
                             let quality = function.quality(rendered.line_count());
-                            Ok::<_, String>((rendered, quality, function.globals))
+                            Ok::<_, anyhow::Error>((rendered, quality, function.globals))
                         });
 
                         let mut report = report.lock().unwrap();
@@ -222,11 +224,11 @@ fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Repor
                             }
                             Ok(Err(error)) => {
                                 report.failed += 1;
-                                report.errors.entry(error_kind(&error)).or_insert((0, format!("{} {:#x}", name, addr))).0 += 1;
+                                report.errors.entry(error_kind(&format!("{:#}", error))).or_insert((0, format!("{} {:#x}", name, addr))).0 += 1;
                             }
                             Err(panic) => {
                                 report.failed += 1;
-                                report.panics.entry(panic).or_insert((0, format!("{} {:#x}", name, addr))).0 += 1;
+                                report.panics.entry(panic.to_string()).or_insert((0, format!("{} {:#x}", name, addr))).0 += 1;
                                 drop(report);
                                 decompiler = Decompiler::new(&program, &analysis).map(|d| d.with_shared_signatures(shared.clone()));
                             }
@@ -304,7 +306,7 @@ type Globals = Vec<(String, Option<CType>)>;
 
 /// Whether the C of each function compiles. The globals of a function are declared with the type it
 /// accesses them with (as bytes when its accesses disagree), under a name of their own for each function.
-fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rendered, Globals)]) -> Result<Vec<bool>, String> {
+fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rendered, Globals)]) -> Result<Vec<bool>> {
     let mut source = format!("{}{}\n{}\n", BASE_TYPES, types, HELPERS);
     let defined: BTreeSet<String> = texts.iter().filter_map(|(_, r, _)| defined_name(&r.meta.signature)).collect();
 
@@ -370,10 +372,10 @@ fn compile(compiler: &str, types: &str, pointer_size: u8, texts: &[(usize, Rende
         command.arg("-m32");
     }
 
-    let mut child = command.arg("-").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| format!("{}: {}", compiler, e))?;
+    let mut child = command.arg("-").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().with_context(|| compiler.to_string())?;
     let mut stdin = child.stdin.take().unwrap();
     let writer = std::thread::spawn(move || stdin.write_all(source.as_bytes()));
-    let output = child.wait_with_output().map_err(|e| format!("{}: {}", compiler, e))?;
+    let output = child.wait_with_output().with_context(|| compiler.to_string())?;
     let _ = writer.join();
 
     let mut errors: Vec<usize> = Vec::new();

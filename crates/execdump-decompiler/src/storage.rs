@@ -7,10 +7,16 @@
  * stack canary) or a constant (30-bit signed). A range is 12 bytes: the start and the end of the
  * addresses, as offsets from the start of the function, and the location. The ranges of a variable are
  * sorted and do not overlap, the location at an address is a binary search.
+ *
+ * The offset of the stack pointer from its value at the entry is kept the same way (ranges of stack
+ * locations), with the shape of each variable (its size, an integer, a float, a pointer to text): a debugger
+ * finds and shows the values of the variables of a running function from them.
  */
 
 use crate::lift::regs::RegisterFile;
 use crate::lift::SlotWrite;
+use crate::typedb::TypeDb;
+use crate::types::CType;
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -139,7 +145,7 @@ pub struct VarNote {
 }
 
 /// Storage of the variables of a function: the notes the C backend reads, then the ranges of each variable
-/// made from them, and the slots of the stack canary
+/// made from them, the slots of the stack canary, and where the stack pointer is
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Storage {
     pub notes: Vec<VarNote>,
@@ -147,6 +153,92 @@ pub struct Storage {
     pub frame_vars: Vec<(usize, Loc)>,
     pub vars: Vec<(usize, Vec<Range>)>,
     pub canaries: Vec<Loc>,
+    /// Offset of the stack pointer from its value at the entry over the addresses of the function (stack
+    /// locations): the stack slots of the variables are found from the stack pointer of a running function
+    pub frame: Vec<Range>,
+}
+
+/// How the debugger reads the value of a variable and shows it
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shape {
+    Int { bytes: u8, signed: bool },
+    Float { bytes: u8 },
+    Bool,
+    /// A pointer, to text (char *) or to anything
+    Pointer { text: bool },
+    /// An array of chars (a buffer of text), its size
+    Text(u32),
+    /// Aggregates, arrays and the unknown types: their bytes
+    Bytes(u32),
+    #[default]
+    Unknown,
+}
+
+impl Shape {
+    pub fn of(ty: &CType, typedb: &TypeDb) -> Shape {
+        let ty = typedb.resolve(ty).unqualified();
+        let size = typedb.size_of(ty);
+
+        return match ty {
+            CType::Bool => Shape::Bool,
+            CType::Char => Shape::Int { bytes: 1, signed: true },
+            CType::Int { bits, signed } => Shape::Int { bytes: (*bits / 8).max(1) as u8, signed: *signed },
+            CType::Enum(_) => Shape::Int { bytes: size.unwrap_or(4) as u8, signed: true },
+            CType::Float { bits } => Shape::Float { bytes: (*bits / 8) as u8 },
+            CType::Pointer(to) => Shape::Pointer { text: matches!(typedb.resolve(to).unqualified(), CType::Char) },
+            CType::Array(element, Some(n)) if matches!(typedb.resolve(element).unqualified(), CType::Char) => Shape::Text((*n).min(u32::MAX as u64) as u32),
+            CType::Unknown(bits) if *bits > 0 && *bits <= 64 => Shape::Int { bytes: (*bits / 8) as u8, signed: false },
+            _ => size.filter(|&s| s > 0).map_or(Shape::Unknown, |s| Shape::Bytes(s.min(u32::MAX as u64) as u32)),
+        };
+    }
+
+    /// i4, u8, f8, b, p, s, t64, x16, ?
+    pub fn encode(self) -> String {
+        return match self {
+            Shape::Int { bytes, signed } => format!("{}{}", if signed { 'i' } else { 'u' }, bytes),
+            Shape::Float { bytes } => format!("f{}", bytes),
+            Shape::Bool => "b".to_string(),
+            Shape::Pointer { text } => if text { "s" } else { "p" }.to_string(),
+            Shape::Text(n) => format!("t{}", n),
+            Shape::Bytes(n) => format!("x{}", n),
+            Shape::Unknown => "?".to_string(),
+        };
+    }
+
+    pub fn decode(text: &str) -> Shape {
+        let number = |t: &str| t.get(1..).and_then(|n| n.parse().ok());
+
+        return match text.chars().next() {
+            Some('i') => number(text).map_or(Shape::Unknown, |bytes| Shape::Int { bytes, signed: true }),
+            Some('u') => number(text).map_or(Shape::Unknown, |bytes| Shape::Int { bytes, signed: false }),
+            Some('f') => number(text).map_or(Shape::Unknown, |bytes| Shape::Float { bytes }),
+            Some('b') => Shape::Bool,
+            Some('p') => Shape::Pointer { text: false },
+            Some('s') => Shape::Pointer { text: true },
+            Some('t') => text.get(1..).and_then(|n| n.parse().ok()).map_or(Shape::Unknown, Shape::Text),
+            Some('x') => text.get(1..).and_then(|n| n.parse().ok()).map_or(Shape::Unknown, Shape::Bytes),
+            _ => Shape::Unknown,
+        };
+    }
+
+    /// Bytes of the value (pointers have the size of a pointer of the program)
+    pub fn size(self, pointer_size: u8) -> usize {
+        return match self {
+            Shape::Int { bytes, .. } | Shape::Float { bytes } => bytes as usize,
+            Shape::Bool => 1,
+            Shape::Pointer { .. } => pointer_size as usize,
+            Shape::Text(n) | Shape::Bytes(n) => n as usize,
+            Shape::Unknown => pointer_size as usize,
+        };
+    }
+}
+
+/// Offset of the stack pointer from its value at the entry, at an offset of its function
+pub fn stack_offset_at(frame: &[Range], offset: u32) -> Option<i64> {
+    return match location_at(frame, offset)?.place() {
+        Place::Stack { offset, .. } => Some(offset),
+        _ => None,
+    };
 }
 
 /// Addresses of a function (offsets from its start) where a variable is in a location
@@ -371,6 +463,15 @@ mod tests {
         assert_eq!(location_at(&ranges, 4), None);
         assert_eq!(location_at(&ranges, 11), Some(Loc(2)));
         assert_eq!(decode(&encode(&ranges)), ranges);
+
+        let frame = vec![Range { start: 0, end: 1, loc: Loc::stack(0).unwrap() }, Range { start: 1, end: 9, loc: Loc::stack(-0x48).unwrap() }];
+        assert_eq!(stack_offset_at(&frame, 0), Some(0));
+        assert_eq!(stack_offset_at(&frame, 4), Some(-0x48));
+        assert_eq!(stack_offset_at(&frame, 9), None);
+
+        for shape in [Shape::Int { bytes: 2, signed: false }, Shape::Float { bytes: 8 }, Shape::Bool, Shape::Pointer { text: true }, Shape::Pointer { text: false }, Shape::Text(64), Shape::Bytes(24), Shape::Unknown] {
+            assert_eq!(Shape::decode(&shape.encode()), shape);
+        }
     }
 
     #[test]

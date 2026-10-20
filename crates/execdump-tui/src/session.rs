@@ -80,7 +80,8 @@ impl App {
                 Resource::Table { program: self.current_program(), table: if name == "memory" { "memmap".to_string() } else { name } }
             }
             View::Review(review) => Resource::Review { program: review.program },
-            View::Welcome | View::Dump(_) => Resource::Welcome,
+            // The debugger is not restored: its program is not running
+            View::Welcome | View::Dump(_) | View::Debug(_) => Resource::Welcome,
         };
     }
 

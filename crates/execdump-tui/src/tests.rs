@@ -484,3 +484,159 @@ fn search_operators_and_completion() {
 
     let _ = std::fs::remove_dir_all(&location);
 }
+
+/// Waits for the program under the debugger to stop (or to end)
+fn wait_stopped(app: &mut App) {
+    for _ in 0..6000 {
+        app.poll_debugger();
+        app.poll_projects();
+
+        if app.debugger.as_ref().is_some_and(|d| matches!(d.state, debug::DebugState::Stopped | debug::DebugState::Exited(_) | debug::DebugState::Ended)) {
+            return;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    panic!("The program did not stop");
+}
+
+/// Address in the binary the program is stopped at (in the selected frame)
+fn stopped_at(app: &App) -> Option<u64> {
+    let debugger = app.debugger.as_ref()?;
+    return debugger.program_addr(&app.programs[0], debugger.frame_pc()?);
+}
+
+fn screen(terminal: &Terminal<TestBackend>) -> String {
+    let buffer = terminal.backend().buffer();
+    return buffer.content().chunks(buffer.area.width as usize).map(|row| row.iter().map(|c| c.symbol()).collect::<String>()).collect::<Vec<_>>().join("\n");
+}
+
+#[test]
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn debugging() {
+    if execdump_debugger::find(None, None).is_none() {
+        eprintln!("no debugger installed, skipped");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("execdump-tui-debug-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let sources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/src");
+    let binary = dir.join("debuggee");
+    // In the order of the sources: the static functions of debuggee_util.c are around its other functions
+    let built = std::process::Command::new("cc").args(["-O1", "-fno-stack-protector", "-fno-inline", "-fno-toplevel-reorder"]).arg(sources.join("debuggee.c")).arg(sources.join("debuggee_util.c")).arg("-o").arg(&binary).status();
+
+    if !built.is_ok_and(|s| s.success()) {
+        eprintln!("no C compiler, skipped");
+        return;
+    }
+
+    let mut app = App::new(Exec::ELF(parse_elf(&binary).unwrap()), binary.clone(), KeyBindings::default(), Some(dir.join("project")), 2);
+
+    for _ in 0..1000 {
+        app.poll_analysis();
+        app.poll_projects();
+
+        if app.projects[0].is_some() {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    wait_decompiled(&mut app);
+
+    let function = |app: &App, name: &str| app.analyses[0].as_ref().unwrap().function_by_name(name).unwrap().addr;
+    let (main, square_sum, depth) = (function(&app, "main"), function(&app, "square_sum"), function(&app, "depth"));
+    let module = |app: &App, addr: u64| app.projects[0].as_ref().unwrap().module_of(addr).map(|m| m.to_string());
+    assert_ne!(module(&app, main), module(&app, square_sum), "the two source files are two modules");
+
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+
+    // Without a breakpoint the program stops at main, the C code of main and the debug view are shown
+    app.run_command("debug");
+    wait_stopped(&mut app);
+    assert_eq!(stopped_at(&app), Some(main));
+    assert!(app.workspace.group_ids().len() >= 2);
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    let shown = screen(&terminal);
+    assert!(shown.contains('▶') && shown.contains("Call stack") && shown.contains("Registers"), "{}", shown);
+
+    // Steps into the calls, until square_sum: the code of its module replaces the one of main
+    for _ in 0..20 {
+        if stopped_at(&app).is_some_and(|pc| app.analyses[0].as_ref().unwrap().function_containing(pc).is_some_and(|f| f.addr == square_sum)) {
+            break;
+        }
+
+        app.run_command("step");
+        wait_stopped(&mut app);
+    }
+
+    assert_eq!(stopped_at(&app), Some(square_sum));
+
+    let sources_shown: Vec<String> = app.workspace.group_ids().into_iter().filter_map(|g| match &app.workspace.group(g).tabs[app.workspace.group(g).active].view {
+        View::Source(source) => Some(source.module.clone()),
+        _ => None,
+    }).collect();
+
+    assert!(sources_shown.contains(&module(&app, square_sum).unwrap()), "{:?}", sources_shown);
+
+    // Its argument: argc + 3
+    let variables = app.variables();
+    assert!(variables.iter().any(|v| v.value.as_deref() == Some("4")), "{:?}", variables.iter().map(|v| (&v.name, &v.value, &v.location)).collect::<Vec<_>>());
+
+    // Over the lines of square_sum, then out of it, back in main
+    app.run_command("n");
+    wait_stopped(&mut app);
+    assert!(stopped_at(&app).is_some_and(|pc| pc > square_sum && app.analyses[0].as_ref().unwrap().function_containing(pc).is_some_and(|f| f.addr == square_sum)));
+
+    app.run_command("finish");
+    wait_stopped(&mut app);
+    assert!(stopped_at(&app).is_some_and(|pc| app.analyses[0].as_ref().unwrap().function_containing(pc).is_some_and(|f| f.addr == main)));
+
+    // A breakpoint in a recursion: the second stop is one frame deeper, the caller frame can be selected
+    app.run_command("break depth");
+    assert!(app.breakpoints.contains(&(0, depth)));
+    app.run_command("continue");
+    wait_stopped(&mut app);
+    assert_eq!(stopped_at(&app), Some(depth));
+
+    app.run_command("continue");
+    wait_stopped(&mut app);
+    let frames = app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frames.clone();
+    assert!(frames.len() >= 3 && app.frame_name(frames[1].pc, &frames[1].function).starts_with("depth+"), "{:?}", frames);
+
+    app.run_command("frame 1");
+    wait_stopped(&mut app);
+    assert_eq!(app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frame, 1);
+    assert!(stopped_at(&app).is_some_and(|pc| pc > depth));
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+    // To the end: the output of the program in the debug view
+    app.run_command("break depth");
+    app.run_command("continue");
+    wait_stopped(&mut app);
+    assert!(matches!(app.debugger.as_ref().unwrap().state, debug::DebugState::Exited(Some(0))));
+
+    for _ in 0..100 {
+        app.poll_debugger();
+
+        if !app.debugger.as_ref().unwrap().output_tail.is_empty() {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert_eq!(app.debugger.as_ref().unwrap().output_tail, ["hello world", "30 3"]);
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert!(screen(&terminal).contains("hello world"));
+
+    app.run_command("kill");
+    assert!(app.debugger.is_none());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -12,6 +12,8 @@ use crate::analysis::function::{recover_function, CallTarget, Function, Function
 use crate::analysis::insn::{Decoder, Flow, Instruction};
 use execdump_core::program::{Program, SymbolKind};
 
+use anyhow::Result;
+
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -37,11 +39,18 @@ fn function_name(program: &Program, addr: u64) -> String {
 }
 
 /// Runs the whole analysis, progress is incremented for each function recovered
-pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Analysis, Box<dyn std::error::Error>> {
+pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Analysis> {
     let decoder = Decoder::new(program.architecture())?;
 
     let mut analysis = Analysis::default();
     analysis.strings = strings::extract_strings(program);
+
+    // The strings of the (pointer, length) pairs are exact, they replace the text read up to a NUL
+    for (&addr, &len) in program.sized_strings.iter() {
+        if let Some(bytes) = program.sized_string(addr, len) {
+            analysis.strings.insert(addr, String::from_utf8_lossy(bytes).to_string());
+        }
+    }
 
     let mut known_starts: HashSet<u64> = program.seeds.iter().map(|s| s.addr).collect();
     known_starts.extend(program.symbols.values().filter(|s| s.kind == SymbolKind::Import && program.is_executable(s.addr)).map(|s| s.addr));

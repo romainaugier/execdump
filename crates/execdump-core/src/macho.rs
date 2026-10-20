@@ -3,6 +3,8 @@ use crate::disasm::{Architecture, disasm_and_format_code};
 use crate::dump::{Dump, DumpRawData};
 use crate::reader::Reader;
 
+use anyhow::{bail, Result};
+
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, FromRepr, IntoStaticStr};
 
@@ -179,7 +181,7 @@ pub struct MachOHeader {
 }
 
 impl MachOHeader {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.magic = reader.read_u32()?;
@@ -235,7 +237,7 @@ pub struct FatArch {
 }
 
 impl FatArch {
-    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self> {
         let mut arch = Self::default();
 
         arch.cputype = reader.read_u32()?;
@@ -277,7 +279,7 @@ pub struct FatHeader {
 }
 
 impl FatHeader {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.magic = reader.read_u32()?;
@@ -450,7 +452,7 @@ pub struct MachOSectionHeader {
 }
 
 impl MachOSectionHeader {
-    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self> {
         let mut header = Self::default();
 
         header.sectname = read_c_string(&reader.read_n::<16>()?, 0);
@@ -568,7 +570,7 @@ pub struct SegmentCommand {
 }
 
 impl SegmentCommand {
-    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self> {
         let mut segment = Self::default();
 
         segment.segname = read_c_string(&reader.read_n::<16>()?, 0);
@@ -670,14 +672,14 @@ pub struct LoadCommand {
 }
 
 impl LoadCommand {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let start = reader.position();
 
         let cmd = reader.read_u32()?;
         let cmdsize = reader.read_u32()?;
 
         if cmdsize < 8 {
-            return Err(format!("Invalid load command size {:#x} at offset {:#x}", cmdsize, start).into());
+            bail!("Invalid load command size {:#x} at offset {:#x}", cmdsize, start);
         }
 
         let command_bytes = {
@@ -883,7 +885,7 @@ pub struct MachOSymbol {
 }
 
 impl MachOSymbol {
-    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, is_64: bool) -> Result<Self> {
         let mut symbol = Self::default();
 
         symbol.n_strx = reader.read_u32()?;
@@ -958,15 +960,15 @@ pub struct MachOBinary {
 }
 
 impl MachOBinary {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < 4 {
-            return Err("File is too small to be a Mach-O file".into());
+            bail!("File is too small to be a Mach-O file");
         }
 
         let mut reader = match u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) {
             MH_MAGIC | MH_MAGIC_64 => Reader::new_le(bytes),
             MH_CIGAM | MH_CIGAM_64 => Reader::new_be(bytes),
-            _ => return Err("File magic number does not match Mach-O magic number".into()),
+            _ => bail!("File magic number does not match Mach-O magic number"),
         };
 
         let mut binary = Self::default();
@@ -986,7 +988,7 @@ impl MachOBinary {
         return Ok(binary);
     }
 
-    fn parse_sections(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_sections(&mut self, reader: &mut Reader) -> Result<()> {
         for command in self.load_commands.iter() {
             if let LoadCommandData::Segment(segment) = &command.data {
                 for header in segment.sections.iter() {
@@ -1005,7 +1007,7 @@ impl MachOBinary {
         return Ok(());
     }
 
-    fn parse_symbols(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_symbols(&mut self, reader: &mut Reader) -> Result<()> {
         let symtab = self.load_commands.iter().find_map(|c| match c.data {
             LoadCommandData::Symtab { symoff, nsyms, stroff, strsize } => Some((symoff, nsyms, stroff, strsize)),
             _ => None,
@@ -1029,7 +1031,7 @@ impl MachOBinary {
         return Ok(());
     }
 
-    fn parse_indirect_symbols(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_indirect_symbols(&mut self, reader: &mut Reader) -> Result<()> {
         let dysymtab = self.load_commands.iter().find_map(|c| match c.data {
             LoadCommandData::Dysymtab(fields) => Some((fields[12], fields[13])),
             _ => None,
@@ -1052,7 +1054,7 @@ impl MachOBinary {
         return Ok(());
     }
 
-    fn parse_function_starts(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_function_starts(&mut self, reader: &mut Reader) -> Result<()> {
         let function_starts = self.load_commands.iter().find_map(|c| match c.data {
             LoadCommandData::LinkeditData { dataoff, datasize } if c.cmd == LoadCommandType::LcFunctionStarts as u32 => Some((dataoff, datasize)),
             _ => None,
@@ -1176,15 +1178,15 @@ pub struct MachO {
     pub binaries: Vec<MachOBinary>,
 }
 
-pub fn parse_macho(file_path: &PathBuf) -> Result<MachO, Box<dyn std::error::Error>> {
+pub fn parse_macho(file_path: &PathBuf) -> Result<MachO> {
     if !file_path.exists() {
-        return Err("File does not exist".into());
+        bail!("File does not exist");
     }
 
     let file_bytes = std::fs::read(file_path)?;
 
     if !is_macho(&file_bytes) {
-        return Err("File magic number does not match Mach-O magic number".into());
+        bail!("File magic number does not match Mach-O magic number");
     }
 
     let mut macho = MachO::default();
@@ -1199,7 +1201,7 @@ pub fn parse_macho(file_path: &PathBuf) -> Result<MachO, Box<dyn std::error::Err
             let end = start.checked_add(arch.size as usize).filter(|&e| e <= file_bytes.len());
 
             let Some(end) = end else {
-                return Err(format!("Fat arch {} is out of the file bounds", cpu_name(arch.cputype, arch.cpusubtype)).into());
+                bail!("Fat arch {} is out of the file bounds", cpu_name(arch.cputype, arch.cpusubtype));
             };
 
             macho.binaries.push(MachOBinary::from_bytes(&file_bytes[start..end])?);

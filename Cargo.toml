@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/execdump-core", "crates/execdump-decompiler", "crates/execdump-project", "crates/execdump-tui"]
+members = ["crates/execdump-core", "crates/execdump-debugger", "crates/execdump-decompiler", "crates/execdump-project", "crates/execdump-tui"]
 
 [workspace.package]
 version = "0.1.0"
@@ -7,9 +7,11 @@ edition = "2024"
 
 [workspace.dependencies]
 execdump-core = { path = "crates/execdump-core" }
+execdump-debugger = { path = "crates/execdump-debugger" }
 execdump-decompiler = { path = "crates/execdump-decompiler" }
 execdump-project = { path = "crates/execdump-project" }
 execdump-tui = { path = "crates/execdump-tui" }
+anyhow = "1.0"
 capstone = "0.14.0"
 chrono = "0.4.42"
 clap = { version = "4.5.54", features = ["derive"] }
@@ -31,6 +33,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 execdump-core.workspace = true
 execdump-decompiler.workspace = true
 execdump-project.workspace = true

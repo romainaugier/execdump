@@ -49,9 +49,9 @@ impl<'a> LEReader<'a> {
     #[inline]
     pub fn read_exact(&mut self, v: &mut [u8]) -> ReaderResult<()> {
         let n = v.len();
+        let bytes = self.data.get(self.position..self.position + n).ok_or(ReaderError::UnexpectedEof)?;
 
-        v.copy_from_slice(&self.data[self.position..self.position + n]);
-
+        v.copy_from_slice(bytes);
         self.position += n;
 
         return Ok(());
@@ -205,9 +205,9 @@ impl<'a> BEReader<'a> {
     #[inline]
     pub fn read_exact(&mut self, v: &mut [u8]) -> ReaderResult<()> {
         let n = v.len();
+        let bytes = self.data.get(self.position..self.position + n).ok_or(ReaderError::UnexpectedEof)?;
 
-        v.copy_from_slice(&self.data[self.position..self.position + n]);
-
+        v.copy_from_slice(bytes);
         self.position += n;
 
         return Ok(());

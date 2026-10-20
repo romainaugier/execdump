@@ -5,6 +5,8 @@ pub mod symbol;
 
 use symbol::Symbol;
 
+use anyhow::{bail, Context, Result};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManglingScheme {
     /// GCC and Clang on Linux, macOS (with an extra leading underscore), BSDs and MinGW
@@ -62,7 +64,7 @@ pub fn detect_mangling_scheme(symbol: &str) -> ManglingScheme {
     return ManglingScheme::Unknown;
 }
 
-pub fn demangle(symbol: &str) -> Result<String, String> {
+pub fn demangle(symbol: &str) -> Result<String> {
     let (prefix, unprefixed) = strip_import_prefix(symbol);
     let (name, version) = split_symbol_version(unprefixed);
 
@@ -71,12 +73,12 @@ pub fn demangle(symbol: &str) -> Result<String, String> {
         ManglingScheme::Msvc => msvc::demangle(name),
         ManglingScheme::RustLegacy => rust::demangle(name),
         ManglingScheme::RustV0 => rust::demangle_v0(name),
-        ManglingScheme::Unknown => return Err(format!("Unknown or unmangled symbol: {}", symbol)),
+        ManglingScheme::Unknown => bail!("Unknown or unmangled symbol: {}", symbol),
     };
 
     return demangled
         .map(|d| format!("{}{}{}", prefix, d, version))
-        .ok_or_else(|| format!("Invalid mangled symbol: {}", symbol));
+        .with_context(|| format!("Invalid mangled symbol: {}", symbol));
 }
 
 /// Typed description of a mangled symbol (import prefixes and ELF symbol versions are ignored)

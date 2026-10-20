@@ -59,6 +59,8 @@ pub struct Context<'a> {
     pub callees: HashMap<String, Prototype>,
     /// Structs of those prototypes, recovered by other functions
     pub imported: BTreeMap<String, Aggregate>,
+    /// Strings the function passes or returns with their length (address -> length)
+    pub sized: RefCell<HashMap<u64, u64>>,
 }
 
 impl Context<'_> {
@@ -94,6 +96,10 @@ impl Context<'_> {
     pub fn string(&self, name: &str) -> Option<String> {
         let addr = *self.globals.get(name)?;
 
+        if let Some(text) = self.sized_text(addr) {
+            return Some(text);
+        }
+
         if self.program.region_at(addr).is_some_and(|r| r.perms.write) {
             return None;
         }
@@ -109,6 +115,10 @@ impl Context<'_> {
             return None;
         }
 
+        if let Some(text) = self.sized_text(addr) {
+            return Some(text);
+        }
+
         let region = self.program.region_at(addr).filter(|r| !r.perms.write && !r.perms.exec && !r.data.is_empty())?;
 
         if !pointer && addr != region.vaddr && self.program.read(addr - 1, 1) != Some(&[0][..]) {
@@ -116,6 +126,137 @@ impl Context<'_> {
         }
 
         return text_at(self.program, addr);
+    }
+
+    /// Text of a string whose length is known (a pointer and a length, the strings of Rust and Go are not NUL
+    /// terminated: they are the start of the strings laid out after them)
+    fn sized_text(&self, addr: u64) -> Option<String> {
+        let len = self.sized.borrow().get(&addr).copied().or_else(|| self.program.sized_strings.get(&addr).copied())?;
+        return self.program.sized_string(addr, len).map(crate::lift::literal);
+    }
+
+    /// Address a constant value is: an integer, a global, through casts and constant offsets
+    fn constant_address(&self, f: &ir::Func, id: ir::ValueId) -> Option<u64> {
+        return match &f.values[id].kind {
+            ir::ValueKind::Int(value) => u64::try_from(*value).ok(),
+            ir::ValueKind::Global(name) => self.globals.get(name).copied(),
+            ir::ValueKind::Inst { op: ir::Op::PtrToInt | ir::Op::IntToPtr | ir::Op::BitCast | ir::Op::ZExt, operands, .. } => self.constant_address(f, operands[0]),
+            ir::ValueKind::Inst { op: ir::Op::Gep, operands, scales, .. } => {
+                let base = self.constant_address(f, operands[0])?;
+                let offset = operands[1..].iter().zip(scales.iter()).try_fold(0i128, |sum, (&index, &scale)| Some(sum + f.int(index)? * scale as i128))?;
+                base.checked_add_signed(i64::try_from(offset).ok()?)
+            }
+            _ => None,
+        };
+    }
+
+    /// The (address, length) pairs a pointer and a length are: two constants, the same arms of two selects on one
+    /// condition, the values two phis of one block get from the same block
+    /// The length is shifted left by shift bits (the high half of an i128)
+    fn sized_pairs(&self, f: &ir::Func, pointer: ir::ValueId, length: ir::ValueId, shift: u32, depth: usize, out: &mut Vec<(u64, u64)>) {
+        let low = (1u128 << shift) - 1;
+        let len = f.int(length).filter(|&l| l >= 0 && l as u128 & low == 0).and_then(|l| u64::try_from(l as u128 >> shift).ok());
+
+        if let (Some(addr), Some(len)) = (self.constant_address(f, pointer), len) {
+            out.push((addr, len));
+            return;
+        }
+
+        if depth == 0 {
+            return;
+        }
+
+        use ir::{Op, ValueKind};
+
+        let uncast = |mut id: ir::ValueId| {
+            while let Some((Op::ZExt | Op::PtrToInt | Op::IntToPtr | Op::BitCast | Op::Freeze, [inner])) = f.inst(id) {
+                id = *inner;
+            }
+
+            id
+        };
+
+        let (pointer, length) = (uncast(pointer), uncast(length));
+
+        match (&f.values[pointer].kind, &f.values[length].kind) {
+            (ValueKind::Inst { op: Op::Select, operands: p, .. }, ValueKind::Inst { op: Op::Select, operands: l, .. }) if p[0] == l[0] => {
+                self.sized_pairs(f, p[1], l[1], shift, depth - 1, out);
+                self.sized_pairs(f, p[2], l[2], shift, depth - 1, out);
+            }
+            (ValueKind::Inst { op: Op::Phi, operands: p, blocks: from, block: a, .. }, ValueKind::Inst { op: Op::Phi, operands: l, blocks: other, block: b, .. }) if a == b => {
+                for (index, block) in from.iter().enumerate() {
+                    if let Some(position) = other.iter().position(|o| o == block) {
+                        self.sized_pairs(f, p[index], l[position], shift, depth - 1, out);
+                    }
+                }
+            }
+            // One length for every pointer a select or a phi chooses (a NULL one has no string), and the reverse
+            (ValueKind::Inst { op: Op::Select, operands: p, .. }, _) => p[1..].iter().for_each(|&arm| self.sized_pairs(f, arm, length, shift, depth - 1, out)),
+            (ValueKind::Inst { op: Op::Phi, operands: p, .. }, _) => p.iter().for_each(|&arm| self.sized_pairs(f, arm, length, shift, depth - 1, out)),
+            (_, ValueKind::Inst { op: Op::Select, operands: l, .. }) => l[1..].iter().for_each(|&arm| self.sized_pairs(f, pointer, arm, shift, depth - 1, out)),
+            (_, ValueKind::Inst { op: Op::Phi, operands: l, .. }) => l.iter().for_each(|&arm| self.sized_pairs(f, pointer, arm, shift, depth - 1, out)),
+            _ => {}
+        }
+    }
+
+    /// Strings with their length in the function: a pointer to text then its length in the arguments of a call or
+    /// stored next to each other (the fields of a &str), a pointer and a length returned in a pair of registers
+    /// (low and high halves of an i128)
+    fn note_sized_strings(&self, f: &ir::Func) {
+        if !self.program.language.has_sized_strings() {
+            return;
+        }
+
+        let pointer_size = self.program.pointer_size.max(4) as i128;
+        let mut found: Vec<(u64, u64)> = Vec::new();
+
+        for value in f.values.iter() {
+            let ir::ValueKind::Inst { op, operands, .. } = &value.kind else {
+                continue;
+            };
+
+            match op {
+                ir::Op::Call => {
+                    for pair in operands.windows(2) {
+                        self.sized_pairs(f, pair[0], pair[1], 0, 4, &mut found);
+                    }
+                }
+                ir::Op::Or if value.ty == ir::Ty::Int(128) => {
+                    self.sized_pairs(f, operands[0], operands[1], 64, 4, &mut found);
+                    self.sized_pairs(f, operands[1], operands[0], 64, 4, &mut found);
+                }
+                _ => {}
+            }
+        }
+
+        for block in f.blocks.iter() {
+            let stores: Vec<(ir::ValueId, i128, ir::ValueId)> = block
+                .insts
+                .iter()
+                .filter_map(|&id| match f.inst(id) {
+                    Some((ir::Op::Store, [value, address])) => {
+                        let (base, offset) = f.base_offset(*address);
+                        Some((base, offset, *value))
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            for &(base, offset, pointer) in stores.iter() {
+                if let Some(&(_, _, length)) = stores.iter().find(|(b, o, _)| *b == base && *o == offset + pointer_size) {
+                    self.sized_pairs(f, pointer, length, 0, 4, &mut found);
+                }
+            }
+        }
+
+        let mut sized = self.sized.borrow_mut();
+
+        for (addr, len) in found {
+            if self.program.sized_string(addr, len).is_some() {
+                let known = sized.entry(addr).or_insert(len);
+                *known = (*known).max(len);
+            }
+        }
     }
 
     pub fn instruction(&self, addr: u64) -> String {
@@ -127,6 +268,7 @@ impl Context<'_> {
 pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, prototype: Option<&Prototype>, addr: u64) -> CFunction {
     let mut f = ir::read(module, function);
     f.sink();
+    ctx.note_sized_strings(&f);
 
     let declared: Vec<CType> = match prototype {
         Some(p) if p.ty.params.len() == f.params.len() => p.ty.params.iter().map(|p| p.ty.clone()).collect(),
@@ -257,7 +399,7 @@ mod tests {
 
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default() };
 
         assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
         assert_eq!(ctx.string_at(0x2003, false).as_deref(), Some("pi"));
@@ -284,7 +426,7 @@ mod tests {
         let prototypes: HashMap<String, Prototype> =
             module.get_functions().filter_map(|f| f.get_name().to_str().ok().and_then(|name| Some((name.to_string(), typedb.function(name)?)))).collect();
         let (globals, noreturn) = (HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default() };
 
         return decompile(&module, function, &ctx, None, 0).print().text;
     }

@@ -14,6 +14,7 @@
 
 mod actions;
 mod commands;
+mod debug;
 mod explorer;
 mod layout;
 mod literal;
@@ -31,7 +32,10 @@ mod workspace;
 #[cfg(test)]
 mod tests;
 
+pub use debug::DebuggerConfig;
 pub use theme::KeyBindings;
+
+use anyhow::Result;
 
 use ratatui::{
     Frame, Terminal,
@@ -79,7 +83,6 @@ use workspace::{Dir, Workspace};
 
 use serde::{Deserialize, Serialize};
 
-use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -184,6 +187,11 @@ pub(crate) struct App {
     bindings: Vec<Binding>,
 
     llm: LlmConfig,
+
+    /// The program under the debugger, the breakpoints (program, address), the [debugger] section of the configuration
+    debugger: Option<debug::Debugger>,
+    breakpoints: std::collections::BTreeSet<(usize, u64)>,
+    debugger_config: DebuggerConfig,
 }
 
 impl App {
@@ -248,6 +256,9 @@ impl App {
             count: None,
             bindings: default_bindings(&keys),
             llm: LlmConfig::default(),
+            debugger: None,
+            breakpoints: std::collections::BTreeSet::new(),
+            debugger_config: DebuggerConfig::default(),
         };
     }
 
@@ -293,9 +304,9 @@ impl App {
         self.message = Some((message, true));
     }
 
-    pub(crate) fn report(&mut self, result: Result<(), String>) {
+    pub(crate) fn report(&mut self, result: Result<()>) {
         if let Err(error) = result {
-            self.error(error);
+            self.error(format!("{:#}", error));
         }
     }
 
@@ -360,7 +371,7 @@ fn restore_terminal() {
     let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
 }
 
-pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, project: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
+pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, debugger: DebuggerConfig, project: Option<PathBuf>) -> Result<()> {
     crash::install();
     crash::on_crash(Some(Box::new(restore_terminal)));
     enable_raw_mode()?;
@@ -372,11 +383,13 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, 
 
     let mut app = App::new(exec, exec_path.clone(), keys, project, default_workers());
     app.llm = llm;
+    app.debugger_config = debugger;
 
-    let result: Result<(), Box<dyn Error>> = (|| {
+    let result: Result<()> = (|| {
         loop {
             app.poll_analysis();
             app.poll_projects();
+            app.poll_debugger();
 
             terminal.draw(|f| ui(f, &mut app))?;
 
@@ -396,6 +409,9 @@ pub fn main(exec_path: &PathBuf, exec: Exec, keys: KeyBindings, llm: LlmConfig, 
 
     crash::on_crash(None);
     restore_terminal();
+
+    // The program under the debugger and the debugger are killed
+    app.debugger = None;
 
     return result;
 }

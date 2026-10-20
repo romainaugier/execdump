@@ -10,6 +10,8 @@
 
 use super::llm::LlmConfig;
 
+use anyhow::{anyhow, bail, Context, Result};
+
 use serde_json::{json, Value};
 
 use std::time::Duration;
@@ -61,7 +63,7 @@ fn base<'a>(config: &'a LlmConfig, default: &'a str, version: &str) -> String {
 }
 
 impl Chat {
-    pub fn new(config: &LlmConfig, system: &str, name: &str, schema: Value, max_tokens: u32) -> Result<Chat, String> {
+    pub fn new(config: &LlmConfig, system: &str, name: &str, schema: Value, max_tokens: u32) -> Result<Chat> {
         let openai = |json_schema| Format::OpenAi { json_schema, completion_tokens: false };
 
         let (format, base_url) = match config.backend.as_str() {
@@ -75,12 +77,12 @@ impl Chat {
             "openai-compatible" => (openai(false), None),
             "anthropic" => (Format::Anthropic, Some("https://api.anthropic.com/v1")),
             "google" | "gemini" => (Format::Google, Some("https://generativelanguage.googleapis.com/v1beta")),
-            other => return Err(format!("unknown backend {}: {}", other, BACKENDS)),
+            other => bail!("unknown backend {}: {}", other, BACKENDS),
         };
 
         let url = match (format, base_url) {
             (Format::OpenAi { .. }, None) => {
-                let base = config.base_url.as_deref().ok_or("the openai-compatible backend needs a base_url")?;
+                let base = config.base_url.as_deref().context("the openai-compatible backend needs a base_url")?;
                 format!("{}/chat/completions", base.trim_end_matches('/'))
             }
             (Format::OpenAi { .. }, Some(default)) => format!("{}/v1/chat/completions", base(config, default, "/v1")),
@@ -93,14 +95,14 @@ impl Chat {
 
         let key = match (&config.api_key, &config.api_key_env) {
             (Some(key), _) => Some(key.clone()),
-            (None, Some(variable)) => Some(std::env::var(variable).map_err(|_| format!("the environment variable {} of the API key is not set", variable))?),
+            (None, Some(variable)) => Some(std::env::var(variable).map_err(|_| anyhow!("the environment variable {} of the API key is not set", variable))?),
             (None, None) => None,
         };
 
         let local = matches!(config.backend.as_str(), "ollama" | "openai-compatible");
 
         let headers = match (format, key) {
-            (_, None) if !local => return Err(format!("the {} backend needs an api_key or api_key_env in the [llm] section", config.backend)),
+            (_, None) if !local => bail!("the {} backend needs an api_key or api_key_env in the [llm] section", config.backend),
             (_, None) => Vec::new(),
             (Format::OpenAi { .. }, Some(key)) => vec![("authorization", format!("Bearer {}", key))],
             (Format::Anthropic, Some(key)) => vec![("x-api-key", key), ("anthropic-version", "2023-06-01".to_string())],
@@ -108,7 +110,7 @@ impl Chat {
         };
 
         let timeout = Duration::from_secs(config.timeout.max(1));
-        let client = reqwest::Client::builder().connect_timeout(timeout).read_timeout(timeout).build().map_err(|e| e.to_string())?;
+        let client = reqwest::Client::builder().connect_timeout(timeout).read_timeout(timeout).build()?;
 
         return Ok(Chat {
             client,
@@ -169,7 +171,7 @@ impl Chat {
         return body;
     }
 
-    pub async fn ask(&self, prompt: &str) -> Result<String, String> {
+    pub async fn ask(&self, prompt: &str) -> Result<String> {
         let mut temperature = true;
 
         let response = loop {
@@ -179,7 +181,7 @@ impl Chat {
                 request = request.header(*name, value);
             }
 
-            let response = request.send().await.map_err(|e| describe(&e))?;
+            let response = request.send().await.map_err(|e| anyhow!(describe(&e)))?;
             let status = response.status();
 
             if status.is_success() {
@@ -195,19 +197,19 @@ impl Chat {
             }
 
             let message = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("error").map(error_text)).unwrap_or_else(|| text.trim().to_string());
-            return Err(format!("{} answered {}: {}", self.url.split('?').next().unwrap_or(&self.url), status, message));
+            bail!("{} answered {}: {}", self.url.split('?').next().unwrap_or(&self.url), status, message);
         };
 
         let answer = self.read(response).await?;
 
         if answer.cut {
-            return Err(format!("the answer was cut at {} tokens, raise max_tokens in the [llm] section", self.max_tokens));
+            bail!("the answer was cut at {} tokens, raise max_tokens in the [llm] section", self.max_tokens);
         }
 
         if answer.text.trim().is_empty() {
             return Err(match answer.reason {
-                Some(reason) => format!("empty answer (stopped: {})", reason),
-                None => "empty answer".to_string(),
+                Some(reason) => anyhow!("empty answer (stopped: {})", reason),
+                None => anyhow!("empty answer"),
             });
         }
 
@@ -215,11 +217,11 @@ impl Chat {
     }
 
     /// Server sent events ("data: {event}" lines), or one JSON answer from servers that do not stream
-    async fn read(&self, mut response: reqwest::Response) -> Result<Answer, String> {
+    async fn read(&self, mut response: reqwest::Response) -> Result<Answer> {
         let (mut pending, mut whole, mut events) = (String::new(), String::new(), 0);
         let mut answer = Answer::default();
 
-        while let Some(bytes) = response.chunk().await.map_err(|e| describe(&e))? {
+        while let Some(bytes) = response.chunk().await.map_err(|e| anyhow!(describe(&e)))? {
             pending.push_str(&String::from_utf8_lossy(&bytes));
 
             while let Some(end) = pending.find('\n') {
@@ -239,23 +241,23 @@ impl Chat {
                     return Ok(answer);
                 }
 
-                let event: Value = serde_json::from_str(data).map_err(|e| format!("unexpected answer ({}): {}", e, data))?;
+                let event: Value = serde_json::from_str(data).map_err(|e| anyhow!("unexpected answer ({}): {}", e, data))?;
                 self.event(&event, &mut answer)?;
             }
         }
 
         if events == 0 {
             whole.push_str(&pending);
-            let event: Value = serde_json::from_str(&whole).map_err(|e| format!("unexpected answer ({}): {}", e, whole.trim()))?;
+            let event: Value = serde_json::from_str(&whole).map_err(|e| anyhow!("unexpected answer ({}): {}", e, whole.trim()))?;
             self.event(&event, &mut answer)?;
         }
 
         return Ok(answer);
     }
 
-    fn event(&self, event: &Value, answer: &mut Answer) -> Result<(), String> {
+    fn event(&self, event: &Value, answer: &mut Answer) -> Result<()> {
         if let Some(error) = event.get("error") {
-            return Err(format!("the API answered: {}", error_text(error)));
+            bail!("the API answered: {}", error_text(error));
         }
 
         match self.format {
@@ -293,7 +295,7 @@ impl Chat {
                 }
 
                 if let Some(reason) = event["promptFeedback"]["blockReason"].as_str() {
-                    return Err(format!("the prompt was blocked: {}", reason));
+                    bail!("the prompt was blocked: {}", reason);
                 }
 
                 let candidate = &event["candidates"][0];
@@ -390,7 +392,7 @@ pub(crate) mod tests {
         return Chat::new(&config(backend, url), "Answer.", "answer", json!({ "type": "object" }), 100).unwrap();
     }
 
-    fn ask(chat: &Chat) -> Result<String, String> {
+    fn ask(chat: &Chat) -> Result<String> {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         return runtime.block_on(chat.ask("question"));
     }
@@ -422,15 +424,15 @@ pub(crate) mod tests {
 
         // What the API says is the error
         let (url, _) = serve("402 Payment Required", "{\"error\":\"Insufficient Balance\"}".to_string());
-        let error = ask(&chat("deepseek", url)).unwrap_err();
+        let error = ask(&chat("deepseek", url)).unwrap_err().to_string();
         assert!(error.contains("402") && error.contains("Insufficient Balance"), "{}", error);
 
         let (url, _) = serve("200 OK", events(&[json!({ "error": { "message": "overloaded" } })]));
-        assert!(ask(&chat("openrouter", url)).unwrap_err().contains("overloaded"));
+        assert!(ask(&chat("openrouter", url)).unwrap_err().to_string().contains("overloaded"));
 
         // Cut answers
         let (url, _) = serve("200 OK", events(&[chunk("{\"code\": \"int", Some("length"))]));
-        assert!(ask(&chat("mistral", url)).unwrap_err().contains("max_tokens"));
+        assert!(ask(&chat("mistral", url)).unwrap_err().to_string().contains("max_tokens"));
 
         // Servers that do not stream
         let (url, _) = serve("200 OK", json!({ "choices": [{ "message": { "content": ANSWER }, "finish_reason": "stop" }] }).to_string());
@@ -456,13 +458,13 @@ pub(crate) mod tests {
         assert!(request.contains("\"tool_choice\"") && request.contains("\"type\":\"tool\"") && request.contains("\"max_tokens\":100"), "{}", request);
 
         let (url, _) = serve("200 OK", events(&[delta("{\"co"), json!({ "type": "message_delta", "delta": { "stop_reason": "max_tokens" } })]));
-        assert!(ask(&chat("anthropic", url)).unwrap_err().contains("max_tokens"));
+        assert!(ask(&chat("anthropic", url)).unwrap_err().to_string().contains("max_tokens"));
 
         let (url, _) = serve("200 OK", events(&[json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } })]));
-        assert!(ask(&chat("anthropic", url)).unwrap_err().contains("Overloaded"));
+        assert!(ask(&chat("anthropic", url)).unwrap_err().to_string().contains("Overloaded"));
 
         let (url, _) = serve("401 Unauthorized", json!({ "type": "error", "error": { "type": "authentication_error", "message": "invalid x-api-key" } }).to_string());
-        let error = ask(&chat("anthropic", url)).unwrap_err();
+        let error = ask(&chat("anthropic", url)).unwrap_err().to_string();
         assert!(error.contains("401") && error.contains("invalid x-api-key"), "{}", error);
     }
 
@@ -479,15 +481,15 @@ pub(crate) mod tests {
         assert!(request.contains("\"maxOutputTokens\":100") && request.contains("application/json") && request.contains("\"temperature\""), "{}", request);
 
         let (url, _) = serve("200 OK", events(&[part("{\"code", Some("MAX_TOKENS"))]));
-        assert!(ask(&chat("google", url)).unwrap_err().contains("max_tokens"));
+        assert!(ask(&chat("google", url)).unwrap_err().to_string().contains("max_tokens"));
 
         let (url, _) = serve("200 OK", events(&[part("", Some("SAFETY"))]));
-        assert!(ask(&chat("google", url)).unwrap_err().contains("SAFETY"));
+        assert!(ask(&chat("google", url)).unwrap_err().to_string().contains("SAFETY"));
     }
 
     #[test]
     fn configurations() {
-        let error = |config: LlmConfig| Chat::new(&config, "", "answer", json!({}), 100).err().unwrap();
+        let error = |config: LlmConfig| Chat::new(&config, "", "answer", json!({}), 100).err().unwrap().to_string();
 
         assert!(error(LlmConfig { backend: "claude".to_string(), ..config("anthropic", String::new()) }).contains("unknown backend claude"));
         assert!(error(LlmConfig { api_key: None, ..config("openai", String::new()) }).contains("api_key"));

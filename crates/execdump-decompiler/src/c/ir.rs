@@ -253,6 +253,32 @@ impl Func {
         };
     }
 
+    /// Base of an address and its constant offset from it (through casts, constant additions and GEPs)
+    pub fn base_offset(&self, mut id: ValueId) -> (ValueId, i128) {
+        let mut offset = 0i128;
+
+        loop {
+            match &self.values[id].kind {
+                ValueKind::Inst { op: Op::IntToPtr | Op::PtrToInt | Op::BitCast | Op::Freeze, operands, .. } => id = operands[0],
+                ValueKind::Inst { op: Op::Add, operands, .. } if self.int(operands[1]).is_some() => {
+                    offset += self.int(operands[1]).unwrap_or(0);
+                    id = operands[0];
+                }
+                ValueKind::Inst { op: Op::Gep, operands, scales, .. } => {
+                    let Some(added) = operands[1..].iter().zip(scales.iter()).try_fold(0i128, |sum, (&index, &scale)| Some(sum + self.int(index)? * scale as i128)) else {
+                        break;
+                    };
+
+                    offset += added;
+                    id = operands[0];
+                }
+                _ => break,
+            }
+        }
+
+        return (id, offset);
+    }
+
     pub fn addr(&self, id: ValueId) -> Option<u64> {
         return match self.values[id].kind {
             ValueKind::Inst { addr, .. } => addr,
@@ -381,6 +407,16 @@ struct Reader {
     data: HashMap<String, Vec<u8>>,
 }
 
+/// Value of a constant of more than 64 bits (the C API reads 64 at most): from its text, `i128 1291...`
+unsafe fn wide_constant(raw: LLVMValueRef) -> i128 {
+    let text = unsafe { LLVMPrintValueToString(raw) };
+    let printed = unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().to_string();
+    unsafe { LLVMDisposeMessage(text) };
+
+    let digits = printed.rsplit(' ').next().unwrap_or_default();
+    return digits.parse::<i128>().or_else(|_| digits.parse::<u128>().map(|v| v as i128)).unwrap_or_else(|_| unsafe { LLVMConstIntGetZExtValue(raw) } as i128);
+}
+
 unsafe fn name(value: LLVMValueRef) -> String {
     let mut length = 0;
     let pointer = unsafe { LLVMGetValueName2(value, &mut length) };
@@ -433,7 +469,7 @@ impl Reader {
                 ValueKind::Param(index)
             } else if !LLVMIsAConstantInt(raw).is_null() {
                 let bits = LLVMGetIntTypeWidth(LLVMTypeOf(raw));
-                let value = if bits <= 64 { LLVMConstIntGetSExtValue(raw) as i128 } else { LLVMConstIntGetZExtValue(raw) as i128 };
+                let value = if bits <= 64 { LLVMConstIntGetSExtValue(raw) as i128 } else { wide_constant(raw) };
                 ValueKind::Int(value)
             } else if !LLVMIsAConstantFP(raw).is_null() {
                 let mut lost = 0;

@@ -542,6 +542,7 @@ dependencies = [
 name = "execdump"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "dirs",
  "execdump-core",
@@ -558,6 +559,7 @@ dependencies = [
 name = "execdump-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "capstone",
  "chrono",
  "libc",
@@ -566,9 +568,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "execdump-debugger"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "execdump-core",
+ "libc",
+]
+
+[[package]]
 name = "execdump-decompiler"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "capstone",
  "execdump-core",
  "inkwell",
@@ -584,6 +596,7 @@ dependencies = [
 name = "execdump-project"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dirs",
  "execdump-core",
  "execdump-decompiler",
@@ -597,8 +610,10 @@ dependencies = [
 name = "execdump-tui"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "crossterm",
  "execdump-core",
+ "execdump-debugger",
  "execdump-decompiler",
  "execdump-project",
  "ratatui",

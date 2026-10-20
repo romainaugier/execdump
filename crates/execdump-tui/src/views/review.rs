@@ -177,12 +177,10 @@ impl App {
                 let accept = matches!(command, Command::Accept(_));
                 let (program, proposal) = (view.program, view.proposal());
 
-                if let Some(id) = proposal {
-                    let result = self.project(program).ok_or_else(String::new).and_then(|p| if accept { p.accept(id) } else { p.reject(id) });
-
-                    match result {
+                if let (Some(id), Some(project)) = (proposal, self.project(program)) {
+                    match if accept { project.accept(id) } else { project.reject(id) } {
                         Ok(()) => self.info(format!("Proposal {} {}", id, if accept { "accepted, :w to save it" } else { "rejected" })),
-                        Err(error) => self.error(error),
+                        Err(error) => self.report(Err(error)),
                     }
                 }
             }

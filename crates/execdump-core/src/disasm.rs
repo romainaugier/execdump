@@ -1,3 +1,5 @@
+use anyhow::{anyhow, Result};
+
 use capstone::Insn;
 use capstone::arch::ArchOperand;
 use capstone::arch::x86;
@@ -67,7 +69,7 @@ fn format_x86_operand(cs: &Capstone, op: &x86::X86Operand) -> String {
 }
 
 impl X86Instruction {
-    pub fn from_cs(insn: &Insn, cs: &Capstone) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_cs(insn: &Insn, cs: &Capstone) -> Result<Self> {
         let detail = cs.insn_detail(insn)?;
         let arch_detail = detail.arch_detail();
         let ops = arch_detail.operands();
@@ -142,7 +144,7 @@ fn disasm_and_format_x86_code(
     code: &[u8],
     addr: u64,
     mode: arch::x86::ArchMode,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+) -> Result<Vec<String>> {
     let cs = Capstone::new()
         .x86()
         .mode(mode)
@@ -168,7 +170,7 @@ fn disasm_and_format_x86_code(
 fn disasm_and_format_aarch64_code(
     code: &[u8],
     addr: u64,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+) -> Result<Vec<String>> {
     let cs = Capstone::new()
         .arm64()
         .mode(arch::arm64::ArchMode::Arm)
@@ -199,12 +201,12 @@ pub fn disasm_and_format_code(
     arch: Architecture,
     code: &[u8],
     addr: u64,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+) -> Result<Vec<String>> {
     match arch {
         Architecture::X86 => disasm_and_format_x86_code(code, addr, arch::x86::ArchMode::Mode32),
         Architecture::X86_64 => disasm_and_format_x86_code(code, addr, arch::x86::ArchMode::Mode64),
         Architecture::Aarch64 => disasm_and_format_aarch64_code(code, addr),
-        Architecture::Unsupported => Err("Unsupported architecture for disassembly".into()),
+        Architecture::Unsupported => Err(anyhow!("Unsupported architecture for disassembly")),
     }
 }
 

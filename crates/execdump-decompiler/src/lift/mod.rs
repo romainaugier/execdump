@@ -22,15 +22,17 @@ pub use frame::{declare_slots, fold_frame_addresses, split_frame, stack_offset};
 pub use protector::{remove_stack_protector, Protector};
 pub use refine::refine;
 
-use crate::analysis::function::{CallTarget, EdgeKind, Function};
+use crate::analysis::function::{BasicBlock, CallTarget, EdgeKind, Function};
 use crate::analysis::insn::Flow;
 use crate::analysis::Analysis;
 use crate::storage;
 
 use regs::{Abi, Reg, RegRef, RegisterFile};
 
+use anyhow::{bail, Context as _, Result};
+
 use execdump_core::disasm::Architecture;
-use execdump_core::program::Program;
+use execdump_core::program::{Language, Program};
 
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
@@ -43,7 +45,7 @@ use inkwell::values::{AsValueRef, BasicMetadataValueEnum, BasicValue, BasicValue
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroU32;
 
 /// Name of the globals the discovery functions store their return registers to
@@ -358,23 +360,48 @@ impl Frame {
 
         return saved;
     }
+
+    /// Offset of the stack pointer from its value at the entry, before each instruction where it is known: the
+    /// addresses (start, end) of the runs of instructions with the same offset, and the offset
+    pub fn stack_offsets(&self, regs: &RegisterFile, sp: Reg) -> Vec<(u64, u64, i64)> {
+        let mut runs: Vec<(u64, u64, i64)> = Vec::new();
+
+        for (start, insns) in self.blocks.iter() {
+            let Some(mut tracker) = self.entry_trackers.get(start).cloned() else {
+                continue;
+            };
+
+            for insn in insns.iter() {
+                if let Some(Known::Stack(offset)) = tracker.get(sp) {
+                    match runs.last_mut() {
+                        Some(last) if last.1 == insn.addr() && last.2 == offset => last.1 = insn.end(),
+                        _ => runs.push((insn.addr(), insn.end(), offset)),
+                    }
+                }
+
+                insn.track(regs, &mut tracker);
+            }
+        }
+
+        return runs;
+    }
 }
 
-pub fn capstone(arch: Architecture) -> Result<capstone::Capstone, String> {
+pub fn capstone(arch: Architecture) -> Result<capstone::Capstone> {
     use capstone::prelude::*;
 
     let cs = match arch {
         Architecture::X86 => Capstone::new().x86().mode(arch::x86::ArchMode::Mode32).syntax(arch::x86::ArchSyntax::Intel).detail(true).build(),
         Architecture::X86_64 => Capstone::new().x86().mode(arch::x86::ArchMode::Mode64).syntax(arch::x86::ArchSyntax::Intel).detail(true).build(),
         Architecture::Aarch64 => Capstone::new().arm64().mode(arch::arm64::ArchMode::Arm).detail(true).build(),
-        Architecture::Unsupported => return Err("unsupported architecture".to_string()),
+        Architecture::Unsupported => bail!("unsupported architecture"),
     };
 
-    return cs.map_err(|e| e.to_string());
+    return Ok(cs?);
 }
 
 /// Decodes the function and follows the stack pointer through its blocks (in reverse post order)
-pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) -> Result<Frame, String> {
+pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) -> Result<Frame> {
     let arch = env.program.architecture();
     let sp = env.abi.stack_pointer;
 
@@ -384,8 +411,8 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
         let mut insns = Vec::new();
 
         for insn in block.insns.iter() {
-            let bytes = env.program.read(insn.addr, insn.size as usize).ok_or_else(|| format!("cannot read {:#x}", insn.addr))?;
-            insns.push(Insn::decode(arch, env.regs, cs, bytes, insn.addr).ok_or_else(|| format!("cannot decode {:#x}", insn.addr))?);
+            let bytes = env.program.read(insn.addr, insn.size as usize).with_context(|| format!("cannot read {:#x}", insn.addr))?;
+            insns.push(Insn::decode(arch, env.regs, cs, bytes, insn.addr).with_context(|| format!("cannot decode {:#x}", insn.addr))?);
         }
 
         frame.blocks.insert(block.start, insns);
@@ -446,63 +473,85 @@ pub enum ResultUse {
     Unused,
 }
 
-/// Whether the instructions after a call read the register its result is in before writing it, unsure is the
-/// answer when they cannot be followed (a branch, an instruction not decoded)
+/// Blocks followed after a call to see what is done with its result
+const RESULT_BLOCKS: usize = 8;
+
+/// Whether the instructions after a call read the register its result is in before writing it, on any of the paths
+/// from it (the blocks after a branch are followed too), unsure is the answer when a path cannot be followed (an
+/// instruction not decoded, an indirect jump, too many blocks)
 pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: u64, reg: Reg, unsure: ResultUse) -> ResultUse {
-    let Some(mut block) = caller.block_containing(call) else {
+    let Some(first) = caller.block_containing(call) else {
         return unsure;
     };
 
-    let mut start = call;
+    let mut pending = vec![(first, call)];
+    let mut seen = HashSet::from([first.start]);
+    let (mut returned, mut undecided) = (false, false);
 
-    for _ in 0..4 {
-        for insn in block.insns.iter().filter(|i| i.addr > start) {
-            let Some(bytes) = env.program.read(insn.addr, insn.size as usize) else {
-                return unsure;
-            };
-
-            let Some(decoded) = Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr) else {
-                return unsure;
-            };
-
-            if insn.flow == Flow::Ret {
-                return ResultUse::Returned;
-            }
-
-            // A call writes the other return registers (the high half of a result) when it does not read them
-            if matches!(insn.flow, Flow::Call(_) | Flow::IndirectCall) && reg != env.abi.int_ret && decoded.register_access(reg) != Some(true) {
-                return ResultUse::Unused;
-            }
-
-            match decoded.register_access(reg) {
-                Some(true) => return ResultUse::Read,
-                Some(false) => return ResultUse::Unused,
-                None => {}
-            }
-
-            if insn.flow == Flow::IndirectJump {
-                return unsure;
-            }
+    while let Some((block, start)) = pending.pop() {
+        if seen.len() > RESULT_BLOCKS {
+            undecided = true;
+            break;
         }
 
-        // Calls to functions that do not return, or blocks that end the function
-        if block.succs.is_empty() {
-            return if matches!(block.last().flow, Flow::Call(_)) { ResultUse::Unused } else { unsure };
-        }
-
-        match block.succs.as_slice() {
-            [edge] => match caller.blocks.get(&edge.to) {
-                Some(next) => {
-                    block = next;
-                    start = 0;
+        match result_in_block(env, cs, block, start, reg) {
+            Seen::Use(ResultUse::Read) => return ResultUse::Read,
+            Seen::Use(ResultUse::Returned) => returned = true,
+            Seen::Use(ResultUse::Unused) => {}
+            Seen::Unknown => undecided = true,
+            // Calls to functions that do not return end the paths, the other blocks without successors are not known
+            Seen::Nothing if block.succs.is_empty() => undecided |= !matches!(block.last().flow, Flow::Call(_)),
+            Seen::Nothing => {
+                for edge in block.succs.iter() {
+                    match caller.blocks.get(&edge.to) {
+                        Some(next) if seen.insert(next.start) => pending.push((next, 0)),
+                        Some(_) => {}
+                        None => undecided = true,
+                    }
                 }
-                None => return unsure,
-            },
-            _ => return unsure,
+            }
         }
     }
 
-    return unsure;
+    return if returned { ResultUse::Returned } else if undecided { unsure } else { ResultUse::Unused };
+}
+
+/// What the instructions of a block do with a result register
+enum Seen {
+    Use(ResultUse),
+    /// Left as it is to the end of the block
+    Nothing,
+    /// An instruction not decoded, an indirect jump
+    Unknown,
+}
+
+fn result_in_block(env: &Env, cs: &capstone::Capstone, block: &BasicBlock, start: u64, reg: Reg) -> Seen {
+    for insn in block.insns.iter().filter(|i| i.addr > start) {
+        let Some(decoded) = env.program.read(insn.addr, insn.size as usize).and_then(|bytes| Insn::decode(env.program.architecture(), env.regs, cs, bytes, insn.addr)) else {
+            return Seen::Unknown;
+        };
+
+        if insn.flow == Flow::Ret {
+            return Seen::Use(ResultUse::Returned);
+        }
+
+        // A call writes the other return registers (the high half of a result) when it does not read them
+        if matches!(insn.flow, Flow::Call(_) | Flow::IndirectCall) && reg != env.abi.int_ret && decoded.register_access(reg) != Some(true) {
+            return Seen::Use(ResultUse::Unused);
+        }
+
+        match decoded.register_access(reg) {
+            Some(true) => return Seen::Use(ResultUse::Read),
+            Some(false) => return Seen::Use(ResultUse::Unused),
+            None => {}
+        }
+
+        if insn.flow == Flow::IndirectJump {
+            return Seen::Unknown;
+        }
+    }
+
+    return Seen::Nothing;
 }
 
 /// Address a register holds at a call, when the instruction that last writes it before the call computes
@@ -729,7 +778,7 @@ struct BlockFlags<'ctx> {
 /// Lifts a function into a module, with its signature or the discovery one. With the storage, the values
 /// written to the registers and the stack slots are noted with their location, returns the stack slots
 /// written.
-pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function: &Function, frame: &Frame, sig: Signature, discovery: bool, storage: bool) -> Result<(FunctionValue<'ctx>, Vec<SlotWrite>), String> {
+pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function: &Function, frame: &Frame, sig: Signature, discovery: bool, storage: bool) -> Result<(FunctionValue<'ctx>, Vec<SlotWrite>)> {
     let fn_type = function_type(cx, &sig, discovery);
     let llvm = module.get_function(&sig.name).unwrap_or_else(|| module.add_function(&sig.name, fn_type, None));
 
@@ -754,7 +803,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
     let regs: Vec<PointerValue> = env.regs.regs.iter().map(|r| builder.build_alloca(int_type(cx, r.bits), r.name).unwrap()).collect();
 
     let frame_size = (frame.high - frame.low).max(1) as u32;
-    let frame_ptr = builder.build_alloca(cx.i8_type().array_type(frame_size), "frame").map_err(|e| e.to_string())?;
+    let frame_ptr = builder.build_alloca(cx.i8_type().array_type(frame_size), "frame")?;
 
     if storage {
         frame::set_stack_offset(frame_ptr.as_value_ref(), frame.low);
@@ -796,7 +845,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
 
     let blocks: HashMap<u64, LlvmBlock> = function.blocks.keys().map(|&a| (a, cx.append_basic_block(llvm, &format!("bb_{:x}", a)))).collect();
 
-    lifter.builder.build_unconditional_branch(blocks[&function.addr]).map_err(|e| e.to_string())?;
+    lifter.builder.build_unconditional_branch(blocks[&function.addr])?;
 
     for addr in reverse_post_order(function) {
         let Some(tracker) = frame.entry_trackers.get(&addr) else {
@@ -823,7 +872,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
     for block in blocks.values() {
         if block.get_terminator().is_none() {
             lifter.builder.position_at_end(*block);
-            lifter.builder.build_unreachable().map_err(|e| e.to_string())?;
+            lifter.builder.build_unreachable()?;
         }
     }
 
@@ -837,7 +886,7 @@ impl<'ctx> Notes<'ctx> {
 }
 
 /// The storage notes of a function: its registers written or received (not the stack pointer and the flags)
-fn notes<'ctx>(env: &Env, frame: &Frame, sig: &Signature, debug: &DebugInfoBuilder<'ctx>) -> Result<Notes<'ctx>, String> {
+fn notes<'ctx>(env: &Env, frame: &Frame, sig: &Signature, debug: &DebugInfoBuilder<'ctx>) -> Result<Notes<'ctx>> {
     let mut mask = frame.blocks.values().flatten().fold(0u128, |mask, insn| mask | insn.written(env.regs));
 
     for param in sig.params.iter() {
@@ -908,7 +957,7 @@ pub fn llvm_type(cx: &Context, ty: LType) -> BasicTypeEnum<'_> {
 
 macro_rules! llvm {
     ($e:expr) => {
-        $e.map_err(|e| e.to_string())?
+        $e?
     };
 }
 
@@ -932,13 +981,26 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Parameters to their locations, the stack pointer to the frame
-    fn lift_entry(&mut self) -> Result<(), String> {
+    fn lift_entry(&mut self) -> Result<()> {
         let sp = self.env.abi.stack_pointer;
         let sp_value = self.stack_value(0)?;
         llvm!(self.builder.build_store(self.regs[sp], sp_value));
 
+        // The registers of the runtime hold a global of it (reading them is not reading an undefined value)
+        for &(reg, name) in self.env.abi.runtime.iter() {
+            let global = self.module.get_global(name).unwrap_or_else(|| {
+                let global = self.module.add_global(self.ptr_type(), None, name);
+                global.set_linkage(Linkage::External);
+                global
+            });
+
+            let value = llvm!(self.builder.build_load(self.ptr_type(), global.as_pointer_value(), name)).into_pointer_value();
+            let value = llvm!(self.builder.build_ptr_to_int(value, self.int(self.env.regs.regs[reg].bits), ""));
+            llvm!(self.builder.build_store(self.regs[reg], value));
+        }
+
         for (index, param) in self.sig.params.clone().iter().enumerate() {
-            let value = self.llvm.get_nth_param(index as u32).ok_or("missing parameter")?;
+            let value = self.llvm.get_nth_param(index as u32).context("missing parameter")?;
 
             if let Some(name) = &param.name {
                 value.set_name(name);
@@ -1018,7 +1080,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
     }
 
-    fn lift_block(&mut self, addr: u64, insns: &[Insn], blocks: &HashMap<u64, LlvmBlock<'ctx>>) -> Result<(), String> {
+    fn lift_block(&mut self, addr: u64, insns: &[Insn], blocks: &HashMap<u64, LlvmBlock<'ctx>>) -> Result<()> {
         let block = &self.function.blocks[&addr];
 
         self.flags = None;
@@ -1078,10 +1140,18 @@ impl<'ctx> Lifter<'ctx, '_> {
                 self.call(&site.target, self.jump, true)?;
                 self.build_tail_return(&site.target)?;
             }
+            // The growth of the stack of Go (cmp rsp, [r14+0x10]; jbe to a call to runtime.morestack) is not code of the
+            // function: the branch always continues
+            Flow::CondJump(_) if block.succs.iter().any(|e| self.grows_stack(e.to)) => {
+                match block.succs.iter().find(|e| !self.grows_stack(e.to)).and_then(|e| blocks.get(&e.to)) {
+                    Some(&next) => llvm!(self.builder.build_unconditional_branch(next)),
+                    None => llvm!(self.builder.build_unreachable()),
+                };
+            }
             Flow::CondJump(destination) => {
                 let target = |kind| block.succs.iter().find(|e| e.kind == kind).and_then(|e| blocks.get(&e.to)).copied();
                 let condition = self.branch.unwrap_or_else(|| self.int(1).const_zero());
-                let current = self.builder.get_insert_block().ok_or("no current block")?;
+                let current = self.builder.get_insert_block().context("no current block")?;
 
                 // Conditional tail calls jump to another function, the missing fall through does not return
                 let on_true = match target(EdgeKind::True) {
@@ -1110,7 +1180,7 @@ impl<'ctx> Lifter<'ctx, '_> {
             }
             Flow::IndirectJump if block.succs.iter().any(|e| e.kind == EdgeKind::Switch) => {
                 // Jump tables: switch on the target address, the C backend turns it back into the table index
-                let target = self.jump.ok_or("indirect jump without a target")?;
+                let target = self.jump.context("indirect jump without a target")?;
                 let default = self.cx.append_basic_block(self.llvm, &format!("bb_{:x}_default", addr));
                 let cases: Vec<(IntValue, LlvmBlock)> = block
                     .succs
@@ -1124,7 +1194,7 @@ impl<'ctx> Lifter<'ctx, '_> {
                 llvm!(self.builder.build_unreachable());
             }
             Flow::IndirectJump => {
-                let target = self.jump.ok_or("indirect jump without a target")?;
+                let target = self.jump.context("indirect jump without a target")?;
                 self.call_intrinsic("__indirect_jump", &[target.into()], None)?;
                 llvm!(self.builder.build_unreachable());
             }
@@ -1142,6 +1212,22 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
+    /// A block of a Go function that calls runtime.morestack to grow the stack, then runs the function again
+    fn grows_stack(&self, addr: u64) -> bool {
+        if self.env.program.language != Language::Go {
+            return false;
+        }
+
+        let Some(block) = self.function.blocks.get(&addr) else {
+            return false;
+        };
+
+        return self.function.calls.iter().filter(|c| c.addr >= block.start && c.addr < block.end).any(|c| match c.target {
+            CallTarget::Function(callee) => self.env.program.symbol_at(callee).is_some_and(|s| s.name.starts_with("runtime.morestack")),
+            _ => false,
+        });
+    }
+
     /// The instructions built from now on come from the machine instruction at this address. The address is
     /// their debug location (line: low 32 bits, column: the next 16 bits plus one), which the LLVM passes
     /// keep on the instructions they create from others, unlike other metadata.
@@ -1154,7 +1240,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// End of a tail call: the return of the callee, nothing when it does not return
-    fn build_tail_return(&mut self, target: &CallTarget) -> Result<(), String> {
+    fn build_tail_return(&mut self, target: &CallTarget) -> Result<()> {
         if (self.env.signature)(target).noreturn {
             llvm!(self.builder.build_unreachable());
             return Ok(());
@@ -1163,7 +1249,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         return self.build_return();
     }
 
-    fn build_return(&mut self) -> Result<(), String> {
+    fn build_return(&mut self) -> Result<()> {
         if self.discovery {
             // The return registers go to sinks, the decompiler looks at what reaches them
             let sinks = [(RETURN_SINK_INT, Some(self.env.abi.int_ret)), (RETURN_SINK_FLOAT, Some(self.env.abi.float_ret)), (RETURN_SINK_HIGH, self.env.abi.int_ret_high)];
@@ -1196,7 +1282,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// The return register and the register of its high half as one integer (rdx:rax)
-    fn pair(&self, high: Reg) -> Result<IntValue<'ctx>, String> {
+    fn pair(&self, high: Reg) -> Result<IntValue<'ctx>> {
         let low = self.read_reg(self.env.abi.int_ret)?;
         let bits = low.get_type().get_bit_width();
         let wide = self.int(2 * bits);
@@ -1212,12 +1298,12 @@ impl<'ctx> Lifter<'ctx, '_> {
      */
 
     /// Reads a register view (al is the low 8 bits of rax), a value read is no longer a call argument candidate
-    pub fn read(&self, r: RegRef) -> Result<IntValue<'ctx>, String> {
+    pub fn read(&self, r: RegRef) -> Result<IntValue<'ctx>> {
         self.written.borrow_mut().remove(&r.reg);
         return self.load_reg(r);
     }
 
-    fn load_reg(&self, r: RegRef) -> Result<IntValue<'ctx>, String> {
+    fn load_reg(&self, r: RegRef) -> Result<IntValue<'ctx>> {
         let full_bits = self.env.regs.regs[r.reg].bits;
         let mut value = llvm!(self.builder.build_load(self.int(full_bits), self.regs[r.reg], "")).into_int_value();
 
@@ -1233,7 +1319,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Writes a register view, the other bits of the full register are kept
-    pub fn write(&self, r: RegRef, value: IntValue<'ctx>) -> Result<(), String> {
+    pub fn write(&self, r: RegRef, value: IntValue<'ctx>) -> Result<()> {
         let full_bits = self.env.regs.regs[r.reg].bits;
         let value = self.resize(value, r.bits, false)?;
 
@@ -1263,7 +1349,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Writes a register view zero extended to the full register (x86 32-bit writes)
-    pub fn write_zext(&self, r: RegRef, value: IntValue<'ctx>) -> Result<(), String> {
+    pub fn write_zext(&self, r: RegRef, value: IntValue<'ctx>) -> Result<()> {
         let full_bits = self.env.regs.regs[r.reg].bits;
         self.written.borrow_mut().insert(r.reg, value.get_type().get_bit_width());
         self.note_register(RegRef { bits: value.get_type().get_bit_width(), ..r }, value);
@@ -1273,28 +1359,28 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
-    pub fn read_reg(&self, reg: Reg) -> Result<IntValue<'ctx>, String> {
+    pub fn read_reg(&self, reg: Reg) -> Result<IntValue<'ctx>> {
         return self.read(self.env.regs.full(reg));
     }
 
-    pub fn write_reg(&self, reg: Reg, value: IntValue<'ctx>) -> Result<(), String> {
+    pub fn write_reg(&self, reg: Reg, value: IntValue<'ctx>) -> Result<()> {
         return self.write(self.env.regs.full(reg), value);
     }
 
-    pub fn read_float(&self, r: RegRef, bits: u32) -> Result<FloatValue<'ctx>, String> {
+    pub fn read_float(&self, r: RegRef, bits: u32) -> Result<FloatValue<'ctx>> {
         let value = self.read(RegRef { bits, ..r })?;
         return self.int_to_float(value);
     }
 
     /// Writes the low bits of a vector register, the upper bits are kept or cleared
-    pub fn write_float(&self, r: RegRef, value: FloatValue<'ctx>, clear_upper: bool) -> Result<(), String> {
+    pub fn write_float(&self, r: RegRef, value: FloatValue<'ctx>, clear_upper: bool) -> Result<()> {
         let bits = value.get_type().get_bit_width();
         let value = llvm!(self.builder.build_bit_cast(value, self.int(bits), "")).into_int_value();
 
         return if clear_upper { self.write_zext(r, value) } else { self.write(RegRef { bits, ..r }, value) };
     }
 
-    pub fn int_to_float(&self, value: IntValue<'ctx>) -> Result<FloatValue<'ctx>, String> {
+    pub fn int_to_float(&self, value: IntValue<'ctx>) -> Result<FloatValue<'ctx>> {
         let ty = match value.get_type().get_bit_width() {
             32 => self.cx.f32_type(),
             _ => self.cx.f64_type(),
@@ -1305,7 +1391,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Truncates or extends an integer
-    pub fn resize(&self, value: IntValue<'ctx>, bits: u32, signed: bool) -> Result<IntValue<'ctx>, String> {
+    pub fn resize(&self, value: IntValue<'ctx>, bits: u32, signed: bool) -> Result<IntValue<'ctx>> {
         let from = value.get_type().get_bit_width();
 
         return Ok(match from.cmp(&bits) {
@@ -1317,7 +1403,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Any value to an integer of the given width (pointers, floats, narrower integers)
-    fn to_int(&self, value: BasicValueEnum<'ctx>, bits: u32) -> Result<IntValue<'ctx>, String> {
+    fn to_int(&self, value: BasicValueEnum<'ctx>, bits: u32) -> Result<IntValue<'ctx>> {
         let value = match value {
             BasicValueEnum::IntValue(v) => v,
             BasicValueEnum::PointerValue(v) => llvm!(self.builder.build_ptr_to_int(v, self.int(self.pointer_bits()), "")),
@@ -1325,14 +1411,14 @@ impl<'ctx> Lifter<'ctx, '_> {
                 let width = v.get_type().get_bit_width();
                 llvm!(self.builder.build_bit_cast(v, self.int(width), "")).into_int_value()
             }
-            _ => return Err("unsupported value type".to_string()),
+            _ => bail!("unsupported value type"),
         };
 
         return self.resize(value, bits, false);
     }
 
     /// Integer (a full register) to a parameter or return type
-    fn from_int(&self, value: IntValue<'ctx>, ty: LType) -> Result<BasicValueEnum<'ctx>, String> {
+    fn from_int(&self, value: IntValue<'ctx>, ty: LType) -> Result<BasicValueEnum<'ctx>> {
         return Ok(match ty {
             LType::Int(bits) => self.resize(value, bits, false)?.into(),
             LType::Ptr => {
@@ -1347,7 +1433,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Reads a parameter or return value at its location (stack offsets relative to sp_offset)
-    fn read_value(&self, value: &Value, sp_offset: i64) -> Result<BasicValueEnum<'ctx>, String> {
+    fn read_value(&self, value: &Value, sp_offset: i64) -> Result<BasicValueEnum<'ctx>> {
         let raw = match value.loc {
             Loc::Reg(reg) => self.read_reg(reg)?,
             Loc::Stack(offset) => {
@@ -1459,24 +1545,24 @@ impl<'ctx> Lifter<'ctx, '_> {
      */
 
     /// Pointer into the stack frame
-    pub fn frame_ptr(&self, offset: i64) -> Result<PointerValue<'ctx>, String> {
+    pub fn frame_ptr(&self, offset: i64) -> Result<PointerValue<'ctx>> {
         let index = self.int(64).const_int((self.frame_base + offset) as u64, true);
         return Ok(unsafe { llvm!(self.builder.build_gep(self.cx.i8_type(), self.frame, &[index], "")) });
     }
 
     /// Integer value of an address in the stack frame
-    pub fn stack_value(&self, offset: i64) -> Result<IntValue<'ctx>, String> {
+    pub fn stack_value(&self, offset: i64) -> Result<IntValue<'ctx>> {
         let ptr = self.frame_ptr(offset)?;
         return Ok(llvm!(self.builder.build_ptr_to_int(ptr, self.int(self.pointer_bits()), "")));
     }
 
     /// Address of [sp + delta]
-    pub fn sp_address(&self, delta: i64) -> Result<PointerValue<'ctx>, String> {
+    pub fn sp_address(&self, delta: i64) -> Result<PointerValue<'ctx>> {
         return self.address(Some(self.env.abi.stack_pointer), None, delta);
     }
 
     /// Address of [base + index * scale + disp], in the frame when the base is a known stack address
-    pub fn address(&self, base: Option<Reg>, index: Option<(RegRef, i64)>, disp: i64) -> Result<PointerValue<'ctx>, String> {
+    pub fn address(&self, base: Option<Reg>, index: Option<(RegRef, i64)>, disp: i64) -> Result<PointerValue<'ctx>> {
         let known = match base {
             Some(base) => self.tracker.offset(base, disp),
             None => Some(Known::Const(disp as u64)),
@@ -1522,11 +1608,11 @@ impl<'ctx> Lifter<'ctx, '_> {
         return if self.pointer_bits() == 32 { 0xffff_ffff } else { u64::MAX };
     }
 
-    pub fn load(&self, ptr: PointerValue<'ctx>, bits: u32) -> Result<IntValue<'ctx>, String> {
+    pub fn load(&self, ptr: PointerValue<'ctx>, bits: u32) -> Result<IntValue<'ctx>> {
         return Ok(llvm!(self.builder.build_load(self.int(bits), ptr, "")).into_int_value());
     }
 
-    pub fn store(&self, ptr: PointerValue<'ctx>, value: IntValue<'ctx>) -> Result<(), String> {
+    pub fn store(&self, ptr: PointerValue<'ctx>, value: IntValue<'ctx>) -> Result<()> {
         llvm!(self.builder.build_store(ptr, value));
 
         if let Some(notes) = self.notes.as_ref() {
@@ -1558,7 +1644,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Pointer to a global (data, string, function or import slot) at an address
-    pub fn global_ptr(&self, addr: u64) -> Result<PointerValue<'ctx>, String> {
+    pub fn global_ptr(&self, addr: u64) -> Result<PointerValue<'ctx>> {
         let program = self.env.program;
 
         if self.env.analysis.functions.contains_key(&addr) {
@@ -1589,7 +1675,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Global variable of the module for an address, constant data keeps its initializer
-    fn global(&self, addr: u64, read_only: bool) -> Result<GlobalValue<'ctx>, String> {
+    fn global(&self, addr: u64, read_only: bool) -> Result<GlobalValue<'ctx>> {
         let program = self.env.program;
         let name = (self.env.global_name)(addr);
 
@@ -1646,7 +1732,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Calls a helper (intrinsic like) function, declared with the types of its arguments
-    pub fn call_intrinsic(&self, name: &str, args: &[BasicValueEnum<'ctx>], ret: Option<BasicTypeEnum<'ctx>>) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+    pub fn call_intrinsic(&self, name: &str, args: &[BasicValueEnum<'ctx>], ret: Option<BasicTypeEnum<'ctx>>) -> Result<Option<BasicValueEnum<'ctx>>> {
         let params: Vec<BasicMetadataTypeEnum> = args.iter().map(|a| a.get_type().into()).collect();
         let fn_type = match ret {
             Some(ret) => ret.fn_type(&params, false),
@@ -1668,7 +1754,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     /// Calls a function: the arguments are read where its signature puts them, the result is written back.
     /// A tail call (a jump) passes the arguments above the return address of the function.
-    pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<(), String> {
+    pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<()> {
         let sig = (self.env.signature)(target);
 
         // Stack arguments are above the return address the call pushes
@@ -1753,7 +1839,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// System call: __syscall(number, args...), the arguments are the registers written before it
-    pub fn syscall(&mut self, number: Reg, args: &[&str], ret: Reg) -> Result<(), String> {
+    pub fn syscall(&mut self, number: Reg, args: &[&str], ret: Reg) -> Result<()> {
         let written = self.written.borrow().clone();
         let regs: Vec<Reg> = args.iter().map(|name| self.env.regs.reg(name)).collect();
         let count = regs.iter().rposition(|r| written.contains_key(r)).map_or(0, |i| i + 1);
@@ -1767,7 +1853,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         // One declaration per argument count
         let name = format!("__syscall{}", count);
-        let result = self.call_intrinsic(&name, &values, Some(self.int(bits).into()))?.ok_or("syscall without a result")?;
+        let result = self.call_intrinsic(&name, &values, Some(self.int(bits).into()))?.context("syscall without a result")?;
         self.write_reg(ret, result.into_int_value())?;
         self.flags = None;
         self.written.borrow_mut().clear();
@@ -1777,7 +1863,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     /// Extra arguments of a variadic call, from its format string when it is a constant
     /// (printf("%d %s", ...)) or the next argument registers otherwise
-    fn variadic_args(&self, sig: &Signature, fixed: &[BasicMetadataValueEnum<'ctx>]) -> Result<Vec<BasicValueEnum<'ctx>>, String> {
+    fn variadic_args(&self, sig: &Signature, fixed: &[BasicMetadataValueEnum<'ctx>]) -> Result<Vec<BasicValueEnum<'ctx>>> {
         let format = sig.params.iter().zip(fixed.iter()).rev().find_map(|(param, _)| match param.loc {
             Loc::Reg(reg) if param.ty == LType::Ptr => match self.tracker.get(reg) {
                 Some(Known::Const(addr)) => self.env.program.read_c_string(addr, 4096),
@@ -1840,7 +1926,7 @@ impl<'ctx> Lifter<'ctx, '_> {
      */
 
     /// Records a flag producing operation and computes the flag bits
-    pub fn set_flags(&mut self, op: FlagOp, lhs: IntValue<'ctx>, rhs: IntValue<'ctx>, result: IntValue<'ctx>) -> Result<(), String> {
+    pub fn set_flags(&mut self, op: FlagOp, lhs: IntValue<'ctx>, rhs: IntValue<'ctx>, result: IntValue<'ctx>) -> Result<()> {
         let start = self.drop_unread_flags()?;
         let flags = self.flag_regs;
         let bits = result.get_type().get_bit_width();
@@ -1892,8 +1978,8 @@ impl<'ctx> Lifter<'ctx, '_> {
     /// The computation of the flags of the previous producer is dead when nothing read them since
     /// and the new producer is in the same block: it overwrites them all. Returns the last
     /// instruction before the new producer's ones.
-    fn drop_unread_flags(&self) -> Result<Option<InstructionValue<'ctx>>, String> {
-        let block = self.builder.get_insert_block().ok_or("no current block")?;
+    fn drop_unread_flags(&self) -> Result<Option<InstructionValue<'ctx>>> {
+        let block = self.builder.get_insert_block().context("no current block")?;
         let unread = std::mem::take(&mut *self.unread_flags.borrow_mut());
 
         if unread.iter().all(|i| i.get_parent() == Some(block)) {
@@ -1937,8 +2023,8 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// The instructions a producer added after start, until its flags are read
-    fn keep_unread_flags(&self, start: Option<InstructionValue<'ctx>>) -> Result<(), String> {
-        let block = self.builder.get_insert_block().ok_or("no current block")?;
+    fn keep_unread_flags(&self, start: Option<InstructionValue<'ctx>>) -> Result<()> {
+        let block = self.builder.get_insert_block().context("no current block")?;
         let mut next = match start {
             Some(instruction) => instruction.get_next_instruction(),
             None => block.get_first_instruction(),
@@ -1958,10 +2044,10 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// Records a floating point comparison (x86 ucomis, arm fcmp)
-    pub fn set_float_flags(&mut self, lhs: FloatValue<'ctx>, rhs: FloatValue<'ctx>) -> Result<(), String> {
+    pub fn set_float_flags(&mut self, lhs: FloatValue<'ctx>, rhs: FloatValue<'ctx>) -> Result<()> {
         let start = self.drop_unread_flags()?;
         let flags = self.flag_regs;
-        let compare = |p, name| self.builder.build_float_compare(p, lhs, rhs, name).map_err(|e| e.to_string());
+        let compare = |p, name| self.builder.build_float_compare(p, lhs, rhs, name);
 
         // x86: unordered sets ZF, PF and CF; arm: unordered sets C and V
         let (zf, cf, of) = if flags.carry_is_borrow {
@@ -1988,7 +2074,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     }
 
     /// A condition as an i1, from the operands of the last flag producer when it is in the block
-    pub fn condition(&self, cond: Cond) -> Result<IntValue<'ctx>, String> {
+    pub fn condition(&self, cond: Cond) -> Result<IntValue<'ctx>> {
         if cond == Cond::Always {
             return Ok(self.int(1).const_all_ones());
         }
@@ -2007,11 +2093,11 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         let flags = self.flag_regs;
-        let read = |reg| self.builder.build_load(self.int(1), self.regs[reg], "").map(|v| v.into_int_value()).map_err(|e| e.to_string());
-        let not = |v| self.builder.build_not(v, "").map_err(|e| e.to_string());
-        let or = |a, b| self.builder.build_or(a, b, "").map_err(|e| e.to_string());
-        let and = |a, b| self.builder.build_and(a, b, "").map_err(|e| e.to_string());
-        let ne = |a, b| self.builder.build_xor(a, b, "").map_err(|e| e.to_string());
+        let read = |reg| self.builder.build_load(self.int(1), self.regs[reg], "").map(|v| v.into_int_value()).map_err(anyhow::Error::from);
+        let not = |v| self.builder.build_not(v, "").map_err(anyhow::Error::from);
+        let or = |a, b| self.builder.build_or(a, b, "").map_err(anyhow::Error::from);
+        let and = |a, b| self.builder.build_and(a, b, "").map_err(anyhow::Error::from);
+        let ne = |a, b| self.builder.build_xor(a, b, "").map_err(anyhow::Error::from);
 
         let zf = read(flags.zero)?;
         let sf = read(flags.sign)?;
@@ -2035,12 +2121,12 @@ impl<'ctx> Lifter<'ctx, '_> {
             Cond::NonNeg => not(sf),
             Cond::Overflow => Ok(of),
             Cond::NoOverflow => not(of),
-            Cond::Parity => read(flags.parity.ok_or("no parity flag")?),
-            Cond::NoParity => not(read(flags.parity.ok_or("no parity flag")?)?),
+            Cond::Parity => read(flags.parity.context("no parity flag")?),
+            Cond::NoParity => not(read(flags.parity.context("no parity flag")?)?),
         };
     }
 
-    fn lazy_condition(&self, producer: &FlagProducer<'ctx>, cond: Cond) -> Result<Option<IntValue<'ctx>>, String> {
+    fn lazy_condition(&self, producer: &FlagProducer<'ctx>, cond: Cond) -> Result<Option<IntValue<'ctx>>> {
         let b = &self.builder;
 
         if producer.op == FlagOp::Float {
@@ -2070,10 +2156,10 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         let (lhs, rhs) = (producer.lhs.into_int_value(), producer.rhs.into_int_value());
-        let result = producer.result.ok_or("integer flags without a result")?;
+        let result = producer.result.context("integer flags without a result")?;
         let zero = result.get_type().const_zero();
 
-        let compare = |p, a, c| b.build_int_compare(p, a, c, "").map(Some).map_err(|e| e.to_string());
+        let compare = |p, a, c| b.build_int_compare(p, a, c, "").map(Some).map_err(anyhow::Error::from);
 
         return match (producer.op, cond) {
             (_, Cond::Eq) => compare(IntPredicate::EQ, result, zero),

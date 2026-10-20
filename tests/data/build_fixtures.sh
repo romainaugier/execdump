@@ -76,3 +76,8 @@ clang++ --target=arm64-apple-macos11 -O1 -c src/main.cpp -o "$TMP"/main_arm64.o
 RUSTC_BOOTSTRAP=1 rustc -O --edition 2021 -C panic=abort -C relocation-model=pie -C strip=debuginfo -Z unstable-options \
     -C symbol-mangling-version=legacy -C link-arg=-nostartfiles -C link-arg=-nostdlib -C link-arg=-Wl,--build-id=none \
     src/rust.rs -o elf_x86_64_rust
+
+# The same with string literals: &str passed to a function, returned in two registers and in a static table
+RUSTC_BOOTSTRAP=1 rustc -O --edition 2021 -C panic=abort -C relocation-model=pie -C strip=debuginfo -Z unstable-options \
+    -C symbol-mangling-version=legacy -C link-arg=-nostartfiles -C link-arg=-nostdlib -C link-arg=-Wl,--build-id=none \
+    src/rust_strings.rs -o elf_x86_64_rust_strings

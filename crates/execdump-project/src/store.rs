@@ -6,6 +6,8 @@
  * Trees are built in memory (no worktree), so the repository only holds what was touched.
  */
 
+use anyhow::{anyhow, Context, Result};
+
 use git2::{FileFavor, MergeFileInput, MergeFileOptions, ObjectType, Oid, Patch, Repository, Signature, Tree};
 
 use std::collections::{BTreeMap, HashMap};
@@ -19,16 +21,16 @@ pub struct Store {
     repo: Repository,
 }
 
-fn error(e: git2::Error) -> String {
-    return e.message().to_string();
+fn error(e: git2::Error) -> anyhow::Error {
+    return anyhow!(e.message().to_string());
 }
 
 impl Store {
-    pub fn open_or_init(path: &Path) -> Result<Self, String> {
+    pub fn open_or_init(path: &Path) -> Result<Self> {
         let repo = match Repository::open_bare(path) {
             Ok(repo) => repo,
             Err(_) => {
-                std::fs::create_dir_all(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+                std::fs::create_dir_all(path).with_context(|| path.display().to_string())?;
                 let repo = Repository::init_bare(path).map_err(error)?;
                 repo.set_head(&format!("refs/heads/{}", MAIN)).map_err(error)?;
                 repo
@@ -90,7 +92,7 @@ impl Store {
 
     /// Commits changes (path, new content or None to delete) on a branch, with extra parents
     /// (merged branches). Returns None when nothing changed.
-    pub fn commit(&self, branch: &str, changes: &[(String, Option<Vec<u8>>)], message: &str, extra_parents: &[Oid]) -> Result<Option<Oid>, String> {
+    pub fn commit(&self, branch: &str, changes: &[(String, Option<Vec<u8>>)], message: &str, extra_parents: &[Oid]) -> Result<Option<Oid>> {
         let parent = self.tip(branch).map(|oid| self.repo.find_commit(oid)).transpose().map_err(error)?;
         let base = parent.as_ref().map(|c| c.tree()).transpose().map_err(error)?;
 
@@ -128,7 +130,7 @@ impl Store {
     }
 
     /// Creates a branch at the tip of another one (replaced if it exists)
-    pub fn branch_from(&self, name: &str, from: &str) -> Result<(), String> {
+    pub fn branch_from(&self, name: &str, from: &str) -> Result<()> {
         match self.tip(from) {
             Some(oid) => {
                 let commit = self.repo.find_commit(oid).map_err(error)?;
@@ -170,7 +172,7 @@ impl Store {
     }
 
     /// Writes a tree with the changes applied to a base tree, None when it ends up empty
-    fn write_tree(&self, base: Option<&Tree>, changes: &[(Vec<&str>, Option<&[u8]>)]) -> Result<Option<Oid>, String> {
+    fn write_tree(&self, base: Option<&Tree>, changes: &[(Vec<&str>, Option<&[u8]>)]) -> Result<Option<Oid>> {
         let mut builder = self.repo.treebuilder(base).map_err(error)?;
         let mut subdirs: BTreeMap<&str, Vec<(Vec<&str>, Option<&[u8]>)>> = BTreeMap::new();
 

@@ -16,6 +16,7 @@ use execdump_core::program::Program;
 use super::follow_cursor;
 use super::graph::insn_spans;
 use crate::commands::{Command, Motion};
+use crate::debug::Marks;
 use crate::theme::Theme;
 use crate::views::View;
 use crate::{App, OpenMode, VERTICAL_STEP};
@@ -538,7 +539,7 @@ impl DisasmView {
         return find_insn(analysis, addr);
     }
 
-    pub fn render(&mut self, theme: &Theme, program: &Program, analysis: Option<&Analysis>, decoder: &Decoder, height: usize) -> Vec<Line<'static>> {
+    pub fn render(&mut self, theme: &Theme, program: &Program, analysis: Option<&Analysis>, decoder: &Decoder, height: usize, marks: &Marks) -> Vec<Line<'static>> {
         self.height = height;
         follow_cursor(self.cursor, &mut self.scroll, height);
 
@@ -581,8 +582,27 @@ impl DisasmView {
                 }
             };
 
+            // The instruction the program is stopped at, the breakpoints
+            let addr = matches!(line, DisasmLine::Insn(..)).then(|| self.line_addr(line)).flatten();
+            let stopped = addr.is_some() && addr == marks.pc;
+
+            if !marks.is_empty() {
+                let breakpoint = addr.is_some_and(|a| marks.breakpoint(a));
+
+                let (mark, color) = match (stopped, breakpoint) {
+                    (true, true) => ("◉ ", theme.breakpoint),
+                    (true, false) => ("▶ ", theme.node_selected),
+                    (false, true) => ("● ", theme.breakpoint),
+                    (false, false) => ("  ", theme.dim),
+                };
+
+                rendered.spans.insert(0, Span::styled(mark, Style::default().fg(color)));
+            }
+
             if index == self.cursor {
                 rendered = rendered.style(Style::default().bg(theme.cursor_bg));
+            } else if stopped {
+                rendered = rendered.style(Style::default().bg(theme.stopped_bg));
             }
 
             lines.push(rendered);
@@ -689,9 +709,9 @@ impl App {
     }
 }
 
-pub(crate) fn render(view: &mut DisasmView, f: &mut Frame, theme: &Theme, area: Rect, programs: &[Arc<Program>], analyses: &[Option<Arc<Analysis>>], decoders: &[Option<Decoder>]) {
+pub(crate) fn render(view: &mut DisasmView, f: &mut Frame, theme: &Theme, area: Rect, programs: &[Arc<Program>], analyses: &[Option<Arc<Analysis>>], decoders: &[Option<Decoder>], marks: &Marks) {
     if let Some(decoder) = decoders[view.program].as_ref() {
-        let lines = view.render(theme, &programs[view.program], analyses[view.program].as_deref(), decoder, area.height as usize);
+        let lines = view.render(theme, &programs[view.program], analyses[view.program].as_deref(), decoder, area.height as usize, marks);
         f.render_widget(Paragraph::new(Text::from(lines)).style(theme.base()), area);
     }
 }
@@ -723,7 +743,7 @@ mod tests {
         assert!(view.cursor_insn(&analysis).is_some());
 
         assert!(view.search("classify", &program, &decoder, true));
-        let lines = view.render(&theme, &program, Some(&analysis), &decoder, 10);
+        let lines = view.render(&theme, &program, Some(&analysis), &decoder, 10, &Marks::default());
         assert_eq!(lines.len(), 10);
 
         let mut function = DisasmView::function(0, &program, &analysis, &decoder, main.addr).unwrap();

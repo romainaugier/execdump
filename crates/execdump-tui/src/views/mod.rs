@@ -3,6 +3,7 @@
  * The commands a view does not handle go to the splits and the application (see commands).
  */
 
+pub(crate) mod debug;
 pub(crate) mod disasm;
 pub(crate) mod dump;
 pub(crate) mod graph;
@@ -13,8 +14,10 @@ pub(crate) mod table;
 pub(crate) mod welcome;
 
 use crate::commands::Command;
+use crate::debug::Marks;
 use crate::{App, DEFAULT_CALL_GRAPH_DEPTH};
 
+use debug::DebugView;
 use disasm::DisasmView;
 use dump::DumpView;
 use graph::{GraphKind, GraphView, NodeKind};
@@ -38,6 +41,7 @@ pub(crate) enum View {
     Table(TableView),
     Source(SourceView),
     Review(ReviewView),
+    Debug(DebugView),
 }
 
 impl View {
@@ -50,6 +54,7 @@ impl View {
             View::Graph(v) => v.title.clone(),
             View::Source(v) => v.title(),
             View::Review(v) => v.title(),
+            View::Debug(_) => "Debugger".to_string(),
             View::Table(v) => if v.filter.is_empty() { v.title.clone() } else { format!("{} [/{}] ({} matches)", v.title, v.filter, v.filtered.len()) },
         }
     }
@@ -115,6 +120,7 @@ impl App {
             View::Table(_) => self.table_command(command, count),
             View::Source(_) => self.source_command(command, count),
             View::Review(_) => self.review_command(command, count),
+            View::Debug(_) => self.debug_command(command, count),
         };
 
         if handled {
@@ -133,6 +139,16 @@ impl App {
 
     /// Draws the view of the active tab of a split
     pub(crate) fn render_view(&mut self, f: &mut Frame, theme: &Theme, group: crate::workspace::GroupId, area: Rect) {
+        let (is_debug, program) = {
+            let group = self.workspace.group(group);
+            let view = &group.tabs[group.active].view;
+            (matches!(view, View::Debug(_)), view.program())
+        };
+
+        // The content of the debug view and the marks of the debugger are made before the view is borrowed
+        let debug_lines = if is_debug { self.debug_lines(theme) } else { Vec::new() };
+        let marks = program.map_or_else(Marks::default, |p| App::marks(&self.debugger, &self.breakpoints, &self.programs, p));
+
         let App { workspace, projects, analyses, programs, decoders, analysis_errors, .. } = self;
         let group = workspace.group_mut(group);
         let active = group.active;
@@ -141,11 +157,12 @@ impl App {
             View::Welcome => welcome::render(f, theme, area, analysis_errors),
             View::Dump(view) => dump::render(view, f, theme, area),
             View::Hex(view) => hex::render(view, f, theme, area),
-            View::Disasm(view) => disasm::render(view, f, theme, area, programs, analyses, decoders),
+            View::Disasm(view) => disasm::render(view, f, theme, area, programs, analyses, decoders, &marks),
             View::Graph(view) => graph::render(view, f, theme, area, projects),
-            View::Source(view) => source::render(view, f, theme, area, projects),
+            View::Source(view) => source::render(view, f, theme, area, projects, &marks),
             View::Review(view) => review::render(view, f, theme, area, projects),
             View::Table(view) => table::render(view, f, theme, area),
+            View::Debug(view) => debug::render(view, f, theme, area, debug_lines),
         }
     }
 

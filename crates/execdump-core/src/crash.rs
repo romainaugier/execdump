@@ -8,6 +8,8 @@
  * on Unix, signal handlers give the terminal back with system calls only, then let the error go on.
  */
 
+use anyhow::{anyhow, Result};
+
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::panic::{self, AssertUnwindSafe};
@@ -161,13 +163,13 @@ pub fn thread(name: &str) -> std::thread::Builder {
 }
 
 /// Runs f, a panic inside it is returned as an error
-pub fn catch<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+pub fn catch<T>(f: impl FnOnce() -> T) -> Result<T> {
     install();
     CATCHING.with(|c| c.set(c.get() + 1));
     let result = panic::catch_unwind(AssertUnwindSafe(f));
     CATCHING.with(|c| c.set(c.get() - 1));
 
-    return result.map_err(|payload| LAST.with(|last| last.borrow_mut().take()).unwrap_or_else(|| format!("panicked: {}", payload_message(&*payload))));
+    return result.map_err(|payload| anyhow!(LAST.with(|last| last.borrow_mut().take()).unwrap_or_else(|| format!("panicked: {}", payload_message(&*payload)))));
 }
 
 fn payload_message(payload: &(dyn Any + Send)) -> String {
@@ -188,12 +190,12 @@ mod tests {
 
     #[test]
     fn caught_panics() {
-        assert_eq!(catch(|| 2 + 2), Ok(4));
+        assert_eq!(catch(|| 2 + 2).unwrap(), 4);
 
-        let error = catch(|| -> u32 { panic!("broken {}", 42) }).unwrap_err();
+        let error = catch(|| -> u32 { panic!("broken {}", 42) }).unwrap_err().to_string();
         assert!(error.contains("crash.rs") && error.ends_with("broken 42"), "{}", error);
 
         let nested = catch(|| catch(|| -> u32 { panic!("inner") }).unwrap_err());
-        assert!(nested.unwrap().ends_with("inner"));
+        assert!(nested.unwrap().to_string().ends_with("inner"));
     }
 }

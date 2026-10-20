@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use execdump_core::crash;
 use execdump_core::elf::ELF;
 use execdump_core::exec::Exec;
@@ -7,6 +9,7 @@ use execdump_decompiler::analysis::analyze;
 use execdump_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
 use execdump_decompiler::analysis::function::Function;
 use execdump_decompiler::analysis::insn::Decoder;
+use execdump_decompiler::storage::Place;
 use execdump_decompiler::Decompiler;
 
 use crate::config::Config;
@@ -233,7 +236,7 @@ pub fn dump_macho(macho: &MachO, args: &Args) {
     }
 }
 
-pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<()> {
     let filter = Regex::new(&args.functions_filter)?;
 
     for program in programs_from_exec(exec) {
@@ -283,7 +286,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                 DecompileOutput::Cfg => print!("{}", cfg_dot(&program, &analysis, &decoder, &functions)),
                 DecompileOutput::Callgraph => print!("{}", callgraph_dot(&analysis)),
                 DecompileOutput::C => {
-                    let create = || -> Result<Decompiler, Box<dyn std::error::Error>> {
+                    let create = || -> Result<Decompiler> {
                         let decompiler = Decompiler::new(&program, &analysis)?;
                         return Ok(if args.llm { decompiler.with_assistant(&config.llm)? } else { decompiler });
                     };
@@ -303,7 +306,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
 
                         let text = match function {
                             Ok(function) => format!("// {:#x}\n{}", addr, function.print().text),
-                            Err(error) => format!("// {} ({:#x}): {}\n", analysis.functions[&addr].name, addr, error),
+                            Err(error) => format!("// {} ({:#x}): {:#}\n", analysis.functions[&addr].name, addr, error),
                         };
 
                         outputs.push((addr, text));
@@ -321,7 +324,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                     for function in functions.iter().filter(|f| f.thunk.is_none()) {
                         match crash::catch(|| decompiler.c_function(function.addr)).and_then(|r| r) {
                             Ok(c) => println!("// {} ({:#x})\n{}", function.name, function.addr, storage_text(&c, &decompiler)),
-                            Err(error) => println!("// {} ({:#x}): {}\n", function.name, function.addr, error),
+                            Err(error) => println!("// {} ({:#x}): {:#}\n", function.name, function.addr, error),
                         }
                     }
                 }
@@ -331,7 +334,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
                     for function in functions.iter().filter(|f| f.thunk.is_none()) {
                         match crash::catch(|| decompiler.llvm_ir(function.addr)).and_then(|r| r) {
                             Ok(ir) => println!("; {} ({:#x})\n{}", function.name, function.addr, ir),
-                            Err(error) => println!("; {} ({:#x}): {}\n", function.name, function.addr, error),
+                            Err(error) => println!("; {} ({:#x}): {:#}\n", function.name, function.addr, error),
                         }
                     }
                 }
@@ -342,7 +345,8 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<(), B
     return Ok(());
 }
 
-/// The locations of the variables of a function over its addresses, and the slots of the stack canary
+/// The locations of the variables of a function over its addresses, the slots of the stack canary and the offset of the
+/// stack pointer
 fn storage_text(function: &execdump_decompiler::c::ast::CFunction, decompiler: &Decompiler) -> String {
     let mut out = String::new();
 
@@ -359,6 +363,23 @@ fn storage_text(function: &execdump_decompiler::c::ast::CFunction, decompiler: &
         out.push_str(&format!("stack canary: {}\n", canary.describe(&decompiler.regs)));
     }
 
+    let frame: Vec<String> = function
+        .storage
+        .frame
+        .iter()
+        .filter_map(|r| match r.loc.place() {
+            Place::Stack { offset, .. } => {
+                let sign = if offset < 0 { "-" } else { "+" };
+                Some(format!("{}{:#x} {:#x}..{:#x}", sign, offset.unsigned_abs(), function.addr.wrapping_add(r.start as u64), function.addr.wrapping_add(r.end as u64)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    if !frame.is_empty() {
+        out.push_str(&format!("stack pointer from the entry: {}\n", frame.join(", ")));
+    }
+
     return out;
 }
 
@@ -371,7 +392,7 @@ pub fn dump_exec(exec: &Exec, args: &Args, config: &Config) {
 
     if !args.decompile.is_empty() {
         if let Err(error) = dump_decompile(exec, args, config) {
-            eprintln!("Decompilation failed: {}", error);
+            eprintln!("Decompilation failed: {:#}", error);
         }
     }
 }

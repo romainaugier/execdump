@@ -1,5 +1,7 @@
 use crate::{demangle::demangle, disasm::{Architecture, disasm_and_format_code}, dump::{Dump, DumpRawData}, reader::{BEReader, LEReader, Reader}};
 
+use anyhow::{anyhow, bail, Result};
+
 use strum::IntoEnumIterator;
 use strum_macros::{EnumIter, FromRepr, IntoStaticStr};
 
@@ -297,7 +299,7 @@ pub struct ELFHeader32 {
 }
 
 impl ELFHeader32 {
-    pub fn from_parser(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_parser(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.ei_mag = reader.read_n()?;
@@ -417,7 +419,7 @@ pub struct ELFHeader64 {
 }
 
 impl ELFHeader64 {
-    pub fn from_parser(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_parser(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.ei_mag = reader.read_n()?;
@@ -486,13 +488,13 @@ impl Default for ELFHeader {
 }
 
 impl ELFHeader {
-    pub fn from_parser(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_parser(reader: &mut Reader) -> Result<Self> {
         let class_byte = reader.peek_at::<4>()?;
 
         match class_byte {
             1 => Ok(Self::ELFHeader32(ELFHeader32::from_parser(reader)?)),
             2 => Ok(Self::ELFHeader64(ELFHeader64::from_parser(reader)?)),
-            _ => Err("Invalid ELF Class".into()),
+            _ => Err(anyhow!("Invalid ELF Class")),
         }
     }
 
@@ -745,7 +747,7 @@ pub struct ELFProgramHeader32 {
 }
 
 impl ELFProgramHeader32 {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.p_type = reader.read_u32()?;
@@ -806,7 +808,7 @@ pub struct ELFProgramHeader64 {
 }
 
 impl ELFProgramHeader64 {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.p_type = reader.read_u32()?;
@@ -1110,7 +1112,7 @@ pub struct ELFSectionHeader32 {
 }
 
 impl ELFSectionHeader32 {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.sh_name = reader.read_u32()?;
@@ -1181,7 +1183,7 @@ pub struct ELFSectionHeader64 {
 }
 
 impl ELFSectionHeader64 {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut header = Self::default();
 
         header.sh_name = reader.read_u32()?;
@@ -1373,7 +1375,7 @@ pub struct ELFSymbol {
 }
 
 impl ELFSymbol {
-    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self> {
         let mut symbol = Self::default();
 
         match class {
@@ -1577,7 +1579,7 @@ pub struct ELFDynamicEntry {
 }
 
 impl ELFDynamicEntry {
-    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass) -> Result<Self> {
         let mut entry = Self::default();
 
         match class {
@@ -1734,7 +1736,7 @@ pub struct ELFRelocation {
 }
 
 impl ELFRelocation {
-    pub fn from_reader(reader: &mut Reader, class: &ELFClass, with_addend: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader, class: &ELFClass, with_addend: bool) -> Result<Self> {
         let mut reloc = Self::default();
 
         match class {
@@ -1819,7 +1821,7 @@ pub struct ELFNote {
 }
 
 impl ELFNote {
-    pub fn from_reader(reader: &mut Reader) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_reader(reader: &mut Reader) -> Result<Self> {
         let mut note = Self::default();
 
         let namesz = reader.read_u32()? as usize;
@@ -1911,7 +1913,7 @@ impl ELF {
     fn parse_headers_and_sections(
         &mut self,
         reader: &mut Reader
-    ) -> Result<Vec<ELFSection>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ELFSection>> {
         self.headers.elf_header = ELFHeader::from_parser(reader)?;
 
         let ph_off = self.headers.elf_header.program_headers_offset();
@@ -1965,7 +1967,7 @@ impl ELF {
         return Ok(sections);
     }
 
-    fn parse_interpreter(&mut self, reader: &mut Reader) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_interpreter(&mut self, reader: &mut Reader) -> Result<()> {
         let interp = self.headers.program_headers
             .iter()
             .find(|ph| ph.program_type() == ProgramHeaderType::Interp);
@@ -1978,7 +1980,7 @@ impl ELF {
         return Ok(());
     }
 
-    fn parse_symbols(&self, sections: &[ELFSection], section: &ELFSection) -> Result<Vec<ELFSymbol>, Box<dyn std::error::Error>> {
+    fn parse_symbols(&self, sections: &[ELFSection], section: &ELFSection) -> Result<Vec<ELFSymbol>> {
         let strtab = sections.get(section.header.link()).map_or(&[] as &[u8], |s| s.data.as_slice());
         let mut reader = self.reader_for(&section.data);
         let mut symbols = Vec::new();
@@ -1992,7 +1994,7 @@ impl ELF {
         return Ok(symbols);
     }
 
-    fn parse_symbol_tables(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_symbol_tables(&mut self, sections: &[ELFSection]) -> Result<()> {
         for section in sections.iter() {
             if matches!(section.header.section_type(), SectionType::Symtab | SectionType::Dynsym) {
                 self.symbol_tables.push(ELFSymbolTable {
@@ -2005,7 +2007,7 @@ impl ELF {
         return Ok(());
     }
 
-    fn parse_dynamic(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_dynamic(&mut self, sections: &[ELFSection]) -> Result<()> {
         let Some(section) = sections.iter().find(|s| s.header.section_type() == SectionType::Dynamic) else {
             return Ok(());
         };
@@ -2033,7 +2035,7 @@ impl ELF {
         return Ok(());
     }
 
-    fn parse_relocation_tables(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_relocation_tables(&mut self, sections: &[ELFSection]) -> Result<()> {
         for section in sections.iter() {
             let with_addend = match section.header.section_type() {
                 SectionType::Rela => true,
@@ -2071,7 +2073,7 @@ impl ELF {
         return Ok(());
     }
 
-    fn parse_notes(&mut self, sections: &[ELFSection]) -> Result<(), Box<dyn std::error::Error>> {
+    fn parse_notes(&mut self, sections: &[ELFSection]) -> Result<()> {
         for section in sections.iter().filter(|s| s.header.section_type() == SectionType::Note) {
             let mut reader = self.reader_for(&section.data);
 
@@ -2181,15 +2183,15 @@ impl ELF {
     }
 }
 
-pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>> {
+pub fn parse_elf(file_path: &PathBuf) -> Result<ELF> {
     if !file_path.exists() {
-        return Err("File does not exist".into());
+        bail!("File does not exist");
     }
 
     let file_bytes = std::fs::read(file_path)?;
 
     if file_bytes.len() < 6 || file_bytes[0..4] != ELF_MAGIC_ARRAY {
-        return Err("File magic number does not match ELF magic number".into());
+        bail!("File magic number does not match ELF magic number");
     }
 
     let e_data = file_bytes[5];
@@ -2197,7 +2199,7 @@ pub fn parse_elf(file_path: &PathBuf) -> Result<ELF, Box<dyn std::error::Error>>
     let mut reader = match e_data {
         1 => Reader::LittleEndian(LEReader::new(&file_bytes)),
         2 => Reader::BigEndian(BEReader::new(&file_bytes)),
-        _ => { return Err("Unknown value for endianness".into()); }
+        _ => { bail!("Unknown value for endianness"); }
     };
 
     let mut elf = ELF::default();

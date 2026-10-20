@@ -5,6 +5,8 @@
  * cargo run --release -p execdump-project --example profile -- <binary> [workers] [max seconds of decompilation]
  */
 
+use anyhow::{Context, Result};
+
 use execdump_core::elf::parse_elf;
 use execdump_core::exec::{guess_exectype, Exec, ExecType};
 use execdump_core::macho::parse_macho;
@@ -21,9 +23,9 @@ use mimalloc as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let path = PathBuf::from(args.next().ok_or("usage: profile <binary> [workers] [seconds]")?);
+    let path = PathBuf::from(args.next().context("usage: profile <binary> [workers] [seconds]")?);
     let workers: usize = args.next().map_or(Ok(execdump_project::default_workers()), |a| a.parse())?;
     let budget = Duration::from_secs(args.next().map_or(Ok(60), |a| a.parse())?);
 

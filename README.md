@@ -45,6 +45,8 @@ SWEEP_COMPILE=1 SWEEP_BASELINE=before.tsv cargo run --release -p execdump-projec
 
 A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
 
+Errors are `anyhow::Error` across the crates: a failure carries what was being done when it happened (`cannot parse a.out: Unexpected end of file`), the status line and the messages show the whole chain on one line. The typed errors that callers match on stay typed (`ReaderError` of the binary readers) and convert with `?`.
+
 ## Usage
 
 ```
@@ -232,7 +234,7 @@ Utilities:
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
-  - :heavy_check_mark: Function discovery by recursive descent, seeded by the entry point, symbols, exports, PE exception table (.pdata), Mach-O LC_FUNCTION_STARTS, ELF .eh_frame and init arrays, then call targets and code references (works on stripped binaries)
+  - :heavy_check_mark: Function discovery by recursive descent, seeded by the entry point, symbols, exports, PE exception table (.pdata), Mach-O LC_FUNCTION_STARTS, ELF .eh_frame and init arrays, the Go pclntab, then call targets and code references (works on stripped binaries)
   - :heavy_check_mark: Control flow graphs (true/false branches, tail calls, x86 jump tables)
   - :heavy_check_mark: Functions split by the compiler (hot and cold parts): the jumps between the parts do not create
     functions in the middle of others, the code reached only from a cold part is a fragment that stops at the code
@@ -243,8 +245,20 @@ Analysis:
   - :heavy_check_mark: Call graph and cross references
   - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
   - :x: aarch64 jump tables
-  - :x: Rust fat-pointers for strings
-  - :x: Go binaries
+  - :heavy_check_mark: Rust fat pointers for strings: a Rust binary (its symbols, or the paths of the standard library its
+    panics keep when it is stripped) has strings that are a pointer and a length, laid out one after the other without NUL.
+    The (pointer, length) pairs of the data (tables of `&str`, panic locations) are strings of their own in the strings
+    table, and the decompiler cuts a string at its length when the function passes it to a call with its length, stores
+    both next to each other (the fields of a `&str`), or returns them in a pair of registers: `write_all(out, "world", 5)`
+    instead of `write_all(out, "worldsuccesswarning: low disk space...", 5)`, `return "unknown" | ((__int128)7 << 64);`
+  - :heavy_check_mark: Go binaries (PE, ELF and Mach-O, x86_64 and aarch64, stripped or not): the pclntab the Go runtime
+    keeps (found by its section, else by its header in the data; layouts of Go 1.2 to 1.15, 1.16/1.17 and 1.18 and
+    later) names every function, gives its bounds and its source file. The functions are in modules by package and
+    file (`runtime/proc.go`, `main/main.go`). The decompiler uses the register ABI of Go (arguments and results in
+    rax, rbx, rcx, rdi... or x0 to x15, the goroutine in r14 or x28 is `runtime_g`), leaves out the growth of the stack
+    (`cmp rsp, [r14+0x10]; jbe` to `runtime.morestack`), knows the panics and fatal errors of the runtime do not
+    return and the write barriers return their buffer in r11 (x25). Go strings are a pointer and a length like the
+    Rust ones: `return "verbose" | ((__int128)7 << 64);`
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
@@ -400,7 +414,12 @@ Decompiler:
     an extension, a conversion or a phi of a variable comes from), then the ranges follow the machine code: a
     location holds a variable from a note until an instruction writes it (the registers it writes, the ones a call
     clobbers, the stack slots it stores to), a block starts with what all the blocks before it agree on. The
-    variables of the stack frame (buffers) are in their slot for the whole function
+    variables of the stack frame (buffers) are in their slot for the whole function. The offset of the stack
+    pointer from its value at the entry is kept the same way (ranges of stack locations, from the stack pointer
+    tracked through the instructions), so the stack slots are found from the stack pointer of a running function,
+    and the shape of each variable (`i4`, `u8`, `f8`, `b`, `p`, `s` for a pointer to text, `t64` for a buffer of 64 chars,
+    `x24` for 24 bytes) tells
+    how to read and show its value
   - :heavy_check_mark: Strings and constants: addresses of strings are string literals (the ones passed to functions even when they end
     another string, linkers merge them), loads from constant addresses of read-only data are their value (numbers,
     floating point numbers, strings, functions), constants that are the address of a function are its name. Literals
@@ -468,6 +487,8 @@ Viewers:
     `libs/<library>` of the project), an imported function opens in the library that exports it (loaded first when
     needed, from the graphs, the call graphs and the C code with `gd`), the libraries loaded are restored with the session
   - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
+  - :heavy_check_mark: Debugger (gdb or lldb): the program runs under the debugger and the decompiled code is its source
+    (see below)
 
 The analysis runs in the background when the TUI starts, then the project opens (modules, cache) and every function is decompiled. The title bar shows the stage, the progress of the decompilation (bar, percentage, remaining time) and `[+]` when there are unsaved changes.
 
@@ -629,6 +650,66 @@ execdump calls the APIs itself, in three formats: OpenAI chat completions (`open
   without it
 
 While the LLM works, the status line shows it with the time it has been running.
+
+### Debugger
+
+`:debug [arguments]` (or `F5`) runs the binary under gdb or lldb, to its first breakpoint, to `main` without one (the
+entry point without `main`). The debug view opens on the right of the C code. At each stop the C code moves to the
+line the program is at, with `▶` in its gutter and the line highlighted, in the module of its function: when a step
+leaves the module, the code of the module of the new function replaces it (on the jumplist of its tab, `Ctrl-o` goes
+back). The linear disassembly and the control flow graph of the function follow the program too.
+
+The debug view shows:
+
+- the variables of the function of the selected frame and their values, read where the decompiler says they are at
+  that address (`--decompile storage`): a register (`edi`, `xmm0`), a stack slot from the stack pointer at the entry
+  of the function (`[sp-0x48]`, the stack pointer is tracked through the instructions), a constant. Their shape gives
+  how they are shown: integers by their size and sign, floats, `char` with its character, pointers to text with their
+  string (`0x555555556004 "world"`), buffers of text as strings, the other buffers as bytes. A variable that is in no
+  location at that address is `?`
+- the call stack, the functions of the program by their name (`depth+0x17`), the others by the name the debugger
+  gives (the libraries); `Enter` on a frame selects it: the code, the variables and the registers are the ones of
+  that frame (unwound by the debugger)
+- the registers, the breakpoints (`Enter` shows the code of one) and the last lines of the output of the program
+
+Breakpoints are toggled on the line (or the instruction, or the node) under the cursor with `F9` or `gb`, or with
+`:break <function or address>`; they are marked with `●` in the C code and the linear disassembly, kept while
+execdump runs and given to the debugger at the load address of the program (PIE and ASLR).
+
+| Keys | Command | Action |
+|---|---|---|
+| `F5` | `:continue` | Continue (start the program when it is not running) |
+| `F7` | `:step` (`:s`) | Next line of C, into the functions of the program it calls |
+| `F8` | `:step-over` (`:n`) | Next line of C of the function, over the calls |
+| `F4` | `:finish` | Until the function returns |
+| | `:stepi`, `:nexti` | One instruction, into or over the calls |
+| `F6` | `:interrupt` | Stop the running program |
+| `F9`, `gb` | `:break [function or address]` | Toggle a breakpoint |
+| | `:frame <n>` | Select a frame of the call stack |
+| | `:kill` | Kill the program and the debugger |
+
+A line of C is its address (the first instruction of its statement), a step continues to the addresses of the lines
+of the function and to its return address with temporary breakpoints. A line is only a stop in the frame the step
+started in: the stack pointer there, minus its offset from the entry of the function at that address, has to be the
+stack pointer at the entry of the frame, so a recursive call does not stop the step. `:step` also stops at the entry
+of the functions of the program the function calls (directly). A function not decompiled yet steps by instructions,
+a step from a library returns to the program, a step from a caller selected in the call stack continues until the
+program is back in it.
+
+The program reads nothing (its input is empty), its output and its errors go to a file shown in the debug view. The
+debugger is gdb on Linux and lldb on macOS, the other one when it is the only one installed, or the one of the
+`[debugger]` section:
+
+```toml
+# ~/.execdumprc
+[debugger]
+backend = "lldb"                   # gdb or lldb
+# path = "/usr/bin/lldb-18"        # the executable, found in the PATH without it
+```
+
+gdb is driven through GDB/MI, lldb through its command line (with formats of its own for its stops and its frames),
+see `crates/execdump-debugger`. The tests of the debugger build a small C program with `cc` and run it under each
+debugger installed.
 
 ![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
 

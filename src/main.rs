@@ -2,6 +2,8 @@ use crate::args::Args;
 use crate::config::Config;
 use crate::dump::dump_exec;
 
+use anyhow::{Context, Result};
+
 use execdump_core::crash;
 use execdump_core::elf::parse_elf;
 use execdump_core::exec::{ExecType, guess_exectype, Exec};
@@ -25,7 +27,7 @@ mod dump;
 use mimalloc as _;
 
 /// Decompiles every function of the programs with their project and writes the source trees
-fn export(exec: &Exec, args: &Args, dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn export(exec: &Exec, args: &Args, dir: &std::path::Path) -> Result<()> {
     let programs: Vec<Arc<Program>> = programs_from_exec(exec).into_iter().map(Arc::new).collect();
     let count = programs.len();
 
@@ -54,33 +56,34 @@ fn main() {
     crash::install();
 
     // The work runs on a thread with a large stack (the decompiler recurses on big functions)
-    let main = crash::thread("main").spawn(|| run().map_err(|e| e.to_string())).expect("cannot start the main thread");
+    let main = crash::thread("main").spawn(|| run()).expect("cannot start the main thread");
 
     match main.join() {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
-            eprintln!("Error: {}", error);
+            eprintln!("Error: {:#}", error);
             std::process::exit(1);
         }
         Err(_) => std::process::exit(101),
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<()> {
     let args = Args::parse();
 
-    let exectype = guess_exectype(&args.file_path)?;
+    let path = &args.file_path;
 
-    let exec = match exectype {
-        ExecType::PE => Exec::PE(parse_pe(&args.file_path)?),
-        ExecType::ELF => Exec::ELF(parse_elf(&args.file_path)?),
-        ExecType::MachO => Exec::MachO(parse_macho(&args.file_path)?),
-    };
+    let exec = match guess_exectype(path).with_context(|| path.display().to_string())? {
+        ExecType::PE => parse_pe(path).map(Exec::PE),
+        ExecType::ELF => parse_elf(path).map(Exec::ELF),
+        ExecType::MachO => parse_macho(path).map(Exec::MachO),
+    }
+    .with_context(|| format!("cannot parse {}", path.display()))?;
 
     let config = Config::load()?;
 
     if args.tui {
-        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm, args.project.clone());
+        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm, config.debugger, args.project.clone());
     } else {
         dump_exec(&exec, &args, &config);
     }

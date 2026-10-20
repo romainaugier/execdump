@@ -25,6 +25,10 @@ pub struct Theme {
     pub dim: Color,
     pub warning: Color,
 
+    /// Debugger: background of the line the program is stopped at, the marks of the breakpoints
+    pub stopped_bg: Color,
+    pub breakpoint: Color,
+
     /// Disassembly syntax highlighting
     pub asm_address: Color,
     pub asm_instruction: Color,
@@ -72,6 +76,8 @@ impl Theme {
             comment: Color::Rgb(106, 153, 85),
             dim: Color::Rgb(110, 110, 110),
             warning: Color::Rgb(220, 180, 90),
+            stopped_bg: Color::Rgb(75, 70, 25),
+            breakpoint: Color::Rgb(229, 72, 60),
             asm_address: Color::Rgb(128, 128, 128),
             asm_instruction: Color::Rgb(86, 156, 214),
             asm_register: Color::Rgb(156, 220, 254),

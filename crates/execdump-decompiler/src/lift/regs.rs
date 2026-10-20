@@ -229,6 +229,8 @@ pub struct Abi {
     pub return_address: i64,
     /// Registers a callee must preserve
     pub callee_saved: Vec<Reg>,
+    /// Registers that hold a value of the runtime in every function (the goroutine of Go), named after it
+    pub runtime: Vec<(Reg, &'static str)>,
 }
 
 impl Abi {
@@ -249,6 +251,7 @@ impl Abi {
                 slot_size: 8,
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "rdi", "rsi", "r12", "r13", "r14", "r15", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"]),
+                runtime: Vec::new(),
             },
             Architecture::X86_64 => Abi {
                 int_args: r(&["rdi", "rsi", "rdx", "rcx", "r8", "r9"]),
@@ -262,6 +265,7 @@ impl Abi {
                 slot_size: 8,
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "r12", "r13", "r14", "r15"]),
+                runtime: Vec::new(),
             },
             Architecture::X86 => Abi {
                 int_args: Vec::new(),
@@ -275,6 +279,7 @@ impl Abi {
                 slot_size: 4,
                 return_address: 4,
                 callee_saved: r(&["ebx", "ebp", "esi", "edi"]),
+                runtime: Vec::new(),
             },
             _ => Abi {
                 int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]),
@@ -289,8 +294,48 @@ impl Abi {
                 return_address: 0,
                 // x30 holds the return address of the function, v8 to v15 keep their low 64 bits
                 callee_saved: r(&["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
+                runtime: Vec::new(),
             },
         }
+    }
+
+    /// The register ABI of Go (ABIInternal, Go 1.17 on x86_64 and 1.18 on aarch64), on every system: the results in
+    /// the registers of the arguments (a string is its pointer then its length), every other register clobbered by
+    /// calls but the ones the runtime keeps (the goroutine in r14 or x28, the zero xmm15, the frame pointer)
+    pub fn go(regs: &RegisterFile) -> Option<Self> {
+        let r = |names: &[&str]| -> Vec<Reg> { names.iter().map(|n| regs.reg(n)).collect() };
+
+        return match regs.arch {
+            Architecture::X86_64 => Some(Abi {
+                int_args: r(&["rax", "rbx", "rcx", "rdi", "rsi", "r8", "r9", "r10", "r11"]),
+                float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14"]),
+                positional: false,
+                int_ret: regs.reg("rax"),
+                int_ret_high: Some(regs.reg("rbx")),
+                float_ret: regs.reg("xmm0"),
+                stack_pointer: regs.reg("rsp"),
+                stack_args: 8,
+                slot_size: 8,
+                return_address: 8,
+                callee_saved: r(&["rbp", "r14", "r15", "xmm15"]),
+                runtime: vec![(regs.reg("r14"), "runtime_g")],
+            }),
+            Architecture::Aarch64 => Some(Abi {
+                int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15"]),
+                float_args: r(&["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
+                positional: false,
+                int_ret: regs.reg("x0"),
+                int_ret_high: Some(regs.reg("x1")),
+                float_ret: regs.reg("v0"),
+                stack_pointer: regs.reg("sp"),
+                stack_args: 8,
+                slot_size: 8,
+                return_address: 0,
+                callee_saved: r(&["x28", "x29", "x30"]),
+                runtime: vec![(regs.reg("x28"), "runtime_g")],
+            }),
+            _ => None,
+        };
     }
 }
 

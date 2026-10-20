@@ -158,7 +158,23 @@ pub fn is_noreturn_name(name: &str) -> bool {
         "ZSt28__throw_bad_array_new_lengthv" | "ZSt16__throw_bad_castv" | "ZSt21__throw_bad_variant_accessPKc"
     ) || name.starts_with("ZN4core9panicking") || name.starts_with("ZN3std7process4exit") || name.starts_with("ZN5alloc5alloc18handle_alloc_error")
       || name.starts_with("rust_panic") || name.starts_with("rust_begin_unwind") || RUST_STD_PANICS.iter().any(|p| name.starts_with(p))
+      || GO_NORETURN.iter().any(|p| name.starts_with(p))
 }
+
+/// The Go runtime functions that do not return: the panics, the fatal errors, and the growth of the stack (it runs the
+/// function again from its start, the jump back after the call is never taken)
+const GO_NORETURN: &[&str] = &[
+    "runtime.gopanic",
+    "runtime.goPanic",
+    "runtime.panic",
+    "runtime.throw",
+    "runtime.fatal",
+    "runtime.morestack",
+    "runtime.goexit",
+    "runtime.Goexit",
+    "runtime.exit",
+    "os.Exit",
+];
 
 /// The functions of std::panicking that panic (set_hook, take_hook, panic_count::... return)
 const RUST_STD_PANICS: &[&str] = &[

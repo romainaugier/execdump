@@ -10,6 +10,8 @@ mod parse;
 
 use crate::types::{CType, DataModel, FuncType, Prototype};
 
+use anyhow::Result;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Mutex;
@@ -134,7 +136,7 @@ impl TypeDb {
     }
 
     /// Adds the declarations of preprocessed C source
-    pub fn parse(&mut self, source: &str) -> Result<(), String> {
+    pub fn parse(&mut self, source: &str) -> Result<()> {
         return parse::parse(self, source);
     }
 

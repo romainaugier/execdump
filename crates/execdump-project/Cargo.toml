@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 execdump-core.workspace = true
 execdump-decompiler.workspace = true
 dirs.workspace = true

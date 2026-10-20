@@ -3,7 +3,7 @@
  * built once from the parsed PE/ELF/Mach-O and used by the analysis and the TUI.
  */
 
-use crate::demangle::demangle;
+use crate::demangle::{demangle, detect_mangling_scheme, ManglingScheme};
 use crate::disasm::Architecture;
 use crate::eh_frame::parse_eh_frame;
 use crate::elf::{ELF, ELFFileType, SectionFlags as ELFSectionFlags, SectionType as ELFSectionType, SymbolBinding, SymbolType as ELFSymbolType, SHN_UNDEF};
@@ -88,6 +88,8 @@ pub enum SeedSource {
     Entry,
     Export,
     Symbol,
+    /// The function table of the Go runtime
+    GoPclntab,
     ExceptionTable,
     FunctionStarts,
     EhFrame,
@@ -100,6 +102,7 @@ impl SeedSource {
             SeedSource::Entry => "entry",
             SeedSource::Export => "export",
             SeedSource::Symbol => "symbol",
+            SeedSource::GoPclntab => "go pclntab",
             SeedSource::ExceptionTable => "exception table",
             SeedSource::FunctionStarts => "function starts",
             SeedSource::EhFrame => "eh_frame",
@@ -123,6 +126,30 @@ pub enum Format {
     MachO,
 }
 
+/// Language the program was written in, when it changes how its data is laid out
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Language {
+    #[default]
+    Unknown,
+    Rust,
+    Go,
+}
+
+impl Language {
+    /// Strings are a pointer and a length (&str, Go strings), not NUL terminated
+    pub fn has_sized_strings(self) -> bool {
+        return matches!(self, Language::Rust | Language::Go);
+    }
+}
+
+/// Longest string a (pointer, length) pair is taken for
+pub const MAX_SIZED_STRING: u64 = 4096;
+
+/// Valid UTF-8 text without control characters other than tabs and line breaks
+pub fn is_text(bytes: &[u8]) -> bool {
+    return std::str::from_utf8(bytes).is_ok_and(|text| text.chars().all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t')));
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Program {
     /// Short description, e.g. "ELF x86_64"
@@ -142,6 +169,10 @@ pub struct Program {
     pub source_files: BTreeMap<u64, String>,
     /// Source files named by the symbol tables, in their order
     pub source_names: Vec<String>,
+    pub language: Language,
+    /// Strings the data points to with (pointer, length) pairs (tables of &str, panic locations), address ->
+    /// length. Only for the languages whose strings are not NUL terminated.
+    pub sized_strings: BTreeMap<u64, u64>,
 }
 
 impl Program {
@@ -211,6 +242,22 @@ impl Program {
         return Some(&bytes[..nul]);
     }
 
+    /// Read-only data (not code) of at least len bytes at an address
+    pub fn constant_bytes(&self, addr: u64, len: u64) -> Option<&[u8]> {
+        let region = self.region_at(addr).filter(|r| !r.perms.write && !r.perms.exec && !r.data.is_empty())?;
+        let offset = (addr - region.vaddr) as usize;
+        return region.data.get(offset..offset.checked_add(len as usize)?);
+    }
+
+    /// Text of len bytes of read-only data, the string of a (pointer, length) pair
+    pub fn sized_string(&self, addr: u64, len: u64) -> Option<&[u8]> {
+        if len == 0 || len > MAX_SIZED_STRING {
+            return None;
+        }
+
+        return self.constant_bytes(addr, len).filter(|bytes| is_text(bytes));
+    }
+
     pub fn read_c_string(&self, addr: u64, max_len: usize) -> Option<String> {
         let bytes = self.bytes_from(addr)?;
         let bytes = &bytes[..bytes.len().min(max_len)];
@@ -264,6 +311,21 @@ impl Program {
         // The name breaks the ties: overlapping regions (TLS sections) are found in the same order every time
         self.regions.sort_by(|a, b| (a.vaddr, a.size, &a.name).cmp(&(b.vaddr, b.size, &b.name)));
 
+        let go = crate::golang::functions(self);
+
+        if !go.is_empty() {
+            self.language = Language::Go;
+            self.add_go_functions(go);
+        }
+
+        if self.language == Language::Unknown && self.is_rust() {
+            self.language = Language::Rust;
+        }
+
+        if self.language.has_sized_strings() {
+            self.sized_strings = self.scan_sized_strings();
+        }
+
         let mut seen = HashSet::new();
         self.seeds.sort_by_key(|s| (s.source, s.addr));
         self.seeds.retain(|s| seen.insert(s.addr));
@@ -276,6 +338,96 @@ impl Program {
                 self.add_symbol(Symbol::new(entry, "entry0", SymbolKind::Function, 0));
             }
         }
+    }
+}
+
+/*
+ * Languages
+ */
+
+/// Paths of the standard library in the panic locations every Rust binary keeps, stripped or not
+const RUST_MARKERS: [&[u8]; 3] = [b"/rustc/", b"library/core/src/", b"library/std/src/"];
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    let Some((&first, rest)) = needle.split_first() else {
+        return true;
+    };
+
+    let mut from = 0;
+
+    while let Some(position) = haystack[from..].iter().position(|&b| b == first) {
+        let start = from + position;
+
+        if haystack[start + 1..].starts_with(rest) {
+            return true;
+        }
+
+        from = start + 1;
+    }
+
+    return false;
+}
+
+impl Program {
+    /// A Rust symbol (legacy with its hash, or v0 that demangles), or the paths of the standard library in the
+    /// read-only data
+    fn is_rust(&self) -> bool {
+        let rust_symbol = |s: &Symbol| match detect_mangling_scheme(&s.name) {
+            ManglingScheme::RustLegacy => true,
+            ManglingScheme::RustV0 => s.demangled != s.name,
+            _ => false,
+        };
+
+        if self.symbols.values().any(rust_symbol) {
+            return true;
+        }
+
+        return self.regions.iter().filter(|r| !r.perms.exec && !r.perms.write).any(|r| RUST_MARKERS.iter().any(|marker| contains(&r.data, marker)));
+    }
+
+    /// The functions of the Go runtime table: symbols (their names stay when the binary is stripped), seeds with
+    /// their size, and the source file of each
+    fn add_go_functions(&mut self, functions: Vec<crate::golang::GoFunction>) {
+        for function in functions {
+            self.add_symbol(Symbol::new(function.entry, &function.name, SymbolKind::Function, function.end - function.entry));
+            self.add_seed(function.entry, Some(function.end - function.entry), SeedSource::GoPclntab);
+
+            if let Some(file) = function.file {
+                if !self.source_names.contains(&file) {
+                    self.source_names.push(file.clone());
+                }
+
+                self.source_files.entry(function.entry).or_insert(file);
+            }
+        }
+    }
+
+    /// (pointer, length) pairs of the data whose pointer is to read-only text of that length
+    fn scan_sized_strings(&self) -> BTreeMap<u64, u64> {
+        let size = self.pointer_size.max(4) as u64;
+        let mut strings = BTreeMap::new();
+
+        for region in self.regions.iter().filter(|r| !r.perms.exec && !r.data.is_empty()) {
+            let start = region.vaddr.next_multiple_of(size);
+            let mut slot = start;
+
+            while slot + 2 * size <= region.vaddr + region.data.len() as u64 {
+                let (Some(pointer), Some(len)) = (self.read_pointer(slot), self.read_pointer(slot + size)) else {
+                    break;
+                };
+
+                if len > 0 && len <= MAX_SIZED_STRING && self.sized_string(pointer, len).is_some() {
+                    let known = strings.entry(pointer).or_insert(len);
+                    *known = (*known).max(len);
+                    slot += 2 * size;
+                    continue;
+                }
+
+                slot += size;
+            }
+        }
+
+        return strings;
     }
 }
 
@@ -872,6 +1024,22 @@ mod tests {
 
         let analysis = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_analysis")).unwrap())).remove(0);
         assert_eq!(analysis.source_names, ["analysis.c"]);
+    }
+
+    #[test]
+    fn languages_and_sized_strings() {
+        let rust = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_rust_strings")).unwrap())).remove(0);
+        assert_eq!(rust.language, Language::Rust);
+
+        // The &str of a static table: pointers in .data.rel.ro to strings of .rodata that are not NUL terminated
+        let colors: Vec<&[u8]> = rust.sized_strings.iter().filter_map(|(&addr, &len)| rust.sized_string(addr, len)).collect();
+        assert!(colors.contains(&&b"crimson"[..]) && colors.contains(&&b"teal"[..]) && colors.contains(&&b"ochre"[..]), "{:?}", colors);
+
+        let c = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_dyn")).unwrap())).remove(0);
+        assert_eq!(c.language, Language::Unknown);
+        assert!(c.sized_strings.is_empty());
+
+        assert!(is_text("héllo\tworld\n".as_bytes()) && !is_text(b"a\x01b") && !is_text(b"\xc3"));
     }
 
     #[test]

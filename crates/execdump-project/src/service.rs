@@ -8,11 +8,14 @@
 use crate::annotations::FunctionNotes;
 use crate::cache::{Cache, Meta, Rendered};
 
+use anyhow::Result;
+
 use execdump_core::crash;
 use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
 use execdump_decompiler::c::ast::CFunction;
 use execdump_decompiler::notes::{apply_summary, apply_vars, used_names};
+use execdump_decompiler::storage::Shape;
 use execdump_decompiler::types::Prototype;
 use execdump_decompiler::{Decompiler, SharedSignatures};
 
@@ -256,7 +259,7 @@ fn worker(index: usize, program: &Program, analysis: &Analysis, shared: &Shared,
                 }
 
                 let name = analysis.functions.get(&addr).map_or_else(|| format!("sub_{:x}", addr), |f| f.name.clone());
-                failed(addr, &name, &error)
+                failed(addr, &name, &format!("{:#}", error))
             }
         };
 
@@ -288,15 +291,15 @@ fn apply(decompiler: &Decompiler, controls: &[(u64, Control)]) {
 }
 
 /// C code of a function with the notes of the user applied
-pub fn render(decompiler: Result<&Decompiler, &String>, addr: u64, notes: &FunctionNotes, name: Option<&str>) -> Rendered {
+pub fn render(decompiler: Result<&Decompiler, &anyhow::Error>, addr: u64, notes: &FunctionNotes, name: Option<&str>) -> Rendered {
     let decompiler = match decompiler {
         Ok(decompiler) => decompiler,
-        Err(error) => return failed(addr, &format!("sub_{:x}", addr), error),
+        Err(error) => return failed(addr, &format!("sub_{:x}", addr), &format!("{:#}", error)),
     };
 
     return match decompiler.c_function(addr) {
         Ok(function) => render_function(decompiler, function, notes, name),
-        Err(error) => failed(addr, &decompiler.function_name(addr), &error),
+        Err(error) => failed(addr, &decompiler.function_name(addr), &format!("{:#}", error)),
     };
 }
 
@@ -331,6 +334,8 @@ pub fn render_function(decompiler: &Decompiler, mut function: CFunction, notes: 
     meta.others = used.others.into_iter().collect();
     meta.storage = std::mem::take(&mut function.storage.vars);
     meta.canaries = std::mem::take(&mut function.storage.canaries);
+    meta.frame = std::mem::take(&mut function.storage.frame);
+    meta.shapes = function.vars.iter().map(|v| Shape::of(&v.ty, &decompiler.typedb)).collect();
 
     return Rendered { ok: true, text: printed.text, lines: printed.lines, meta };
 }

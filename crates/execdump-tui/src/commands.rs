@@ -13,7 +13,10 @@
 
 use super::*;
 
+use crate::debug::DebugAction;
 use crate::views::source::{InsertWhere, Reach};
+
+use anyhow::{anyhow, bail, Context as _, Result};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -55,6 +58,7 @@ impl Key {
             KeyCode::PageDown => "PageDown".to_string(),
             KeyCode::Home => "Home".to_string(),
             KeyCode::End => "End".to_string(),
+            KeyCode::F(n) => format!("F{}", n),
             other => format!("{:?}", other),
         };
 
@@ -96,6 +100,7 @@ pub(crate) fn parse_keys(text: &str) -> Vec<Key> {
             "PageDown" => KeyCode::PageDown,
             "Home" => KeyCode::Home,
             "End" => KeyCode::End,
+            function if function.starts_with('F') && function[1..].parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)) => KeyCode::F(function[1..].parse().unwrap_or(1)),
             single if single.chars().count() == 1 => KeyCode::Char(single.chars().next().unwrap()),
             _ => {
                 keys.push(Key::char('<'));
@@ -246,6 +251,15 @@ pub(crate) enum Command {
     Export(String),
     Library(String),
 
+    // Debugger
+    /// Runs the program under the debugger, with its arguments
+    Debug(Vec<String>),
+    Debugger(DebugAction),
+    /// Toggles a breakpoint at a function or an address, at the line under the cursor without one
+    Break(Option<String>),
+    /// Frame of the call stack the variables and the code are shown for
+    SelectFrame(usize),
+
     // Splits and tabs
     Split { dir: Dir, target: Option<String> },
     TabNew(Option<String>),
@@ -299,6 +313,7 @@ const VIEWS: &str = "Views";
 const GRAPH: &str = "Graphs";
 const CODE: &str = "C code";
 const PROJECT: &str = "Project";
+const DEBUG: &str = "Debugger";
 
 use Complete as C;
 
@@ -397,6 +412,17 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("rewrite", &[], "", "ask the LLM to rewrite the function as clear C", PROJECT, C::Nothing),
     spec("export", &[], "<directory>", "export the C code as a source tree", PROJECT, C::Path),
     spec("lib", &["library"], "<name or path>", "load a shared library", PROJECT, C::Library),
+    spec("debug", &[], "[arguments]", "run the program under the debugger (gdb or lldb): to its first breakpoint, to main without one", DEBUG, C::Nothing),
+    spec("continue", &["cont"], "", "continue the program (start it under the debugger when it is not)", DEBUG, C::Nothing),
+    spec("step", &["s"], "", "next line of C, into the functions it calls", DEBUG, C::Nothing),
+    spec("step-over", &["over", "n"], "", "next line of C of the function, over the calls", DEBUG, C::Nothing),
+    spec("finish", &["step-out", "fin"], "", "until the function returns", DEBUG, C::Nothing),
+    spec("stepi", &["si"], "", "next instruction, into the calls", DEBUG, C::Nothing),
+    spec("nexti", &["ni"], "", "next instruction, over the calls", DEBUG, C::Nothing),
+    spec("interrupt", &["pause"], "", "stop the running program", DEBUG, C::Nothing),
+    spec("kill", &["stop-debug"], "", "kill the program and the debugger", DEBUG, C::Nothing),
+    spec("break", &["b", "br"], "[function or address]", "toggle a breakpoint (at the line or the instruction under the cursor without an argument)", DEBUG, C::Function),
+    spec("frame", &[], "<n>", "frame of the call stack the code and the variables are shown for", DEBUG, C::Nothing),
     spec("split", &["sp", "new"], "[function]", "split below (on a function)", SPLITS, C::Function),
     spec("vsplit", &["vs", "vnew"], "[function]", "split on the right (on a function)", SPLITS, C::Function),
     spec("tabnew", &["tabe", "tabedit"], "[function]", "new tab (on a function)", SPLITS, C::Function),
@@ -421,13 +447,13 @@ pub(crate) fn find_spec(name: &str) -> Option<&'static Spec> {
     return SPECS.iter().find(|s| s.name == name).or_else(|| SPECS.iter().find(|s| s.aliases.contains(&name)));
 }
 
-fn direction(text: Option<&str>) -> Result<Dir, String> {
+fn direction(text: Option<&str>) -> Result<Dir> {
     return match text {
         Some("left" | "h") => Ok(Dir::Left),
         Some("down" | "j") => Ok(Dir::Down),
         Some("up" | "k") => Ok(Dir::Up),
         Some("right" | "l") => Ok(Dir::Right),
-        _ => Err("a direction: left, down, up or right".to_string()),
+        _ => Err(anyhow!("a direction: left, down, up or right")),
     };
 }
 
@@ -436,7 +462,7 @@ fn signed(text: Option<&str>) -> Option<i32> {
 }
 
 /// Command of a command line: a command and its arguments, or an address or a function to go to
-pub(crate) fn parse(text: &str) -> Result<Command, String> {
+pub(crate) fn parse(text: &str) -> Result<Command> {
     let text = text.trim_start();
     let (name, rest) = text.split_once(char::is_whitespace).map_or((text.trim_end(), ""), |(n, r)| (n, r));
 
@@ -449,10 +475,10 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
     let mut words = rest.split_whitespace();
     let (first, second) = (words.next(), words.next());
     let first_owned = first.map(|w| w.to_string());
-    let usage = |spec: &Spec| format!("Usage: {} {}", spec.name, spec.usage);
+    let usage = |spec: &Spec| anyhow!("Usage: {} {}", spec.name, spec.usage);
 
     if name.is_empty() {
-        return Err(String::new());
+        bail!("empty command line");
     }
 
     let Some(spec) = find_spec(name) else {
@@ -526,15 +552,15 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "detail" => Command::Detail { all: first == Some("all") },
         "depth" => match first {
             Some(d) if d.starts_with('+') || d.starts_with('-') => Command::DepthBy(signed(first).ok_or_else(|| usage(spec))?),
-            Some(d) => Command::Depth(d.parse().map_err(|_| "Usage in a call graph: depth <n>".to_string())?),
-            None => return Err("Usage in a call graph: depth <n>".to_string()),
+            Some(d) => Command::Depth(d.parse().map_err(|_| anyhow!("Usage in a call graph: depth <n>"))?),
+            None => bail!("Usage in a call graph: depth <n>"),
         },
         "toggle-imports" => Command::ToggleImports,
         "reroot" => Command::Reroot,
         "up" => Command::CallGraphUp,
         "accept" | "reject" => {
             let id = match first {
-                Some(n) => Some(n.parse::<u64>().map_err(|_| format!("Usage: {} <proposal number>", spec.name))?),
+                Some(n) => Some(n.parse::<u64>().map_err(|_| anyhow!("Usage: {} <proposal number>", spec.name))?),
                 None => None,
             };
 
@@ -574,11 +600,11 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "previous-conflict" => Command::Conflict { forward: false },
         "rename" => match (first, second) {
             (Some(old), Some(new)) => Command::Rename(old.to_string(), new.to_string()),
-            _ => return Err("Usage: rename <name> <new name> (- restores the original name)".to_string()),
+            _ => bail!("Usage: rename <name> <new name> (- restores the original name)"),
         },
         "retype" => match rest.split_once(char::is_whitespace) {
             Some((var, ty)) => Command::Retype(var.to_string(), ty.trim().to_string()),
-            None => return Err("Usage: retype <variable> <C type> (- restores the recovered type)".to_string()),
+            None => bail!("Usage: retype <variable> <C type> (- restores the recovered type)"),
         },
         "sig" => Command::Signature(rest.to_string()),
         "summary" => Command::Summary(rest.to_string()),
@@ -588,12 +614,12 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "ours" => Command::Resolve { edited: true, decompiled: false },
         "theirs" => Command::Resolve { edited: false, decompiled: true },
         "both" => Command::Resolve { edited: true, decompiled: true },
-        "mv" => Command::MoveFunction(first.map(|m| m.to_string()).ok_or("Usage: mv <module path> [function]")?, second.map(|f| f.to_string())),
-        "mkmod" => Command::MakeModule(first.map(|m| m.to_string()).ok_or("Usage: mkmod <module path>")?),
-        "rmmod" => Command::RemoveModule(first.map(|m| m.to_string()).ok_or("Usage: rmmod <module path>")?),
+        "mv" => Command::MoveFunction(first.map(|m| m.to_string()).context("Usage: mv <module path> [function]")?, second.map(|f| f.to_string())),
+        "mkmod" => Command::MakeModule(first.map(|m| m.to_string()).context("Usage: mkmod <module path>")?),
+        "rmmod" => Command::RemoveModule(first.map(|m| m.to_string()).context("Usage: rmmod <module path>")?),
         "renmod" => match (first, second) {
             (Some(old), Some(new)) => Command::RenameModule(old.to_string(), new.to_string()),
-            _ => return Err("Usage: renmod <old module> <new module>".to_string()),
+            _ => bail!("Usage: renmod <old module> <new module>"),
         },
         "llm" => match first {
             Some("modules" | "mods") => Command::LlmModules(second.map(|s| s.to_string())),
@@ -601,8 +627,19 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
             _ => Command::Improve,
         },
         "rewrite" => Command::Rewrite,
-        "export" => Command::Export(first.map(|d| d.to_string()).ok_or("Usage: export <directory>")?),
-        "lib" => Command::Library(first.map(|l| l.to_string()).ok_or("Usage: lib <name or path>")?),
+        "export" => Command::Export(first.map(|d| d.to_string()).context("Usage: export <directory>")?),
+        "lib" => Command::Library(first.map(|l| l.to_string()).context("Usage: lib <name or path>")?),
+        "debug" => Command::Debug(rest.split_whitespace().map(|w| w.to_string()).collect()),
+        "continue" => Command::Debugger(DebugAction::Continue),
+        "step" => Command::Debugger(DebugAction::Step),
+        "step-over" => Command::Debugger(DebugAction::StepOver),
+        "finish" => Command::Debugger(DebugAction::Finish),
+        "stepi" => Command::Debugger(DebugAction::StepInstruction),
+        "nexti" => Command::Debugger(DebugAction::NextInstruction),
+        "interrupt" => Command::Debugger(DebugAction::Interrupt),
+        "kill" => Command::Debugger(DebugAction::Kill),
+        "break" => Command::Break(first_owned),
+        "frame" => Command::SelectFrame(first.and_then(|n| n.parse().ok()).ok_or_else(|| usage(spec))?),
         "split" => Command::Split { dir: Dir::Down, target: first_owned },
         "vsplit" => Command::Split { dir: Dir::Right, target: first_owned },
         "tabnew" => Command::TabNew(first_owned),
@@ -611,16 +648,16 @@ pub(crate) fn parse(text: &str) -> Result<Command, String> {
         "tabprevious" => Command::TabPrevious,
         "only" => Command::Only,
         "link" => Command::Link,
-        "focus-split" => Command::FocusSplit(direction(first).map_err(|e| format!("Usage: focus-split <{}>", e))?),
+        "focus-split" => Command::FocusSplit(direction(first).map_err(|e| anyhow!("Usage: focus-split <{}>", e))?),
         "next-split" => Command::NextSplit,
         "previous-split" => Command::PreviousSplit,
         "last-split" => Command::LastSplit,
         "close-split" => Command::CloseSplit,
-        "move-tab" => Command::MoveTab(direction(first).map_err(|e| format!("Usage: move-tab <{}>", e))?),
+        "move-tab" => Command::MoveTab(direction(first).map_err(|e| anyhow!("Usage: move-tab <{}>", e))?),
         "equalize" => Command::Equalize,
         "resize-width" => Command::Resize { width: true, delta: signed(first).ok_or_else(|| usage(spec))? },
         "resize-height" => Command::Resize { width: false, delta: signed(first).ok_or_else(|| usage(spec))? },
-        other => return Err(format!("Unknown command: {}", other)),
+        other => bail!("Unknown command: {}", other),
     });
 }
 
@@ -638,6 +675,7 @@ pub(crate) enum Context {
     Disasm,
     Table,
     Review,
+    Debug,
     /// Any view of the content
     Content,
     Explorer,
@@ -653,6 +691,7 @@ impl Context {
             Context::Disasm => "Linear disassembly",
             Context::Table => "Tables",
             Context::Review => "Review of the proposals",
+            Context::Debug => "Debugger",
             Context::Content => "Views",
             Context::Explorer => "Explorer",
             Context::Global => "Global",
@@ -718,6 +757,12 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Global, &[s("<C-w>b")], "link");
     bind(Global, &[s("<C-w>t")], "tabnew");
     bind(Global, &[s("gt")], "tabnext");
+    bind(Global, &[s("<F5>")], "continue");
+    bind(Global, &[s("<F6>")], "interrupt");
+    bind(Global, &[s("<F7>")], "step");
+    bind(Global, &[s("<F8>")], "step-over");
+    bind(Global, &[s("<F4>")], "finish");
+    bind(Global, &[s("<F9>")], "break");
     bind(Global, &[s("gT")], "tabprevious");
 
     // Explorer
@@ -784,6 +829,11 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     // Linear disassembly and tables: right opens
     bind(Disasm, &[c(k.right)], "open");
     bind(Table, &[c(k.right)], "open");
+
+    // Breakpoints at the cursor
+    bind(Source, &[s("gb")], "break");
+    bind(Disasm, &[s("gb")], "break");
+    bind(Graph, &[s("gb")], "break");
 
     // Review
     bind(Review, &[s("a")], "accept");
@@ -868,7 +918,7 @@ pub(crate) fn resolve(bindings: &[Binding], contexts: &[Context], keys: &[Key]) 
 pub(crate) fn help_lines(bindings: &[Binding]) -> Vec<(String, String)> {
     let mut lines = Vec::new();
 
-    for context in [Context::Global, Context::Explorer, Context::Content, Context::Search, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source] {
+    for context in [Context::Global, Context::Explorer, Context::Content, Context::Search, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source, Context::Debug] {
         lines.push((context.title().to_string(), String::new()));
         let mut seen: Vec<&str> = Vec::new();
 
@@ -937,6 +987,7 @@ impl App {
             View::Disasm(_) => Some(Context::Disasm),
             View::Table(_) => Some(Context::Table),
             View::Review(_) => Some(Context::Review),
+            View::Debug(_) => Some(Context::Debug),
             _ => None,
         };
 
@@ -976,10 +1027,13 @@ impl App {
 
     /// Runs a command line
     pub(crate) fn run_command(&mut self, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+
         match parse(text) {
             Ok(command) => self.execute(command, None),
-            Err(error) if !error.is_empty() => self.error(error),
-            Err(_) => {}
+            Err(error) => self.error(error.to_string()),
         }
     }
 
@@ -1090,8 +1144,12 @@ impl App {
                     return self.error(format!("Usage: {} <proposal number>", if accept { "accept" } else { "reject" }));
                 };
 
-                let result = self.project(program).ok_or_else(String::new).and_then(|p| if accept { p.accept(id) } else { p.reject(id) });
-                self.report(result.map_err(|e| if e.is_empty() { "No project yet".to_string() } else { e }));
+                let Some(project) = self.project(program) else {
+                    return;
+                };
+
+                let result = if accept { project.accept(id) } else { project.reject(id) };
+                self.report(result);
             }
             Command::Definition => self.info("No name under the cursor".to_string()),
             Command::Rename(old, new) => self.rename(&old, &new),
@@ -1110,12 +1168,16 @@ impl App {
             }
             Command::MoveFunction(module, function) => self.move_function(Some(module), function),
             Command::MakeModule(module) => {
-                let result = self.project(program).ok_or_else(String::new).and_then(|p| p.create_module(&module));
-                self.report(result);
+                if let Some(project) = self.project(program) {
+                    let result = project.create_module(&module);
+                    self.report(result);
+                }
             }
             Command::RemoveModule(module) => {
-                let result = self.project(program).ok_or_else(String::new).and_then(|p| p.remove_module(&module));
-                self.report(result);
+                if let Some(project) = self.project(program) {
+                    let result = project.remove_module(&module);
+                    self.report(result);
+                }
             }
             Command::RenameModule(old, new) => self.rename_module(program, &old, &new),
             Command::Improve => self.improve_code(),
@@ -1129,6 +1191,10 @@ impl App {
             Command::Split { .. } | Command::TabNew(_) | Command::TabClose | Command::TabNext | Command::TabPrevious | Command::Only | Command::Link => {}
             Command::FocusSplit(_) | Command::NextSplit | Command::PreviousSplit | Command::LastSplit | Command::CloseSplit | Command::MoveTab(_) => {}
             Command::Equalize | Command::Resize { .. } => {}
+            Command::Debug(args) => self.start_debugger(args),
+            Command::Debugger(action) => self.debug_action(action),
+            Command::Break(target) => self.toggle_breakpoint(target.as_deref()),
+            Command::SelectFrame(index) => self.select_frame(index),
         }
 
         let _ = count;
@@ -1162,6 +1228,8 @@ mod tests {
         assert_eq!(parse_keys("<C-w><lt>"), vec![Key { code: KeyCode::Char('w'), ctrl: true }, Key::char('<')]);
         assert_eq!(parse_keys("<Space><Enter>"), vec![Key::char(' '), Key { code: KeyCode::Enter, ctrl: false }]);
         assert_eq!(parse_keys("<x"), vec![Key::char('<'), Key::char('x')]);
+        assert_eq!(parse_keys("<F5>"), vec![Key { code: KeyCode::F(5), ctrl: false }]);
+        assert_eq!(Key { code: KeyCode::F(9), ctrl: false }.name(), "F9");
         assert_eq!(Key { code: KeyCode::Char('w'), ctrl: true }.name(), "Ctrl-w");
         assert_eq!(sequence_name(&parse_keys("<C-w>v")), "Ctrl-w v");
         assert_eq!(sequence_name(&parse_keys("gt")), "gt");
@@ -1169,14 +1237,18 @@ mod tests {
 
     #[test]
     fn command_lines() {
-        assert_eq!(parse("q"), Ok(Command::Quit { all: false, force: false }));
-        assert_eq!(parse("qa!"), Ok(Command::Quit { all: true, force: true }));
-        assert_eq!(parse("rename a1 count"), Ok(Command::Rename("a1".to_string(), "count".to_string())));
-        assert_eq!(parse("retype v1 const char *"), Ok(Command::Retype("v1".to_string(), "const char *".to_string())));
-        assert_eq!(parse("prompt rename x "), Ok(Command::Prompt("rename x ".to_string())));
-        assert_eq!(parse("resize-width -5"), Ok(Command::Resize { width: true, delta: -5 }));
-        assert_eq!(parse("main"), Ok(Command::Goto("main".to_string())));
-        assert!(parse("export").unwrap_err().starts_with("Usage"));
+        assert_eq!(parse("q").unwrap(), Command::Quit { all: false, force: false });
+        assert_eq!(parse("qa!").unwrap(), Command::Quit { all: true, force: true });
+        assert_eq!(parse("rename a1 count").unwrap(), Command::Rename("a1".to_string(), "count".to_string()));
+        assert_eq!(parse("retype v1 const char *").unwrap(), Command::Retype("v1".to_string(), "const char *".to_string()));
+        assert_eq!(parse("prompt rename x ").unwrap(), Command::Prompt("rename x ".to_string()));
+        assert_eq!(parse("resize-width -5").unwrap(), Command::Resize { width: true, delta: -5 });
+        assert_eq!(parse("main").unwrap(), Command::Goto("main".to_string()));
+        assert_eq!(parse("debug -v input.txt").unwrap(), Command::Debug(vec!["-v".to_string(), "input.txt".to_string()]));
+        assert_eq!(parse("n").unwrap(), Command::Debugger(DebugAction::StepOver));
+        assert_eq!(parse("b main").unwrap(), Command::Break(Some("main".to_string())));
+        assert!(parse("export").unwrap_err().to_string().starts_with("Usage"));
+        assert!(parse("").is_err());
     }
 
     #[test]

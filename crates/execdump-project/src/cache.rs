@@ -8,7 +8,7 @@
  * execdump, annotations of the function and of what it calls) has not changed.
  */
 
-use execdump_decompiler::storage::{self, Loc, Range};
+use execdump_decompiler::storage::{self, Loc, Range, Shape};
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -44,6 +44,10 @@ pub struct Meta {
     /// Where the variables are while the function runs (by index in vars), the slots of the stack canary
     pub storage: Vec<(usize, Vec<Range>)>,
     pub canaries: Vec<Loc>,
+    /// Offset of the stack pointer from its value at the entry (stack locations over the addresses)
+    pub frame: Vec<Range>,
+    /// How the value of each variable is read and shown (by index in vars)
+    pub shapes: Vec<Shape>,
 }
 
 impl Meta {
@@ -65,6 +69,14 @@ impl Meta {
         self.errors.iter().for_each(|e| line('E', e));
         self.storage.iter().for_each(|(var, ranges)| line('L', &format!("{}\t{}", var, storage::encode(ranges))));
         self.canaries.iter().for_each(|loc| line('K', &format!("{:x}", loc.0)));
+
+        if !self.frame.is_empty() {
+            line('F', &storage::encode(&self.frame));
+        }
+
+        if !self.shapes.is_empty() {
+            line('Y', &self.shapes.iter().map(|s| s.encode()).collect::<Vec<_>>().join(" "));
+        }
 
         return out;
     }
@@ -97,6 +109,8 @@ impl Meta {
                     }
                 }
                 "K " => meta.canaries.extend(u32::from_str_radix(&value, 16).ok().map(Loc)),
+                "F " => meta.frame = storage::decode(&value),
+                "Y " => meta.shapes = value.split_whitespace().map(Shape::decode).collect(),
                 _ => {}
             }
         }
@@ -380,6 +394,8 @@ mod tests {
             globals: vec![("g_4000".to_string(), 0x4000)],
             storage: vec![(0, vec![Range { start: 0, end: 8, loc: Loc(0x81d) }, Range { start: 12, end: 20, loc: Loc(0x3fffffa2) }])],
             canaries: vec![Loc(0x7fffffc2)],
+            frame: vec![Range { start: 0, end: 1, loc: Loc::stack(0).unwrap() }, Range { start: 1, end: 20, loc: Loc::stack(-0x28).unwrap() }],
+            shapes: vec![Shape::Int { bytes: 4, signed: true }, Shape::Pointer { text: true }, Shape::Bytes(64)],
             ..Meta::default()
         };
 

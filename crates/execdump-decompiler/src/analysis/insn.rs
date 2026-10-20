@@ -2,6 +2,8 @@
  * Architecture-neutral instruction model built on top of Capstone
  */
 
+use anyhow::{bail, Result};
+
 use capstone::arch::arm64::{Arm64OperandType, ArchMode as Arm64Mode};
 use capstone::arch::x86::{ArchMode as X86Mode, ArchSyntax, X86OperandType, X86Reg};
 use capstone::arch::ArchOperand;
@@ -99,12 +101,12 @@ pub struct Decoder {
     address_mask: u64,
 }
 
-fn build_capstone(arch: Architecture, detail: bool) -> Result<Capstone, Box<dyn std::error::Error>> {
+fn build_capstone(arch: Architecture, detail: bool) -> Result<Capstone> {
     let cs = match arch {
         Architecture::X86 => Capstone::new().x86().mode(X86Mode::Mode32).syntax(ArchSyntax::Intel).detail(detail).build()?,
         Architecture::X86_64 => Capstone::new().x86().mode(X86Mode::Mode64).syntax(ArchSyntax::Intel).detail(detail).build()?,
         Architecture::Aarch64 => Capstone::new().arm64().mode(Arm64Mode::Arm).detail(detail).build()?,
-        Architecture::Unsupported => return Err("Unsupported architecture for disassembly".into()),
+        Architecture::Unsupported => bail!("Unsupported architecture for disassembly"),
     };
 
     return Ok(cs);
@@ -147,7 +149,7 @@ fn classify_aarch64(mnemonic: &str, operands: &[Operand]) -> Flow {
 }
 
 impl Decoder {
-    pub fn new(arch: Architecture) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(arch: Architecture) -> Result<Self> {
         return Ok(Self {
             arch,
             detailed: build_capstone(arch, true)?,

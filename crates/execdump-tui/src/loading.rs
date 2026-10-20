@@ -5,6 +5,8 @@
 
 use super::*;
 
+use anyhow::{Context, Result};
+
 /// Background preparation of a program: its analysis, then its project
 pub(crate) struct Loading {
     pub functions: Arc<AtomicUsize>,
@@ -24,19 +26,19 @@ pub(crate) struct Prepared {
     needed: Vec<Needed>,
 }
 
-pub(crate) type Loaded = (usize, Result<Prepared, String>);
+pub(crate) type Loaded = (usize, Result<Prepared>);
 
 /// The program of a binary (the first one of fat binaries), with the libraries it needs
-pub(crate) fn parse_binary(path: &Path) -> Result<(Program, Vec<Needed>), String> {
+pub(crate) fn parse_binary(path: &Path) -> Result<(Program, Vec<Needed>)> {
     let path = path.to_path_buf();
 
-    let exec = match guess_exectype(&path).map_err(|e| e.to_string())? {
-        ExecType::PE => Exec::PE(parse_pe(&path).map_err(|e| e.to_string())?),
-        ExecType::ELF => Exec::ELF(parse_elf(&path).map_err(|e| e.to_string())?),
-        ExecType::MachO => Exec::MachO(parse_macho(&path).map_err(|e| e.to_string())?),
+    let exec = match guess_exectype(&path)? {
+        ExecType::PE => Exec::PE(parse_pe(&path)?),
+        ExecType::ELF => Exec::ELF(parse_elf(&path)?),
+        ExecType::MachO => Exec::MachO(parse_macho(&path)?),
     };
 
-    let program = programs_from_exec(&exec).into_iter().next().ok_or("no program in the file")?;
+    let program = programs_from_exec(&exec).into_iter().next().context("no program in the file")?;
     return Ok((program, needed_libraries(&exec, &path)));
 }
 
@@ -46,7 +48,7 @@ impl Loading {
         let path = path.to_path_buf();
 
         return Loading::spawn(index, sender, move |functions, stage| {
-            let analysis = Arc::new(analyze(&program, Some(functions)).map_err(|e| e.to_string())?);
+            let analysis = Arc::new(analyze(&program, Some(functions))?);
             stage.store(PROJECT, Ordering::Relaxed);
             let project = Project::open(index, count, program.clone(), analysis.clone(), &path, location, workers);
             Ok(Prepared { program, analysis, project, needed: Vec::new() })
@@ -60,19 +62,19 @@ impl Loading {
         return Loading::spawn(index, sender, move |functions, stage| {
             let (program, needed) = parse_binary(&path)?;
             let program = Arc::new(program);
-            let analysis = Arc::new(analyze(&program, Some(functions)).map_err(|e| e.to_string())?);
+            let analysis = Arc::new(analyze(&program, Some(functions))?);
             stage.store(PROJECT, Ordering::Relaxed);
             let project = Project::open(0, 1, program.clone(), analysis.clone(), &path, Some(location), workers);
             Ok(Prepared { program, analysis, project, needed })
         });
     }
 
-    fn spawn(index: usize, sender: &Sender<Loaded>, work: impl FnOnce(&AtomicUsize, &AtomicU8) -> Result<Prepared, String> + Send + 'static) -> Self {
+    fn spawn(index: usize, sender: &Sender<Loaded>, work: impl FnOnce(&AtomicUsize, &AtomicU8) -> Result<Prepared> + Send + 'static) -> Self {
         let loading = Loading { functions: Arc::new(AtomicUsize::new(0)), stage: Arc::new(AtomicU8::new(ANALYSIS)) };
         let (functions, stage, sender) = (loading.functions.clone(), loading.stage.clone(), sender.clone());
 
         let thread = crash::thread(&format!("analysis-{}", index)).spawn(move || {
-            let result = crash::catch(|| work(&functions, &stage)).unwrap_or_else(|error| Err(format!("analysis failed: {}", error)));
+            let result = crash::catch(|| work(&functions, &stage)).unwrap_or_else(|error| Err(error.context("analysis failed")));
             let _ = sender.send((index, result));
         });
 
@@ -120,7 +122,7 @@ impl App {
                         }
                     }
                 }
-                Err(error) => self.analysis_errors[index] = Some(error),
+                Err(error) => self.analysis_errors[index] = Some(format!("{:#}", error)),
             }
         }
 

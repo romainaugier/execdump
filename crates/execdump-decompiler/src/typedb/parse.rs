@@ -6,6 +6,8 @@ use super::{Aggregate, Field, TypeDb};
 
 use crate::types::{CType, FuncType, Param};
 
+use anyhow::{anyhow, bail, Context, Result};
+
 use lang_c::ast::*;
 use lang_c::driver::{parse_preprocessed, Config, Flavor};
 use lang_c::span::Node;
@@ -14,7 +16,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 /// Runs the C preprocessor on a list of headers (compiler -E -P)
-pub fn preprocess(compiler: &str, args: &[String], headers: &[String]) -> Result<String, String> {
+pub fn preprocess(compiler: &str, args: &[String], headers: &[String]) -> Result<String> {
     let includes: String = headers.iter().map(|h| format!("#include <{}>\n", h)).collect();
 
     let mut child = Command::new(compiler)
@@ -25,14 +27,14 @@ pub fn preprocess(compiler: &str, args: &[String], headers: &[String]) -> Result
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("{}: {}", compiler, e))?;
+        .with_context(|| compiler.to_string())?;
 
-    child.stdin.take().ok_or("no stdin")?.write_all(includes.as_bytes()).map_err(|e| e.to_string())?;
+    child.stdin.take().context("no stdin")?.write_all(includes.as_bytes())?;
 
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let output = child.wait_with_output()?;
 
     if !output.status.success() {
-        return Err(format!("{} failed:\n{}", compiler, String::from_utf8_lossy(&output.stderr)));
+        bail!("{} failed:\n{}", compiler, String::from_utf8_lossy(&output.stderr));
     }
 
     return Ok(String::from_utf8_lossy(&output.stdout).to_string());
@@ -182,7 +184,7 @@ fn builtin_typedef(name: &str) -> Option<CType> {
     return [8, 16, 64, 128].contains(&bits).then_some(CType::Int { bits, signed });
 }
 
-pub fn parse(db: &mut TypeDb, source: &str) -> Result<(), String> {
+pub fn parse(db: &mut TypeDb, source: &str) -> Result<()> {
     let (source, hints) = sanitize(&format!("{}{}", PRELUDE, source));
 
     let mut config = Config::default();
@@ -190,7 +192,7 @@ pub fn parse(db: &mut TypeDb, source: &str) -> Result<(), String> {
 
     let parsed = parse_preprocessed(&config, source.clone()).map_err(|e| {
         let line = source.lines().nth(e.line.saturating_sub(1)).unwrap_or_default().trim();
-        format!("line {}, column {}: expected one of {:?} in \"{}\"", e.line, e.column, e.expected, line)
+        anyhow!("line {}, column {}: expected one of {:?} in \"{}\"", e.line, e.column, e.expected, line)
     })?;
 
     let (packs, hints): (Vec<_>, Vec<_>) = hints.into_iter().partition(|(_, hint)| matches!(hint, Hint::Pack(_)));

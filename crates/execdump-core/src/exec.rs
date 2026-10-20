@@ -1,3 +1,5 @@
+use anyhow::{bail, Result};
+
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -12,7 +14,7 @@ pub enum ExecType {
     MachO,
 }
 
-pub fn guess_exectype(path: &PathBuf) -> Result<ExecType, Box<dyn std::error::Error>> {
+pub fn guess_exectype(path: &PathBuf) -> Result<ExecType> {
     let mut file = File::open(path)?;
     let mut buffer = vec![0; 8];
 
@@ -30,7 +32,7 @@ pub fn guess_exectype(path: &PathBuf) -> Result<ExecType, Box<dyn std::error::Er
         return Ok(ExecType::MachO);
     }
 
-    return Err("Cannot determine the executable type".into());
+    bail!("Cannot determine the executable type");
 }
 
 #[derive(Debug)]

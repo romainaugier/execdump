@@ -2,6 +2,7 @@
  * Modules: the source files the functions are organized in.
  *
  * The initial grouping is found automatically, from the most to the least reliable source:
+ * - the Go pclntab, which gives the package of every function and the source file it is in
  * - the ELF FILE symbols, which give the object file of the local functions
  * - the functions between two functions of the same object file (linkers lay out each object file
  *   contiguously)
@@ -11,7 +12,7 @@
  */
 
 use execdump_core::demangle::{detect_mangling_scheme, ManglingScheme};
-use execdump_core::program::Program;
+use execdump_core::program::{Language, Program};
 use execdump_decompiler::analysis::Analysis;
 
 use std::collections::{BTreeMap, HashMap};
@@ -21,9 +22,19 @@ pub fn auto_modules(program: &Program, analysis: &Analysis, default: &str) -> BT
     let functions: Vec<u64> = analysis.functions.values().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
     let mut modules: BTreeMap<u64, String> = BTreeMap::new();
 
+    // Go: the package of the function and its source file (runtime.gopark of /usr/lib/go/src/runtime/proc.go ->
+    // runtime/proc.go)
+    if program.language == Language::Go {
+        for &addr in functions.iter() {
+            if let Some(module) = program.symbol_at(addr).map(|s| go_module(&s.name, program.source_files.get(&addr).map(String::as_str))) {
+                modules.insert(addr, module);
+            }
+        }
+    }
+
     // Rust paths name the module of a function (its object files are codegen units, not source files)
     for &addr in functions.iter() {
-        let symbol = program.symbol_at(addr).filter(|s| matches!(detect_mangling_scheme(&s.name), ManglingScheme::RustLegacy | ManglingScheme::RustV0));
+        let symbol = program.symbol_at(addr).filter(|s| !modules.contains_key(&addr) && matches!(detect_mangling_scheme(&s.name), ManglingScheme::RustLegacy | ManglingScheme::RustV0));
 
         if let Some(module) = symbol.and_then(|s| rust_module(&s.demangled)) {
             modules.insert(addr, module);
@@ -77,6 +88,29 @@ pub(crate) fn source_module(file: &str) -> String {
     }
 
     return format!("{}.c", name.trim_end_matches(".o"));
+}
+
+/// Package of a Go function: its path to the first dot after the last slash (internal/poll.(*FD).Write ->
+/// internal/poll, example.com/app/sub.Run -> example.com/app/sub)
+fn go_package(name: &str) -> &str {
+    let last_slash = name.rfind('/').map_or(0, |i| i + 1);
+    let end = name[last_slash..].find('.').map_or(name.len(), |i| last_slash + i);
+    return &name[..end];
+}
+
+/// Module of a Go function: its package and the name of its source file (runtime/proc.go), the package alone without
+/// a file
+fn go_module(name: &str, file: Option<&str>) -> String {
+    let clean = |text: &str| -> String { text.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/') { c } else { '_' }).collect() };
+    let package = clean(go_package(name).trim_matches('/'));
+    let package = if package.is_empty() { "go".to_string() } else { package };
+
+    let stem = file.and_then(|f| f.rsplit(['/', '\\']).next()).map(|f| f.strip_suffix(".go").unwrap_or(f)).filter(|f| !f.is_empty());
+
+    return match stem {
+        Some(stem) => format!("{}/{}.go", package, clean(stem)),
+        None => format!("{}.go", package),
+    };
 }
 
 /// ns::Class::method(int) -> ns/Class.cpp
@@ -295,6 +329,11 @@ mod tests {
         assert_eq!(rust_module("<[u8] as core::fmt::Debug>::fmt").as_deref(), Some("core/fmt.rs"));
         assert_eq!(rust_module("core::ptr::drop_in_place::<alloc::string::String>").as_deref(), Some("core/ptr.rs"));
         assert_eq!(rust_module("execdump::main").as_deref(), Some("execdump/main.rs"));
+        assert_eq!(go_module("runtime.gopark", Some("/usr/lib/go/src/runtime/proc.go")), "runtime/proc.go");
+        assert_eq!(go_module("internal/poll.(*FD).Write", Some("internal/poll/fd_unix.go")), "internal/poll/fd_unix.go");
+        assert_eq!(go_module("example.com/app/sub.Run", None), "example.com/app/sub.go");
+        assert_eq!(go_module("main.main", Some("C:\\src\\app\\main.go")), "main/main.go");
+        assert_eq!(go_module("type:.eq.main.T", None), "type_.go");
     }
 
     #[test]

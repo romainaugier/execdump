@@ -8,6 +8,8 @@
  * data/typedb/extras_*.h declare the runtime functions compilers call that no public header declares
  */
 
+use anyhow::{bail, Result};
+
 use execdump_core::disasm::Architecture;
 use execdump_decompiler::typedb::{preprocess, TypeDb};
 use execdump_decompiler::types::DataModel;
@@ -43,14 +45,14 @@ typedef struct { long long q; } __m64;
 
 const INTRINSICS_HEADERS: &[&str] = &["x86intrin.h", "intrin.h", "immintrin.h", "emmintrin.h", "xmmintrin.h", "mmintrin.h", "pmmintrin.h", "ia32intrin.h"];
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     let platform = std::env::args().nth(1).unwrap_or_default();
     let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/typedb");
 
     let (compiler, headers, mut args, model, extras) = match platform.as_str() {
         "unix" => ("cc", UNIX_HEADERS, vec!["-D_GNU_SOURCE", "-O2", "-D_FORTIFY_SOURCE=2"], DataModel::new(Architecture::X86_64, false), "extras_unix.h"),
         "windows" => ("x86_64-w64-mingw32-gcc", WINDOWS_HEADERS, vec![], DataModel::new(Architecture::X86_64, true), "extras_windows.h"),
-        _ => return Err("usage: build_typedb unix|windows".into()),
+        _ => bail!("usage: build_typedb unix|windows"),
     };
 
     let stub = std::env::temp_dir().join("execdump-intrinsics-stub");

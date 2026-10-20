@@ -2,8 +2,10 @@
  * Global configuration, loaded from ~/.execdumprc (TOML), one section per feature
  */
 
+use anyhow::{Context, Result};
+
 use execdump_decompiler::llm::LlmConfig;
-use execdump_tui::KeyBindings;
+use execdump_tui::{DebuggerConfig, KeyBindings};
 
 use serde::Deserialize;
 
@@ -12,10 +14,11 @@ use serde::Deserialize;
 pub struct Config {
     pub keys: KeyBindings,
     pub llm: LlmConfig,
+    pub debugger: DebuggerConfig,
 }
 
 impl Config {
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load() -> Result<Self> {
         let Some(path) = dirs::home_dir().map(|h| h.join(".execdumprc")) else {
             return Ok(Config::default());
         };
@@ -24,9 +27,9 @@ impl Config {
             return Ok(Config::default());
         }
 
-        let contents = std::fs::read_to_string(&path)?;
+        let contents = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
 
-        return toml::from_str(&contents).map_err(|e| format!("{}: {}", path.display(), e).into());
+        return toml::from_str(&contents).with_context(|| path.display().to_string());
     }
 }
 

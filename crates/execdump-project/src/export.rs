@@ -6,6 +6,8 @@
 
 use crate::project::Project;
 
+use anyhow::{bail, Context, Result};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -38,24 +40,24 @@ fn prototype_name(signature: &str) -> Option<&str> {
     return Some(&before[start..]).filter(|n| !n.is_empty());
 }
 
-fn write(dir: &Path, path: &str, text: &str, files: &mut usize) -> Result<(), String> {
+fn write(dir: &Path, path: &str, text: &str, files: &mut usize) -> Result<()> {
     let path = dir.join(path);
 
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {}", parent.display(), e))?;
+        std::fs::create_dir_all(parent).with_context(|| parent.display().to_string())?;
     }
 
-    std::fs::write(&path, text).map_err(|e| format!("{}: {}", path.display(), e))?;
+    std::fs::write(&path, text).with_context(|| path.display().to_string())?;
     *files += 1;
 
     return Ok(());
 }
 
-pub fn export(project: &mut Project, dir: &Path) -> Result<Report, String> {
+pub fn export(project: &mut Project, dir: &Path) -> Result<Report> {
     let missing = project.missing();
 
     if !missing.is_empty() {
-        return Err(format!("{} functions are not decompiled yet", missing.len()));
+        bail!("{} functions are not decompiled yet", missing.len());
     }
 
     let mut report = Report { dir: dir.to_path_buf(), ..Report::default() };

@@ -7,6 +7,8 @@ use super::{llvm, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
 
 use crate::analysis::function::CallTarget;
 
+use anyhow::{anyhow, bail, Context, Result};
+
 use capstone::arch::arm64::{Arm64CC, Arm64Extender, Arm64OperandType, Arm64Shift};
 use capstone::arch::ArchOperand;
 use capstone::Capstone;
@@ -273,14 +275,14 @@ pub fn memory(insn: &Insn) -> Vec<MemAccess> {
  */
 
 /// Value of a register or immediate operand, with its extension and shift
-fn get<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, bits: u32) -> Result<IntValue<'ctx>, String> {
+fn get<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, bits: u32) -> Result<IntValue<'ctx>> {
     let b = &l.builder;
 
     let (mut value, ext, sh) = match op {
         Op::Reg { r, ext, shift } => (l.read(*r)?, *ext, *shift),
         Op::Zero(_) => return Ok(l.int(bits).const_zero()),
         Op::Imm(imm, shift) => (l.int(bits).const_int(*imm as u64, true), Ext::None, *shift),
-        _ => return Err("not a value operand".to_string()),
+        _ => bail!("not a value operand"),
     };
 
     value = match ext {
@@ -306,35 +308,35 @@ fn get<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, bits: u32) -> Result<IntValue<'ctx>,
 }
 
 /// Writes a register, 32-bit writes clear the upper half (as do the scalar floating point writes)
-fn set<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: IntValue<'ctx>) -> Result<(), String> {
+fn set<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: IntValue<'ctx>) -> Result<()> {
     return match op {
         Op::Reg { r, .. } if r.bits < l.env.regs.regs[r.reg].bits => l.write_zext(*r, value),
         Op::Reg { r, .. } => l.write(*r, value),
         Op::Zero(_) => Ok(()),
-        _ => Err("not a register operand".to_string()),
+        _ => Err(anyhow!("not a register operand")),
     };
 }
 
-fn get_float<'ctx>(l: &Lifter<'ctx, '_>, op: &Op) -> Result<FloatValue<'ctx>, String> {
+fn get_float<'ctx>(l: &Lifter<'ctx, '_>, op: &Op) -> Result<FloatValue<'ctx>> {
     return match op {
         Op::Reg { r, .. } => l.read_float(*r, r.bits),
         Op::Fp(value) => Ok(l.cx.f64_type().const_float(*value)),
         Op::Zero(bits) => l.int_to_float(l.int(*bits).const_zero()),
-        _ => Err("not a floating point operand".to_string()),
+        _ => Err(anyhow!("not a floating point operand")),
     };
 }
 
-fn set_float<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: FloatValue<'ctx>) -> Result<(), String> {
+fn set_float<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: FloatValue<'ctx>) -> Result<()> {
     let Op::Reg { r, .. } = op else {
-        return Err("not a register operand".to_string());
+        bail!("not a register operand");
     };
 
     return l.write_float(*r, value, true);
 }
 
 /// Address of the memory operand (before the base update of the post indexed forms)
-fn address<'ctx>(l: &Lifter<'ctx, '_>, insn: &Insn) -> Result<PointerValue<'ctx>, String> {
-    let (base, index, disp, post) = memory_operand(insn).ok_or("no memory operand")?;
+fn address<'ctx>(l: &Lifter<'ctx, '_>, insn: &Insn) -> Result<PointerValue<'ctx>> {
+    let (base, index, disp, post) = memory_operand(insn).context("no memory operand")?;
     let disp = if post.is_some() { 0 } else { disp };
 
     let Some((index, ext, sh)) = index else {
@@ -347,19 +349,19 @@ fn address<'ctx>(l: &Lifter<'ctx, '_>, insn: &Insn) -> Result<PointerValue<'ctx>
     return Ok(unsafe { llvm!(l.builder.build_gep(l.cx.i8_type(), ptr, &[offset], "")) });
 }
 
-fn writeback<'ctx>(l: &Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
+fn writeback<'ctx>(l: &Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
     if !insn.writeback {
         return Ok(());
     }
 
-    let (base, _, disp, post) = memory_operand(insn).ok_or("no memory operand")?;
+    let (base, _, disp, post) = memory_operand(insn).context("no memory operand")?;
     let value = l.read(base)?;
     let value = llvm!(l.builder.build_int_add(value, l.constant(64, post.unwrap_or(disp) as u64), ""));
 
     return l.write(base, value);
 }
 
-fn unsupported(l: &Lifter, insn: &Insn) -> Result<(), String> {
+fn unsupported(l: &Lifter, insn: &Insn) -> Result<()> {
     let asm_type = l.cx.void_type().fn_type(&[], false);
     let asm = l.cx.create_inline_asm(asm_type, insn.text.clone(), String::new(), true, false, Some(InlineAsmDialect::ATT), false);
     llvm!(l.builder.build_indirect_call(asm_type, asm, &[], ""));
@@ -374,7 +376,7 @@ fn bitfield_mask(width: u32) -> u64 {
  * Semantics
  */
 
-pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
+pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
     let ops = insn.ops.as_slice();
     let mnemonic = insn.mnemonic.as_str();
     let b = &l.builder;
@@ -582,7 +584,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
 
         ("csel" | "csinc" | "csinv" | "csneg", [dst, x, y]) => {
             let bits = dst.bits();
-            let cond = l.condition(insn.cc.ok_or("conditional select without a condition")?)?;
+            let cond = l.condition(insn.cc.context("conditional select without a condition")?)?;
             let (x, y) = (get(l, x, bits)?, get(l, y, bits)?);
 
             let y = match mnemonic {
@@ -596,13 +598,13 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
         }
         ("cset" | "csetm", [dst]) => {
             let bits = dst.bits();
-            let cond = l.condition(insn.cc.ok_or("cset without a condition")?)?;
+            let cond = l.condition(insn.cc.context("cset without a condition")?)?;
             let value = l.resize(cond, bits, mnemonic == "csetm")?;
             set(l, dst, value)?;
         }
         ("cinc" | "cinv" | "cneg", [dst, src]) => {
             let bits = dst.bits();
-            let cond = l.condition(insn.cc.ok_or("conditional operation without a condition")?)?;
+            let cond = l.condition(insn.cc.context("conditional operation without a condition")?)?;
             let value = get(l, src, bits)?;
             let changed = match mnemonic {
                 "cinc" => llvm!(b.build_int_add(value, l.constant(bits, 1), "")),
@@ -615,7 +617,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
         ("ccmp" | "ccmn", [x, y, Op::Imm(nzcv, _)]) => {
             // Compares when the condition holds, sets the flags to nzcv otherwise
             let bits = x.bits();
-            let cond = l.condition(insn.cc.ok_or("conditional compare without a condition")?)?;
+            let cond = l.condition(insn.cc.context("conditional compare without a condition")?)?;
             let (a, c) = (get(l, x, bits)?, get(l, y, bits)?);
             let (op, result) = if mnemonic == "ccmp" { (FlagOp::Sub, llvm!(b.build_int_sub(a, c, ""))) } else { (FlagOp::Add, llvm!(b.build_int_add(a, c, ""))) };
 
@@ -669,7 +671,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
         // Branches
         ("b", [Op::Imm(..)]) => {}
         (m, [Op::Imm(..)]) if m.starts_with("b.") || m.starts_with("bc.") => {
-            l.branch = Some(l.condition(insn.cc.ok_or("conditional branch without a condition")?)?);
+            l.branch = Some(l.condition(insn.cc.context("conditional branch without a condition")?)?);
         }
         ("cbz" | "cbnz", [reg, _]) => {
             let value = get(l, reg, reg.bits())?;
@@ -789,7 +791,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
             l.set_float_flags(x, y)?;
         }
         ("fcsel", [dst, x, y]) => {
-            let cond = l.condition(insn.cc.ok_or("fcsel without a condition")?)?;
+            let cond = l.condition(insn.cc.context("fcsel without a condition")?)?;
             let (x, y) = (get_float(l, x)?, get_float(l, y)?);
             let value = llvm!(b.build_select(cond, x, y, "")).into_float_value();
             set_float(l, dst, value)?;
@@ -802,7 +804,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
 }
 
 /// add, sub and the compares, with their flags
-fn arithmetic<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
+fn arithmetic<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
     let ops = insn.ops.as_slice();
     let mnemonic = insn.mnemonic.as_str();
     let b = &l.builder;
@@ -827,7 +829,7 @@ fn arithmetic<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String>
     };
 
     let (op, result) = match mnemonic {
-        "add" | "adds" | "cmn" => (FlagOp::Add, known.map_or_else(|| b.build_int_add(x, y, "").map_err(|e| e.to_string()), Ok)?),
+        "add" | "adds" | "cmn" => (FlagOp::Add, known.map_or_else(|| b.build_int_add(x, y, ""), Ok)?),
         _ => (FlagOp::Sub, llvm!(b.build_int_sub(x, y, ""))),
     };
 

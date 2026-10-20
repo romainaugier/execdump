@@ -18,9 +18,11 @@ use crate::llm::{self, Assistant, LlmConfig, Renames};
 use crate::storage;
 use crate::types::{CType, DataModel, FuncType, Param, Prototype};
 
+use anyhow::{anyhow, bail, Context as _, Result};
+
 use execdump_core::demangle::demangle_symbol;
 use execdump_core::disasm::Architecture;
-use execdump_core::program::{Format, Program};
+use execdump_core::program::{Format, Language, Program};
 
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -197,16 +199,17 @@ pub struct Decompiler<'a> {
 }
 
 impl<'a> Decompiler<'a> {
-    pub fn new(program: &'a Program, analysis: &'a Analysis) -> Result<Self, String> {
+    pub fn new(program: &'a Program, analysis: &'a Analysis) -> Result<Self> {
         let arch = program.architecture();
 
         if arch == Architecture::Unsupported {
-            return Err("unsupported architecture".to_string());
+            bail!("unsupported architecture");
         }
 
         let windows = program.format == Format::Pe;
         let regs = RegisterFile::new(arch);
-        let abi = Abi::new(&regs, windows);
+        let go = (program.language == Language::Go).then(|| Abi::go(&regs)).flatten();
+        let abi = go.unwrap_or_else(|| Abi::new(&regs, windows));
         let model = DataModel::new(arch, windows);
         let typedb = TypeDb::bundled(if windows { Platform::Windows } else { Platform::Unix }, model);
 
@@ -228,7 +231,7 @@ impl<'a> Decompiler<'a> {
             globals: RefCell::new(HashMap::new()),
             prototypes: RefCell::new(HashMap::new()),
             noreturn: RefCell::new(HashSet::new()),
-            decoder: Decoder::new(arch).map_err(|e| e.to_string())?,
+            decoder: Decoder::new(arch)?,
             cs: lift::capstone(arch)?,
             frames: RefCell::new((HashMap::new(), VecDeque::new())),
             machine: target_machine(program)?,
@@ -265,7 +268,7 @@ impl<'a> Decompiler<'a> {
     }
 
     /// Enables the LLM improvement pass of the C code
-    pub fn with_assistant(mut self, config: &LlmConfig) -> Result<Self, String> {
+    pub fn with_assistant(mut self, config: &LlmConfig) -> Result<Self> {
         self.assistant = Some(Assistant::new(config)?);
         return Ok(self);
     }
@@ -276,9 +279,9 @@ impl<'a> Decompiler<'a> {
 
     /// The C function improved by the LLM (names, types and a summary), the function rename is
     /// remembered for the functions decompiled afterwards
-    pub fn c_function_improved(&self, addr: u64) -> Result<CFunction, String> {
+    pub fn c_function_improved(&self, addr: u64) -> Result<CFunction> {
         let mut function = self.c_function(addr)?;
-        let assistant = self.assistant.as_ref().ok_or("no LLM configured")?;
+        let assistant = self.assistant.as_ref().context("no LLM configured")?;
 
         let mut suggestions = assistant.suggest(&function.print().text)?;
 
@@ -299,14 +302,14 @@ impl<'a> Decompiler<'a> {
     }
 
     /// The optimized LLVM IR of a function
-    pub fn llvm_ir(&self, addr: u64) -> Result<String, String> {
+    pub fn llvm_ir(&self, addr: u64) -> Result<String> {
         // Named values: the IR is read by people
         let cx = Context::create();
         let module = self.lift_function(&cx, addr)?;
 
         // LLVM prints the constant expressions as trees
         if printed_constants_size(&module) > MAX_PRINTED_CONSTANTS {
-            return Err("the constant expressions of the function are too large to be printed".to_string());
+            bail!("the constant expressions of the function are too large to be printed");
         }
 
         // The instruction addresses are debug locations for the C backend
@@ -321,7 +324,7 @@ impl<'a> Decompiler<'a> {
     }
 
     /// The C code of a function
-    pub fn c_code(&self, addr: u64) -> Result<String, String> {
+    pub fn c_code(&self, addr: u64) -> Result<String> {
         let function = self.c_function(addr)?;
         return Ok(function.print().text);
     }
@@ -335,7 +338,7 @@ impl<'a> Decompiler<'a> {
     }
 
     /// The C function of a function, with the address of each statement
-    pub fn c_function(&self, addr: u64) -> Result<CFunction, String> {
+    pub fn c_function(&self, addr: u64) -> Result<CFunction> {
         if let Some(function) = self.ready.borrow_mut().remove(&addr) {
             return Ok(function);
         }
@@ -355,12 +358,12 @@ impl<'a> Decompiler<'a> {
     }
 
     /// The C function, the structs of its callees it uses
-    fn c_function_with_callees(&self, addr: u64) -> Result<(CFunction, BTreeMap<String, Aggregate>), String> {
+    fn c_function_with_callees(&self, addr: u64) -> Result<(CFunction, BTreeMap<String, Aggregate>)> {
         let (callees, imported) = self.callee_prototypes(addr);
         let cx = anonymous_context();
         let (module, lifted) = self.lift(&cx, addr, true)?;
         let sig = self.signature(addr);
-        let function = module.get_function(&sig.name).ok_or("the lifted function is missing")?;
+        let function = module.get_function(&sig.name).context("the lifted function is missing")?;
         let prototype = self.prototypes.borrow().get(&sig.name).cloned();
 
         let mut function = {
@@ -378,6 +381,7 @@ impl<'a> Decompiler<'a> {
                 structs: Default::default(),
                 callees,
                 imported: imported.clone(),
+                sized: Default::default(),
             };
 
             c::decompile(&module, function, &ctx, prototype.as_ref(), addr)
@@ -680,13 +684,13 @@ impl<'a> Decompiler<'a> {
     }
 
     /// Lifts a function with its final signature into a new module and optimizes it
-    pub fn lift_function<'ctx>(&self, cx: &'ctx Context, addr: u64) -> Result<Module<'ctx>, String> {
+    pub fn lift_function<'ctx>(&self, cx: &'ctx Context, addr: u64) -> Result<Module<'ctx>> {
         return self.lift(cx, addr, false).map(|(module, _)| module);
     }
 
     /// Lifts and optimizes a function, with the notes of the storage of its values for the C code
-    fn lift<'ctx>(&self, cx: &'ctx Context, addr: u64, storage: bool) -> Result<(Module<'ctx>, Lifted), String> {
-        let function = self.analysis.functions.get(&addr).ok_or_else(|| format!("no function at {:#x}", addr))?;
+    fn lift<'ctx>(&self, cx: &'ctx Context, addr: u64, storage: bool) -> Result<(Module<'ctx>, Lifted)> {
+        let function = self.analysis.functions.get(&addr).with_context(|| format!("no function at {:#x}", addr))?;
         let sig = self.signature(addr);
 
         let module = self.module(cx, &function.name)?;
@@ -753,13 +757,22 @@ impl<'a> Decompiler<'a> {
 
         function.storage.vars = vars;
         function.storage.canaries = lifted.canaries.iter().filter_map(|&offset| storage::Loc::stack(offset)).map(|l| l.canary()).collect();
+
+        let offset = |a: u64| a.wrapping_sub(addr) as u32;
+        function.storage.frame = lifted
+            .frame
+            .stack_offsets(&self.regs, self.abi.stack_pointer)
+            .into_iter()
+            .filter_map(|(start, end, sp)| Some(storage::Range { start: offset(start), end: offset(end), loc: storage::Loc::stack(sp)? }))
+            .collect();
+        function.storage.frame.sort_by_key(|r| r.start);
     }
 
     fn env<'e>(&'e self, signature: &'e dyn Fn(&CallTarget) -> Signature, global_name: &'e dyn Fn(u64) -> String) -> Env<'e> {
         return Env { program: self.program, analysis: self.analysis, regs: &self.regs, abi: &self.abi, signature, global_name };
     }
 
-    fn module<'ctx>(&self, cx: &'ctx Context, name: &str) -> Result<Module<'ctx>, String> {
+    fn module<'ctx>(&self, cx: &'ctx Context, name: &str) -> Result<Module<'ctx>> {
         let module = cx.create_module(name);
         module.set_triple(&self.machine.get_triple());
         module.set_data_layout(&self.machine.get_target_data().get_data_layout());
@@ -769,10 +782,10 @@ impl<'a> Decompiler<'a> {
 
     /// Optimizes a lifted module, returns the frame offsets the stack canary was stored at. The saved slots are
     /// the offsets from the stack pointer at the entry the prologue saves registers to.
-    fn optimize(&self, module: &Module, storage: bool, saved: &[i64]) -> Result<Vec<u64>, String> {
-        module.verify().map_err(|e| format!("invalid IR: {}", e.to_string()))?;
+    fn optimize(&self, module: &Module, storage: bool, saved: &[i64]) -> Result<Vec<u64>> {
+        module.verify().map_err(|e| anyhow!("invalid IR: {}", e.to_string()))?;
 
-        module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+        module.run_passes(PASSES, &self.machine, PassBuilderOptions::create())?;
 
         // Stack protector checks removed, frames kept whole by an escaping address split into variables,
         // then optimized again
@@ -799,8 +812,8 @@ impl<'a> Decompiler<'a> {
                 break;
             }
 
-            module.verify().map_err(|e| format!("invalid IR after the stack protector removal and the split of the stack frame: {}", e.to_string()))?;
-            module.run_passes(PASSES, &self.machine, PassBuilderOptions::create()).map_err(|e| e.to_string())?;
+            module.verify().map_err(|e| anyhow!("invalid IR after the stack protector removal and the split of the stack frame: {}", e.to_string()))?;
+            module.run_passes(PASSES, &self.machine, PassBuilderOptions::create())?;
 
             again = false;
 
@@ -1029,6 +1042,12 @@ impl<'a> Decompiler<'a> {
     }
 
     fn compute_signature(&self, addr: u64) -> Signature {
+        let symbol = self.program.symbol_at(addr).map_or("", |s| s.name.as_str());
+
+        if let Some(sig) = self.go_runtime_signature(symbol, &self.function_name(addr)) {
+            return sig;
+        }
+
         let sig = self.compute_signature_without_clobbers(addr);
         return Signature { clobbers: self.clobbers(addr), ..sig };
     }
@@ -1066,6 +1085,19 @@ impl<'a> Decompiler<'a> {
 
         self.clobbered.borrow_mut().insert(addr, mask);
         return mask;
+    }
+
+    /// The functions of the Go runtime with their own conventions: the write barriers return the buffer the
+    /// caller writes the pointers to in r11 (x25 on aarch64), the registers of the arguments untouched
+    fn go_runtime_signature(&self, symbol: &str, name: &str) -> Option<Signature> {
+        if self.program.language != Language::Go || !symbol.starts_with("runtime.gcWriteBarrier") {
+            return None;
+        }
+
+        let buffer = self.regs.reg(if self.program.architecture() == Architecture::Aarch64 { "x25" } else { "r11" });
+        let ret = Value { loc: Loc::Reg(buffer), ty: LType::Ptr, name: None };
+
+        return Some(Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: false, noreturn: false, guessed: false, clobbers: 1 << buffer });
     }
 
     fn compute_signature_without_clobbers(&self, addr: u64) -> Signature {
@@ -1237,8 +1269,8 @@ impl<'a> Decompiler<'a> {
     }
 
     /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used
-    fn discover(&self, addr: u64, name: &str) -> Result<Signature, String> {
-        let function = self.analysis.functions.get(&addr).ok_or_else(|| format!("no function at {:#x}", addr))?;
+    fn discover(&self, addr: u64, name: &str) -> Result<Signature> {
+        let function = self.analysis.functions.get(&addr).with_context(|| format!("no function at {:#x}", addr))?;
 
         let cx = anonymous_context();
         let module = self.module(&cx, name)?;
@@ -1258,7 +1290,7 @@ impl<'a> Decompiler<'a> {
     }
 
     /// Stack frame of a function, decoded once for its discovery and its final lift
-    fn frame(&self, env: &Env, function: &crate::analysis::function::Function) -> Result<Rc<Frame>, String> {
+    fn frame(&self, env: &Env, function: &crate::analysis::function::Function) -> Result<Rc<Frame>> {
         if let Some(frame) = self.frames.borrow().0.get(&function.addr) {
             return Ok(frame.clone());
         }
@@ -1444,7 +1476,7 @@ fn anonymous_context() -> Context {
 }
 
 /// Target machine of the program (its triple and data layout for the modules, its cost model for the passes)
-fn target_machine(program: &Program) -> Result<TargetMachine, String> {
+fn target_machine(program: &Program) -> Result<TargetMachine> {
     let config = InitializationConfig::default();
 
     let triple = match (program.architecture(), program.format) {
@@ -1456,7 +1488,7 @@ fn target_machine(program: &Program) -> Result<TargetMachine, String> {
         (Architecture::Aarch64, Format::Pe) => "aarch64-pc-windows-msvc",
         (Architecture::Aarch64, Format::MachO) => "arm64-apple-macosx",
         (Architecture::Aarch64, _) => "aarch64-unknown-linux-gnu",
-        (Architecture::Unsupported, _) => return Err("unsupported architecture".to_string()),
+        (Architecture::Unsupported, _) => bail!("unsupported architecture"),
     };
 
     match program.architecture() {
@@ -1465,11 +1497,11 @@ fn target_machine(program: &Program) -> Result<TargetMachine, String> {
     }
 
     let triple = TargetTriple::create(triple);
-    let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
+    let target = Target::from_triple(&triple)?;
 
     return target
         .create_target_machine(&triple, "generic", "", OptimizationLevel::Default, RelocMode::Default, CodeModel::Default)
-        .ok_or_else(|| "cannot create the target machine".to_string());
+        .context("cannot create the target machine");
 }
 
 /// Import name without its decorations (__imp_, symbol versions, stdcall suffixes)
@@ -1787,6 +1819,26 @@ mod tests {
     }
 
     #[test]
+    fn rust_sized_strings() {
+        let program = fixture("elf_x86_64_rust_strings");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = |name: &str| decompiler.c_code(function(&analysis, name)).unwrap();
+
+        // A &str passed to a call is its pointer then its length, the text stops at the length (not at the next NUL)
+        let start = code("_start");
+        assert!(start.contains("\"starting up\\n\", 12)"), "{}", start);
+
+        // Returned in two registers: the length in the high half
+        let level = code("rust_strings::level");
+        assert!(level.contains("\"quiet\"") && level.contains("\"verbose\"") && level.contains("\"debug\""), "{}", level);
+        assert!(level.contains("(__int128)7 << 64"), "{}", level);
+
+        // The &str of the tables of the data are strings of their own
+        assert!(["crimson", "teal", "ochre"].iter().all(|color| analysis.strings.values().any(|s| s == color)), "{:?}", analysis.strings);
+    }
+
+    #[test]
     fn trivial_functions_inlined() {
         for (name, cold) in [("elf_x86_64_quality", "length_of_cold"), ("elf_i386_quality", "fatal"), ("elf_aarch64_quality", "fatal")] {
             let program = fixture(name);
@@ -1874,6 +1926,11 @@ mod tests {
         let decompiler = Decompiler::new(&program, &analysis).unwrap();
         let c = decompiler.c_function(function(&analysis, "length_of")).unwrap();
         assert_eq!(c.storage.canaries, vec![storage::Loc::stack(-0x10).unwrap().canary()]);
+
+        // The stack pointer before each instruction: at the entry, in the body (sub rsp, 0x58), back before the ret
+        assert_eq!(storage::stack_offset_at(&c.storage.frame, 0), Some(0));
+        assert_eq!(storage::stack_offset_at(&c.storage.frame, 0x34), Some(-0x58));
+        assert_eq!(storage::stack_offset_at(&c.storage.frame, 0x4f), Some(0));
     }
 
     #[test]

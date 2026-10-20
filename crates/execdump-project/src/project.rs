@@ -15,6 +15,8 @@ use crate::modules::{auto_modules, Modules};
 use crate::service::{Control, Event, Priority, Service};
 use crate::store::{diff_text, has_conflicts, map_lines, rebase_text, Store, GENERATED, MAIN, PROPOSALS};
 
+use anyhow::{bail, Context, Result};
+
 use execdump_core::crash;
 use execdump_core::program::{Format, Program};
 use execdump_decompiler::analysis::function::CallTarget;
@@ -119,9 +121,9 @@ struct ProposalFile {
 
 /// Result of a background LLM request
 enum Assisted {
-    Function { addr: u64, before: String, notes: Result<FunctionNotes, String> },
-    Modules { label: String, moves: Result<Vec<(u64, String)>, String> },
-    Rewrite { addr: u64, before: String, calls: Vec<String>, code: Result<String, String> },
+    Function { addr: u64, before: String, notes: Result<FunctionNotes> },
+    Modules { label: String, moves: Result<Vec<(u64, String)>> },
+    Rewrite { addr: u64, before: String, calls: Vec<String>, code: Result<String> },
 }
 
 pub struct Project {
@@ -264,7 +266,7 @@ impl Project {
 
         if project.location.join(REPOSITORY).exists() {
             if let Err(error) = project.load() {
-                project.messages.push((format!("Cannot load the project {}: {}", project.location.display(), error), true));
+                project.messages.push((format!("Cannot load the project {}: {:#}", project.location.display(), error), true));
             }
         }
 
@@ -543,18 +545,18 @@ impl Project {
     }
 
     /// Names a function (None goes back to the name of the symbols)
-    pub fn rename_function(&mut self, addr: u64, name: Option<&str>) -> Result<(), String> {
+    pub fn rename_function(&mut self, addr: u64, name: Option<&str>) -> Result<()> {
         if !self.analysis.functions.contains_key(&addr) {
-            return Err(format!("no function at {:#x}", addr));
+            bail!("no function at {:#x}", addr);
         }
 
         if let Some(name) = name {
             if !valid_identifier(name) {
-                return Err(format!("{} is not a valid C identifier", name));
+                bail!("{} is not a valid C identifier", name);
             }
 
             if self.names.get(name).is_some_and(|&a| a != addr) {
-                return Err(format!("{} is already the name of another function", name));
+                bail!("{} is already the name of another function", name);
             }
         }
 
@@ -577,9 +579,9 @@ impl Project {
         return Ok(());
     }
 
-    pub fn rename_global(&mut self, addr: u64, name: Option<&str>) -> Result<(), String> {
+    pub fn rename_global(&mut self, addr: u64, name: Option<&str>) -> Result<()> {
         if let Some(name) = name.filter(|n| !valid_identifier(n)) {
-            return Err(format!("{} is not a valid C identifier", name));
+            bail!("{} is not a valid C identifier", name);
         }
 
         let notes = GlobalNotes { name: name.map(|n| n.to_string()) };
@@ -597,15 +599,15 @@ impl Project {
     }
 
     /// Name the decompiler gave to a variable shown with a name
-    pub fn original_var(&mut self, function: u64, shown: &str) -> Result<String, String> {
-        let (rendered, _) = self.shown(function).ok_or("the function is not decompiled yet")?;
+    pub fn original_var(&mut self, function: u64, shown: &str) -> Result<String> {
+        let (rendered, _) = self.shown(function).context("the function is not decompiled yet")?;
 
-        return rendered.meta.vars.iter().find(|(_, s)| s == shown).map(|(o, _)| o.clone()).ok_or_else(|| format!("{} is not a variable of {}", shown, self.function_name(function)));
+        return rendered.meta.vars.iter().find(|(_, s)| s == shown).map(|(o, _)| o.clone()).with_context(|| format!("{} is not a variable of {}", shown, self.function_name(function)));
     }
 
-    pub fn rename_var(&mut self, function: u64, shown: &str, name: &str) -> Result<(), String> {
+    pub fn rename_var(&mut self, function: u64, shown: &str, name: &str) -> Result<()> {
         if !valid_identifier(name) {
-            return Err(format!("{} is not a valid C identifier", name));
+            bail!("{} is not a valid C identifier", name);
         }
 
         let original = self.original_var(function, shown)?;
@@ -619,9 +621,9 @@ impl Project {
         return Ok(());
     }
 
-    pub fn retype_var(&mut self, function: u64, shown: &str, ty: Option<&str>) -> Result<(), String> {
+    pub fn retype_var(&mut self, function: u64, shown: &str, ty: Option<&str>) -> Result<()> {
         if let Some(ty) = ty.filter(|t| parse_type(t, &self.typedb).is_none()) {
-            return Err(format!("unknown type {}", ty));
+            bail!("unknown type {}", ty);
         }
 
         let original = self.original_var(function, shown)?;
@@ -635,7 +637,7 @@ impl Project {
     }
 
     /// Gives a function a prototype, its name in the prototype renames the function
-    pub fn set_prototype(&mut self, addr: u64, text: Option<&str>) -> Result<(), String> {
+    pub fn set_prototype(&mut self, addr: u64, text: Option<&str>) -> Result<()> {
         let prototype = text.map(|t| parse_prototype(t, &self.typedb)).transpose()?;
 
         if let Some(prototype) = prototype.as_ref() {
@@ -663,13 +665,13 @@ impl Project {
     }
 
     /// Replaces the text of a function, the edit is dropped when it is the decompiled text again
-    pub fn set_edit(&mut self, addr: u64, text: &str) -> Result<(), String> {
+    pub fn set_edit(&mut self, addr: u64, text: &str) -> Result<()> {
         let text = if text.ends_with('\n') || text.is_empty() { text.to_string() } else { format!("{}\n", text) };
 
         let edit = match self.work.edits.get(&addr) {
             Some(edit) => Edit::new(edit.base.clone(), edit.base_lines.clone(), text, &edit.rendered.meta),
             None => {
-                let rendered = self.decompiled(addr).ok_or("the function is not decompiled yet")?;
+                let rendered = self.decompiled(addr).context("the function is not decompiled yet")?;
                 Edit::new(rendered.text.clone(), rendered.lines.clone(), text, &rendered.meta)
             }
         };
@@ -709,13 +711,13 @@ impl Project {
         return self.modules.module_of(addr);
     }
 
-    pub fn move_function(&mut self, addr: u64, module: &str) -> Result<(), String> {
+    pub fn move_function(&mut self, addr: u64, module: &str) -> Result<()> {
         if !valid_module(module) {
-            return Err(format!("{} is not a valid module path (relative path such as net/socket.c)", module));
+            bail!("{} is not a valid module path (relative path such as net/socket.c)", module);
         }
 
         let Some(auto) = self.auto.get(&addr).cloned() else {
-            return Err(format!("{:#x} is not a function of the program", addr));
+            bail!("{:#x} is not a function of the program", addr);
         };
 
         let mut notes = self.notes(addr);
@@ -732,9 +734,9 @@ impl Project {
         return Ok(());
     }
 
-    pub fn create_module(&mut self, module: &str) -> Result<(), String> {
+    pub fn create_module(&mut self, module: &str) -> Result<()> {
         if !valid_module(module) {
-            return Err(format!("{} is not a valid module path (relative path such as net/socket.c)", module));
+            bail!("{} is not a valid module path (relative path such as net/socket.c)", module);
         }
 
         self.work.modules.insert(module.to_string());
@@ -744,13 +746,13 @@ impl Project {
         return Ok(());
     }
 
-    pub fn rename_module(&mut self, old: &str, new: &str) -> Result<(), String> {
+    pub fn rename_module(&mut self, old: &str, new: &str) -> Result<()> {
         if !valid_module(new) {
-            return Err(format!("{} is not a valid module path", new));
+            bail!("{} is not a valid module path", new);
         }
 
         if !self.modules.contains(old) {
-            return Err(format!("no module {}", old));
+            bail!("no module {}", old);
         }
 
         for addr in self.modules.functions(old).to_vec() {
@@ -764,9 +766,9 @@ impl Project {
         return Ok(());
     }
 
-    pub fn remove_module(&mut self, module: &str) -> Result<(), String> {
+    pub fn remove_module(&mut self, module: &str) -> Result<()> {
         if !self.modules.functions(module).is_empty() {
-            return Err(format!("{} still holds functions, move them first", module));
+            bail!("{} still holds functions, move them first", module);
         }
 
         self.work.modules.remove(module);
@@ -784,7 +786,7 @@ impl Project {
         return format!("{}{}", self.prefix, path);
     }
 
-    fn store(&mut self) -> Result<&Store, String> {
+    fn store(&mut self) -> Result<&Store> {
         if self.store.is_none() {
             self.store = Some(Store::open_or_init(&self.location.join(REPOSITORY))?);
         }
@@ -792,7 +794,7 @@ impl Project {
         return Ok(self.store.as_ref().unwrap());
     }
 
-    fn load(&mut self) -> Result<(), String> {
+    fn load(&mut self) -> Result<()> {
         let store = Store::open_or_init(&self.location.join(REPOSITORY))?;
         let mut work = Work::default();
 
@@ -805,17 +807,17 @@ impl Project {
 
             if let Some(name) = path.strip_prefix("fn/") {
                 if let Some(addr) = addr_of(name, ".toml") {
-                    work.functions.insert(addr, FunctionNotes::from_toml(&text).map_err(|e| format!("{}: {}", path, e))?);
+                    work.functions.insert(addr, FunctionNotes::from_toml(&text).with_context(|| path.to_string())?);
                 } else if let Some(addr) = addr_of(name, ".c") {
                     let base = bases.get(name).map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_else(|| text.to_string());
                     work.edits.insert(addr, Edit::new(base, Vec::new(), text.to_string(), &Default::default()));
                 }
             } else if let Some(name) = path.strip_prefix("data/") {
                 if let Some(addr) = addr_of(name, ".toml") {
-                    work.globals.insert(addr, toml::from_str(&text).map_err(|e| format!("{}: {}", path, e))?);
+                    work.globals.insert(addr, toml::from_str(&text).with_context(|| path.to_string())?);
                 }
             } else if path == "modules.toml" {
-                let list: ModuleList = toml::from_str(&text).map_err(|e| format!("{}: {}", path, e))?;
+                let list: ModuleList = toml::from_str(&text).with_context(|| path.to_string())?;
                 work.modules = list.modules.into_iter().collect();
             }
         }
@@ -887,7 +889,7 @@ impl Project {
     }
 
     /// Commits the work: the bases of the edited functions on generated, everything else on main
-    pub fn save(&mut self, location: Option<PathBuf>) -> Result<String, String> {
+    pub fn save(&mut self, location: Option<PathBuf>) -> Result<String> {
         if let Some(location) = location {
             if location != self.location {
                 self.location = location;
@@ -981,9 +983,9 @@ impl Project {
         return std::fs::read_to_string(self.location.join(SESSION)).ok();
     }
 
-    pub fn save_session(&self, text: &str) -> Result<(), String> {
-        std::fs::create_dir_all(&self.location).map_err(|e| e.to_string())?;
-        return std::fs::write(self.location.join(SESSION), text).map_err(|e| e.to_string());
+    pub fn save_session(&self, text: &str) -> Result<()> {
+        std::fs::create_dir_all(&self.location)?;
+        return Ok(std::fs::write(self.location.join(SESSION), text)?);
     }
 
     /*
@@ -991,8 +993,8 @@ impl Project {
      */
 
     /// Asks the LLM to improve a function (names, types, summary), the answer becomes a proposal
-    pub fn llm_function(&mut self, addr: u64, config: &LlmConfig) -> Result<(), String> {
-        let (rendered, _) = self.shown(addr).ok_or("the function is not decompiled yet")?;
+    pub fn llm_function(&mut self, addr: u64, config: &LlmConfig) -> Result<()> {
+        let (rendered, _) = self.shown(addr).context("the function is not decompiled yet")?;
         let assistant = Assistant::new(config)?;
         let sender = self.assisted_sender.clone();
         let typedb_platform = if self.program.format == Format::Pe { Platform::Windows } else { Platform::Unix };
@@ -1037,8 +1039,8 @@ impl Project {
     }
 
     /// Asks the LLM to rewrite a function as clear C (the code shown, edited or not), the answer becomes a proposal
-    pub fn llm_rewrite(&mut self, addr: u64, config: &LlmConfig) -> Result<(), String> {
-        let (rendered, _) = self.shown(addr).ok_or("the function is not decompiled yet")?;
+    pub fn llm_rewrite(&mut self, addr: u64, config: &LlmConfig) -> Result<()> {
+        let (rendered, _) = self.shown(addr).context("the function is not decompiled yet")?;
         let assistant = Assistant::rewrite(config)?;
         let sender = self.assisted_sender.clone();
         let calls = rendered.meta.calls.clone();
@@ -1054,7 +1056,7 @@ impl Project {
     }
 
     /// Asks the LLM to organize the functions of a module (or of the whole program) into modules
-    pub fn llm_modules(&mut self, module: Option<&str>, config: &LlmConfig) -> Result<(), String> {
+    pub fn llm_modules(&mut self, module: Option<&str>, config: &LlmConfig) -> Result<()> {
         const MAX_FUNCTIONS: usize = 300;
 
         let assistant = Assistant::modules(config)?;
@@ -1116,7 +1118,7 @@ impl Project {
                 let notes = match notes {
                     Ok(notes) if !notes.is_empty() => notes,
                     Ok(_) => return self.messages.push((format!("LLM: nothing to improve in {}", self.function_name(addr)), false)),
-                    Err(error) => return self.messages.push((format!("LLM: {}", error), true)),
+                    Err(error) => return self.messages.push((format!("LLM: {:#}", error), true)),
                 };
 
                 let mut merged = self.notes(addr);
@@ -1131,7 +1133,7 @@ impl Project {
             Assisted::Modules { label, moves } => {
                 let moves = match moves {
                     Ok(moves) => moves,
-                    Err(error) => return self.messages.push((format!("LLM: {}", error), true)),
+                    Err(error) => return self.messages.push((format!("LLM: {:#}", error), true)),
                 };
 
                 let mut functions = BTreeMap::new();
@@ -1160,7 +1162,7 @@ impl Project {
                 let code = match code {
                     Ok(code) if code.trim() != before.trim() => code,
                     Ok(_) => return self.messages.push((format!("LLM: nothing to rewrite in {}", self.function_name(addr)), false)),
-                    Err(error) => return self.messages.push((format!("LLM: {}", error), true)),
+                    Err(error) => return self.messages.push((format!("LLM: {:#}", error), true)),
                 };
 
                 // What the rewrite may have lost is in the label of the proposal
@@ -1204,13 +1206,13 @@ impl Project {
         });
 
         if let Err(error) = result {
-            self.messages.push((format!("Cannot keep the proposal in {}: {}", self.location.display(), error), true));
+            self.messages.push((format!("Cannot keep the proposal in {}: {:#}", self.location.display(), error), true));
         }
     }
 
     /// Applies a proposal to the work (merged into main on the next save)
-    pub fn accept(&mut self, id: u64) -> Result<(), String> {
-        let index = self.proposals.iter().position(|p| p.id == id).ok_or_else(|| format!("no proposal {}", id))?;
+    pub fn accept(&mut self, id: u64) -> Result<()> {
+        let index = self.proposals.iter().position(|p| p.id == id).with_context(|| format!("no proposal {}", id))?;
         let functions = std::mem::take(&mut self.proposals[index].functions);
         let edits = std::mem::take(&mut self.proposals[index].edits);
 
@@ -1221,7 +1223,7 @@ impl Project {
         for (addr, notes) in functions {
             if let Some(name) = notes.name.as_deref() {
                 if let Err(error) = self.rename_function(addr, Some(name)) {
-                    self.messages.push((error, true));
+                    self.messages.push((format!("{:#}", error), true));
                 }
             }
 
@@ -1243,8 +1245,8 @@ impl Project {
         return Ok(());
     }
 
-    pub fn reject(&mut self, id: u64) -> Result<(), String> {
-        let index = self.proposals.iter().position(|p| p.id == id).ok_or_else(|| format!("no proposal {}", id))?;
+    pub fn reject(&mut self, id: u64) -> Result<()> {
+        let index = self.proposals.iter().position(|p| p.id == id).with_context(|| format!("no proposal {}", id))?;
         self.proposals.remove(index);
 
         if let Some(store) = self.store.as_ref() {
@@ -1264,7 +1266,7 @@ impl Project {
         return self.auto.keys().copied().filter(|&a| !self.work.edits.contains_key(&a) && self.decompiled(a).is_none()).collect();
     }
 
-    pub fn export(&mut self, dir: &Path) -> Result<crate::export::Report, String> {
+    pub fn export(&mut self, dir: &Path) -> Result<crate::export::Report> {
         return crate::export::export(self, dir);
     }
 

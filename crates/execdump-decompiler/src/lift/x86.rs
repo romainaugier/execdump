@@ -7,6 +7,8 @@ use super::{llvm, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
 
 use crate::analysis::function::CallTarget;
 
+use anyhow::{anyhow, Context, Result};
+
 use capstone::arch::x86::X86OperandType;
 use capstone::arch::ArchOperand;
 use capstone::Capstone;
@@ -261,7 +263,7 @@ fn condition_code(suffix: &str) -> Option<Cond> {
  * Operands
  */
 
-fn segment_access<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, value: Option<IntValue<'ctx>>) -> Result<Option<IntValue<'ctx>>, String> {
+fn segment_access<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, value: Option<IntValue<'ctx>>) -> Result<Option<IntValue<'ctx>>> {
     // TLS and TEB accesses become the MSVC intrinsics (__readfsqword(0x28))
     let segment = if mem.segment == Some(Segment::Fs) { "fs" } else { "gs" };
     let size = match mem.bits {
@@ -285,35 +287,35 @@ fn segment_access<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, value: Option<IntValue<
     };
 }
 
-fn address<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem) -> Result<PointerValue<'ctx>, String> {
+fn address<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem) -> Result<PointerValue<'ctx>> {
     return l.address(mem.base.map(|b| b.reg), mem.index.map(|i| (i, mem.scale)), mem.disp);
 }
 
 /// Value of an operand, immediates are sign extended to the requested width
-fn get<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, bits: u32) -> Result<IntValue<'ctx>, String> {
+fn get<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, bits: u32) -> Result<IntValue<'ctx>> {
     let value = match op {
         Op::Reg(r) => l.read(*r)?,
         Op::Imm(imm, _) => return Ok(l.int(bits).const_int(*imm as u64, true)),
-        Op::Mem(mem) if mem.segment.is_some() => segment_access(l, mem, None)?.ok_or("segment read")?,
+        Op::Mem(mem) if mem.segment.is_some() => segment_access(l, mem, None)?.context("segment read")?,
         Op::Mem(mem) => l.load(address(l, mem)?, mem.bits)?,
     };
 
     return l.resize(value, bits, true);
 }
 
-fn set<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: IntValue<'ctx>, wide: bool) -> Result<(), String> {
+fn set<'ctx>(l: &Lifter<'ctx, '_>, op: &Op, value: IntValue<'ctx>, wide: bool) -> Result<()> {
     match op {
         // 32-bit writes clear the upper half of the 64-bit registers
         Op::Reg(r) if wide && r.bits == 32 && r.offset == 0 && l.env.regs.regs[r.reg].bits == 64 => l.write_zext(*r, value),
         Op::Reg(r) => l.write(*r, value),
         Op::Mem(mem) if mem.segment.is_some() => segment_access(l, mem, Some(l.resize(value, mem.bits, false)?)).map(|_| ()),
         Op::Mem(mem) => l.store(address(l, mem)?, l.resize(value, mem.bits, false)?),
-        Op::Imm(..) => Err("write to an immediate".to_string()),
+        Op::Imm(..) => Err(anyhow!("write to an immediate")),
     }
 }
 
 /// Integer value of the address computed by lea
-fn effective_address<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, bits: u32) -> Result<IntValue<'ctx>, String> {
+fn effective_address<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, bits: u32) -> Result<IntValue<'ctx>> {
     let ptr = address(l, mem)?;
     let value = llvm!(l.builder.build_ptr_to_int(ptr, l.int(64), ""));
     return l.resize(value, bits, false);
@@ -323,7 +325,7 @@ fn sp_reg(l: &Lifter) -> RegRef {
     return l.env.regs.full(l.env.abi.stack_pointer);
 }
 
-fn push<'ctx>(l: &Lifter<'ctx, '_>, value: IntValue<'ctx>, slot: i64) -> Result<(), String> {
+fn push<'ctx>(l: &Lifter<'ctx, '_>, value: IntValue<'ctx>, slot: i64) -> Result<()> {
     let value = l.resize(value, slot as u32 * 8, true)?;
     let ptr = l.sp_address(-slot)?;
     l.store(ptr, value)?;
@@ -334,7 +336,7 @@ fn push<'ctx>(l: &Lifter<'ctx, '_>, value: IntValue<'ctx>, slot: i64) -> Result<
     return l.write(sp_reg(l), sp);
 }
 
-fn pop<'ctx>(l: &Lifter<'ctx, '_>, slot: i64) -> Result<IntValue<'ctx>, String> {
+fn pop<'ctx>(l: &Lifter<'ctx, '_>, slot: i64) -> Result<IntValue<'ctx>> {
     let ptr = l.sp_address(0)?;
     let value = l.load(ptr, slot as u32 * 8)?;
 
@@ -346,7 +348,7 @@ fn pop<'ctx>(l: &Lifter<'ctx, '_>, slot: i64) -> Result<IntValue<'ctx>, String> 
 }
 
 /// Unsupported instructions are kept as inline assembly
-fn unsupported(l: &Lifter, insn: &Insn) -> Result<(), String> {
+fn unsupported(l: &Lifter, insn: &Insn) -> Result<()> {
     let asm_type = l.cx.void_type().fn_type(&[], false);
     let asm = l.cx.create_inline_asm(asm_type, insn.text.clone(), String::new(), true, false, Some(InlineAsmDialect::Intel), false);
     llvm!(l.builder.build_indirect_call(asm_type, asm, &[], ""));
@@ -357,7 +359,7 @@ fn unsupported(l: &Lifter, insn: &Insn) -> Result<(), String> {
  * Semantics
  */
 
-pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
+pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
     let ops = insn.ops.as_slice();
     let mnemonic = insn.mnemonic.as_str();
     let wide = insn.wide;
@@ -584,12 +586,12 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
         }
 
         (m, [dst]) if m.starts_with("set") => {
-            let cond = condition_code(&m[3..]).ok_or_else(|| format!("unknown condition {}", m))?;
+            let cond = condition_code(&m[3..]).with_context(|| format!("unknown condition {}", m))?;
             let value = l.condition(cond)?;
             set(l, dst, l.resize(value, 8, false)?, wide)?;
         }
         (m, [dst, src]) if m.starts_with("cmov") => {
-            let cond = condition_code(&m[4..]).ok_or_else(|| format!("unknown condition {}", m))?;
+            let cond = condition_code(&m[4..]).with_context(|| format!("unknown condition {}", m))?;
             let bits = dst.bits();
             let condition = l.condition(cond)?;
             let value = llvm!(b.build_select(condition, get(l, src, bits)?, get(l, dst, bits)?, "")).into_int_value();
@@ -603,7 +605,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
                     l.branch = Some(llvm!(b.build_int_compare(IntPredicate::EQ, value, value.get_type().const_zero(), "")));
                     return Ok(());
                 }
-                _ => condition_code(&m[1..]).ok_or_else(|| format!("unknown condition {}", m))?,
+                _ => condition_code(&m[1..]).with_context(|| format!("unknown condition {}", m))?,
             };
 
             l.branch = Some(l.condition(cond)?);
@@ -717,7 +719,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<(), String> {
 }
 
 /// rax/rdx pair (or eax/edx, ax/dx) for the widening multiplications and the divisions
-fn accumulator(l: &Lifter, bits: u32) -> Result<(RegRef, RegRef), String> {
+fn accumulator(l: &Lifter, bits: u32) -> Result<(RegRef, RegRef)> {
     let wide = l.env.regs.arch == Architecture::X86_64;
     let rax = l.env.regs.full(l.env.regs.reg(if wide { "rax" } else { "eax" }));
     let rdx = l.env.regs.full(l.env.regs.reg(if wide { "rdx" } else { "edx" }));
@@ -730,7 +732,7 @@ fn accumulator(l: &Lifter, bits: u32) -> Result<(RegRef, RegRef), String> {
     return Ok((RegRef { bits, ..rax }, RegRef { bits, ..rdx }));
 }
 
-fn write_pair<'ctx>(l: &Lifter<'ctx, '_>, lo: RegRef, hi: RegRef, value: IntValue<'ctx>, bits: u32, wide: bool) -> Result<(), String> {
+fn write_pair<'ctx>(l: &Lifter<'ctx, '_>, lo: RegRef, hi: RegRef, value: IntValue<'ctx>, bits: u32, wide: bool) -> Result<()> {
     let low = l.resize(value, bits, false)?;
     let high = llvm!(l.builder.build_right_shift(value, l.constant(bits * 2, bits as u64), false, ""));
     let high = l.resize(high, bits, false)?;
@@ -741,13 +743,13 @@ fn write_pair<'ctx>(l: &Lifter<'ctx, '_>, lo: RegRef, hi: RegRef, value: IntValu
     return Ok(());
 }
 
-fn store_carry<'ctx>(l: &Lifter<'ctx, '_>, value: IntValue<'ctx>) -> Result<(), String> {
+fn store_carry<'ctx>(l: &Lifter<'ctx, '_>, value: IntValue<'ctx>) -> Result<()> {
     let cf = l.env.regs.full(l.env.regs.reg("cf"));
     return l.write(cf, value);
 }
 
 /// rep stos and rep movs: memset and memcpy for the bytes, the MSVC intrinsics otherwise (__stosq)
-fn string_op(l: &Lifter, insn: &Insn) -> Result<(), String> {
+fn string_op(l: &Lifter, insn: &Insn) -> Result<()> {
     let wide = insn.wide;
     let regs = l.env.regs;
     let name = |n64: &str, n32: &str| regs.full(regs.reg(if wide { n64 } else { n32 }));
@@ -795,7 +797,7 @@ fn string_op(l: &Lifter, insn: &Insn) -> Result<(), String> {
     return Ok(());
 }
 
-fn advance<'ctx>(l: &Lifter<'ctx, '_>, reg: RegRef, count: IntValue<'ctx>, size: u32) -> Result<(), String> {
+fn advance<'ctx>(l: &Lifter<'ctx, '_>, reg: RegRef, count: IntValue<'ctx>, size: u32) -> Result<()> {
     let count = l.resize(count, reg.bits, false)?;
     let bytes = llvm!(l.builder.build_int_mul(count, l.constant(reg.bits, size as u64), ""));
     let value = llvm!(l.builder.build_int_add(l.read(reg)?, bytes, ""));
@@ -803,7 +805,7 @@ fn advance<'ctx>(l: &Lifter<'ctx, '_>, reg: RegRef, count: IntValue<'ctx>, size:
 }
 
 /// Scalar SSE: moves, arithmetic, conversions and comparisons on the low lane
-pub fn lift_sse<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<bool, String> {
+pub fn lift_sse<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<bool> {
     let ops = insn.ops.as_slice();
     let mnemonic = insn.mnemonic.as_str();
     let wide = insn.wide;

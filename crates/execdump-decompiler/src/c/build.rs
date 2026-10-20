@@ -247,6 +247,11 @@ impl<'a> Builder<'a> {
         return match &f.values[id].kind {
             ValueKind::Param(index) => Expr::Var(*index),
             ValueKind::Int(0) if is_pointer(self.ty(id)) => Expr::Name("NULL".to_string()),
+            // The high half of a pair of registers returned together: (__int128)7 << 64
+            ValueKind::Int(value) if f.values[id].ty == Ty::Int(128) && *value != 0 && *value as u64 == 0 => {
+                let high = Expr::Cast(CType::int(128), Box::new(Expr::Int((*value as u128 >> 64) as i128)));
+                Expr::binary(BinaryOp::Shl, high, Expr::Int(64))
+            }
             // Addresses of strings and functions in constants (non position independent code)
             ValueKind::Int(value) => {
                 let addr = u64::try_from(*value).ok().filter(|&a| a >= 0x1000);

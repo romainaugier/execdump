@@ -1,4 +1,5 @@
-use std::error::Error;
+use anyhow::{anyhow, bail, Result};
+
 use std::path::PathBuf;
 use std::collections::HashMap;
 
@@ -52,12 +53,12 @@ impl DOSHeader {
         return DOSHeader::default();
     }
 
-    fn from_parser(reader: &mut Reader) -> Result<DOSHeader, Box<dyn Error>> {
+    fn from_parser(reader: &mut Reader) -> Result<DOSHeader> {
         let mut header: DOSHeader = DOSHeader::new();
         header.e_magic = reader.read_u16()?;
 
         if header.e_magic != DOS_MAGIC {
-            return Err("Invalid DOS magic number".into());
+            bail!("Invalid DOS magic number");
         }
 
         reader.set_position(0x3C)?;
@@ -223,7 +224,7 @@ pub struct COFFHeader {
 }
 
 impl COFFHeader {
-    fn from_parser(reader: &mut Reader) -> Result<COFFHeader, Box<dyn Error>> {
+    fn from_parser(reader: &mut Reader) -> Result<COFFHeader> {
         let mut header: COFFHeader = COFFHeader::default();
 
         header.machine = reader.read_u16()?;
@@ -272,12 +273,12 @@ pub struct NTHeader {
 }
 
 impl NTHeader {
-    fn from_parser(reader: &mut Reader) -> Result<NTHeader, Box<dyn Error>> {
+    fn from_parser(reader: &mut Reader) -> Result<NTHeader> {
         let mut header: NTHeader = NTHeader::default();
         header.signature = reader.read_u32()?;
 
         if header.signature != NT_PE_SIGNATURE {
-            return Err("Invalid PE signature in NT Header".into());
+            bail!("Invalid PE signature in NT Header");
         }
 
         header.coff_header = COFFHeader::from_parser(reader)?;
@@ -314,7 +315,7 @@ impl ImageDataDirectory {
 
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<ImageDataDirectory, Box<dyn std::error::Error>> {
+    ) -> Result<ImageDataDirectory> {
         let mut idd = ImageDataDirectory::new();
 
         idd.virtual_address = reader.read_u32()?;
@@ -483,7 +484,7 @@ impl OptionalHeader32 {
         return OptionalHeader32::default();
     }
 
-    fn from_parser(reader: &mut Reader) -> Result<OptionalHeader32, Box<dyn Error>> {
+    fn from_parser(reader: &mut Reader) -> Result<OptionalHeader32> {
         let mut header: OptionalHeader32 = OptionalHeader32::new();
 
         header.magic = reader.read_u16()?;
@@ -665,7 +666,7 @@ impl OptionalHeader64 {
         return OptionalHeader64::default();
     }
 
-    fn from_parser(reader: &mut Reader) -> Result<OptionalHeader64, Box<dyn Error>> {
+    fn from_parser(reader: &mut Reader) -> Result<OptionalHeader64> {
         let mut header: OptionalHeader64 = OptionalHeader64::new();
 
         header.magic = reader.read_u16()?;
@@ -1005,7 +1006,7 @@ impl SectionHeader {
 
     fn from_parser(
         reader: &mut Reader,
-    ) -> Result<SectionHeader, Box<dyn std::error::Error>> {
+    ) -> Result<SectionHeader> {
         let mut header = SectionHeader::new();
 
         let first_name_byte = reader.read_u8()?;
@@ -1050,12 +1051,14 @@ impl SectionHeader {
         return Ok(header);
     }
 
+    /// Bytes of the section in the file: the rest of a section bigger in memory is zeros (Go puts its .bss in the end
+    /// of .data), the raw data is padded to the file alignment past the virtual size
     pub fn data_size(&self) -> usize {
-        if self.virtual_size != self.size_of_raw_data {
-            return self.virtual_size as usize;
-        } else {
+        if self.virtual_size == 0 {
             return self.size_of_raw_data as usize;
         }
+
+        return self.virtual_size.min(self.size_of_raw_data) as usize;
     }
 
     #[rustfmt::skip]
@@ -1161,7 +1164,7 @@ pub struct ImportDirectoryTableEntry {
 impl ImportDirectoryTableEntry {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<ImportDirectoryTableEntry, Box<dyn std::error::Error>> {
+    ) -> Result<ImportDirectoryTableEntry> {
         let mut idt = ImportDirectoryTableEntry::default();
 
         idt.import_lookup_table_rva = reader.read_u32()?;
@@ -1204,7 +1207,7 @@ pub struct ImportDirectoryTable {
 impl ImportDirectoryTable {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<ImportDirectoryTable, Box<dyn std::error::Error>> {
+    ) -> Result<ImportDirectoryTable> {
         let mut idt = ImportDirectoryTable::default();
 
         loop {
@@ -1256,7 +1259,7 @@ impl ImportLookupTableEntry {
     pub fn from_parser(
         reader: &mut Reader,
         is_32_bits: bool,
-    ) -> Result<ImportLookupTableEntry, Box<dyn std::error::Error>> {
+    ) -> Result<ImportLookupTableEntry> {
         let mut entry = ImportLookupTableEntry::new();
 
         if is_32_bits {
@@ -1316,7 +1319,7 @@ impl ImportLookupTable {
     pub fn from_parser(
         reader: &mut Reader,
         is_32_bit: bool,
-    ) -> Result<ImportLookupTable, Box<dyn std::error::Error>> {
+    ) -> Result<ImportLookupTable> {
         let mut ilt = ImportLookupTable::default();
 
         loop {
@@ -1366,7 +1369,7 @@ impl HintNameEntry {
 
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<HintNameEntry, Box<dyn std::error::Error>> {
+    ) -> Result<HintNameEntry> {
         let mut entry = HintNameEntry::new();
 
         entry.hint = reader.read_u16()?;
@@ -1407,7 +1410,7 @@ pub struct HintNameData {
 impl HintNameData {
     pub fn parse_dll_name(
         reader: &mut Reader,
-    ) -> Result<String, Box<dyn std::error::Error>> {
+    ) -> Result<String> {
         let mut name_buffer = Vec::new();
 
         loop {
@@ -1483,7 +1486,7 @@ pub struct ExportDirectoryTable {
 impl ExportDirectoryTable {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<ExportDirectoryTable, Box<dyn std::error::Error>> {
+    ) -> Result<ExportDirectoryTable> {
         let mut edt = ExportDirectoryTable::default();
 
         edt.export_flags = reader.read_u32()?;
@@ -1539,7 +1542,7 @@ pub struct ExportAddressTableEntry {
 impl ExportAddressTableEntry {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<ExportAddressTableEntry, Box<dyn std::error::Error>> {
+    ) -> Result<ExportAddressTableEntry> {
         let mut entry = ExportAddressTableEntry::default();
 
         entry.export_rva = reader.read_u32()?;
@@ -1678,7 +1681,7 @@ impl DebugDirectory {
 
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<DebugDirectory, Box<dyn std::error::Error>> {
+    ) -> Result<DebugDirectory> {
         let mut dd = DebugDirectory::new();
 
         dd.characteristics = reader.read_u32()?;
@@ -1751,7 +1754,7 @@ pub struct X64ExcFunctionEntry {
 impl X64ExcFunctionEntry {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<X64ExcFunctionEntry, Box<dyn std::error::Error>> {
+    ) -> Result<X64ExcFunctionEntry> {
         let mut entry = X64ExcFunctionEntry::default();
 
         entry.begin_address = reader.read_u32()?;
@@ -1810,7 +1813,7 @@ pub struct Arm64ExcFunctionEntry {
 impl Arm64ExcFunctionEntry {
     pub fn from_parser(
         reader: &mut Reader,
-    ) -> Result<Arm64ExcFunctionEntry, Box<dyn std::error::Error>> {
+    ) -> Result<Arm64ExcFunctionEntry> {
         let mut entry = Arm64ExcFunctionEntry::default();
 
         entry.begin_address = reader.read_u32()?;
@@ -1882,7 +1885,7 @@ impl ExcFunctionEntry {
     pub fn from_parser(
         reader: &mut Reader,
         machine_type: MachineType,
-    ) -> Result<ExcFunctionEntry, Box<dyn std::error::Error>> {
+    ) -> Result<ExcFunctionEntry> {
         match machine_type {
             MachineType::AMD64 | MachineType::I386 => Ok(ExcFunctionEntry::X64(
                 X64ExcFunctionEntry::from_parser(reader)?,
@@ -1890,7 +1893,7 @@ impl ExcFunctionEntry {
             MachineType::ARM64 | MachineType::ARM64EC | MachineType::ARM64X => Ok(ExcFunctionEntry::Arm64(
                 Arm64ExcFunctionEntry::from_parser(reader)?,
             )),
-            _ => Err("Cannot parse Exception Function Entry, unsupported platform".into()),
+            _ => Err(anyhow!("Cannot parse Exception Function Entry, unsupported platform")),
         }
     }
 
@@ -1923,7 +1926,7 @@ impl ExceptionTable {
         reader: &mut Reader,
         size: usize,
         machine_type: MachineType,
-    ) -> Result<ExceptionTable, Box<dyn std::error::Error>> {
+    ) -> Result<ExceptionTable> {
         let mut et = ExceptionTable::default();
 
         let mut parsed_sz = 0 as usize;
@@ -2046,7 +2049,7 @@ impl PE {
     pub fn parse_headers_and_sections(
         &mut self,
         reader: &mut Reader,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let dos_header = DOSHeader::from_parser(reader)?;
 
         reader.set_position(dos_header.e_lfanew as usize)?;
@@ -2078,7 +2081,7 @@ impl PE {
                 };
             }
             _ => {
-                return Err("Invalid PE optional header magic".into());
+                bail!("Invalid PE optional header magic");
             }
         }
 
@@ -2115,7 +2118,7 @@ impl PE {
     pub fn parse_import_data(
         &mut self,
         reader: &mut Reader,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let import_table_idd = self.get_optional_header().get_import_table_idd();
         let itd_file_offset = self.convert_rva_to_file_offset(import_table_idd.virtual_address);
 
@@ -2176,7 +2179,7 @@ impl PE {
     pub fn parse_export_data(
         &mut self,
         reader: &mut Reader,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let export_table_idd = self.get_optional_header().get_export_table_idd();
         let etd_offset = self.convert_rva_to_file_offset(export_table_idd.virtual_address);
 
@@ -2196,7 +2199,7 @@ impl PE {
                     export_data.export_address_table.push(entry);
                 }
             } else {
-                return Err("Cannot find the Export Address Table".into());
+                bail!("Cannot find the Export Address Table");
             }
 
             if let Some(entp_offset) = self.convert_rva_to_file_offset(export_data.export_directory_table.name_pointer_rva) {
@@ -2212,7 +2215,7 @@ impl PE {
                     reader.set_position(old_position)?;
                 }
             } else {
-                return Err("Cannot find the Export Name Pointer Table".into());
+                bail!("Cannot find the Export Name Pointer Table");
             }
 
             if let Some(eot_offset) = self.convert_rva_to_file_offset(export_data.export_directory_table.ordinal_table_rva) {
@@ -2224,7 +2227,7 @@ impl PE {
                     export_data.export_ordinal_table.push(ordinal);
                 }
             } else {
-                return Err("Cannot find the Export Ordinal Table".into());
+                bail!("Cannot find the Export Ordinal Table");
             }
 
             if let Some(ent_offset) = self.convert_rva_to_file_offset(export_data.export_directory_table.name_rva) {
@@ -2246,7 +2249,7 @@ impl PE {
                     export_data.export_name_table.push(String::from_utf8(buffer)?);
                 }
             } else {
-                return Err("Cannot find the Export Name Table".into());
+                bail!("Cannot find the Export Name Table");
             }
 
             self.export_data = Some(export_data);
@@ -2258,7 +2261,7 @@ impl PE {
     pub fn parse_debug_directory(
         &mut self,
         reader: &mut Reader,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let debug_va = self.get_optional_header().get_debug_idd().virtual_address;
 
         if debug_va > 0 {
@@ -2279,7 +2282,7 @@ impl PE {
     pub fn parse_exception_table(
         &mut self,
         reader: &mut Reader,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<()> {
         let exception_va = self
             .get_optional_header()
             .get_exception_table_idd()
@@ -2347,9 +2350,9 @@ impl PE {
 /*
  * Main parse method that reads from a file, tests if it's a PE file or not, parses and returns the parsed PE
  */
-pub fn parse_pe(file_path: &PathBuf) -> Result<PE, Box<dyn std::error::Error>> {
+pub fn parse_pe(file_path: &PathBuf) -> Result<PE> {
     if !file_path.exists() {
-        return Err("File does not exist".into());
+        bail!("File does not exist");
     }
 
     let file_bytes = std::fs::read(file_path)?;

@@ -4,6 +4,8 @@
 
 use super::*;
 
+use anyhow::{anyhow, Result};
+
 impl App {
     pub(crate) fn save(&mut self, location: Option<PathBuf>) {
         if location.is_some() {
@@ -26,7 +28,7 @@ impl App {
             match project.save(location) {
                 Ok(message) => messages.push(message),
                 Err(error) => {
-                    self.message = Some((format!("Cannot save: {}", error), true));
+                    self.message = Some((format!("Cannot save: {:#}", error), true));
                     return;
                 }
             }
@@ -57,12 +59,12 @@ impl App {
                 let conflicts = if report.conflicts.is_empty() { String::new() } else { format!(", {} functions with conflicts", report.conflicts.len()) };
                 self.info(format!("Exported {} functions in {} files to {}{}", report.functions, report.files, report.dir.display(), conflicts));
             }
-            Err(error) => self.error(format!("Export failed: {}", error)),
+            Err(error) => self.error(format!("Export failed: {:#}", error)),
         }
     }
 
     /// Runs an action on the project and the function under the cursor
-    pub(crate) fn with_function(&mut self, action: impl FnOnce(&mut Project, u64) -> Result<(), String>) {
+    pub(crate) fn with_function(&mut self, action: impl FnOnce(&mut Project, u64) -> Result<()>) {
         let Some((program, addr)) = self.current_function() else {
             return self.error("No function under the cursor".to_string());
         };
@@ -76,7 +78,7 @@ impl App {
     }
 
     /// Runs an action on the source view and its project
-    pub(crate) fn with_source(&mut self, action: impl FnOnce(&mut SourceView, &mut Project) -> Result<(), String>) {
+    pub(crate) fn with_source(&mut self, action: impl FnOnce(&mut SourceView, &mut Project) -> Result<()>) {
         let App { workspace, projects, .. } = self;
 
         let result = match workspace.view_mut() {
@@ -84,7 +86,7 @@ impl App {
                 Some(project) => action(source, project),
                 None => Ok(()),
             },
-            _ => Err("Only in the C code (:source)".to_string()),
+            _ => Err(anyhow!("Only in the C code (:source)")),
         };
 
         self.report(result);
@@ -106,7 +108,7 @@ impl App {
 
             let result = match (addr, self.project(program)) {
                 (Some(addr), Some(project)) => project.rename_function(addr, new),
-                _ => Err(format!("Unknown function: {}", old)),
+                _ => Err(anyhow!("Unknown function: {}", old)),
             };
 
             return self.report(result);
@@ -128,7 +130,7 @@ impl App {
         } else if let Some(addr) = project.global(function, old) {
             project.rename_global(addr, new)
         } else {
-            Err(format!("{} is not a variable, a function or a global of {}", old, project.function_name(function)))
+            Err(anyhow!("{} is not a variable, a function or a global of {}", old, project.function_name(function)))
         };
 
         self.report(result);
@@ -159,15 +161,15 @@ impl App {
             return self.error("No function to move".to_string());
         };
 
-        let result = self.project(program).ok_or_else(String::new).and_then(|p| {
-            p.move_function(addr, &module)?;
-            Ok(format!("{} moved to {}", p.function_name(addr), module))
-        });
+        let Some(project) = self.project(program) else {
+            return;
+        };
+
+        let result = project.move_function(addr, &module).map(|_| format!("{} moved to {}", project.function_name(addr), module));
 
         match result {
             Ok(message) => self.info(message),
-            Err(error) if !error.is_empty() => self.error(error),
-            Err(_) => {}
+            Err(error) => self.report(Err(error)),
         }
     }
 
@@ -190,7 +192,7 @@ impl App {
 
         match result {
             Ok(()) => self.info("Asking the LLM to rewrite the code, its proposal will show in :review".to_string()),
-            Err(error) => self.error(format!("LLM: {}", error)),
+            Err(error) => self.error(format!("LLM: {:#}", error)),
         }
     }
 
@@ -214,7 +216,7 @@ impl App {
 
         match result {
             Ok(()) => self.info("Asking the LLM to improve the code, its proposal will show in :review".to_string()),
-            Err(error) => self.error(format!("LLM: {}", error)),
+            Err(error) => self.error(format!("LLM: {:#}", error)),
         }
     }
 
@@ -226,17 +228,23 @@ impl App {
         };
 
         let llm = self.llm.clone();
-        let result = self.project(program).ok_or_else(String::new).and_then(|p| p.llm_modules(module.as_deref(), &llm));
 
-        match result {
+        let Some(project) = self.project(program) else {
+            return;
+        };
+
+        match project.llm_modules(module.as_deref(), &llm) {
             Ok(()) => self.info(format!("Asking the LLM to organize {}...", module.as_deref().unwrap_or("the program"))),
-            Err(error) if !error.is_empty() => self.error(error),
-            Err(_) => {}
+            Err(error) => self.report(Err(error)),
         }
     }
 
     pub(crate) fn rename_module(&mut self, program: usize, old: &str, new: &str) {
-        let result = self.project(program).ok_or_else(String::new).and_then(|p| p.rename_module(old, new));
+        let Some(project) = self.project(program) else {
+            return;
+        };
+
+        let result = project.rename_module(old, new);
         self.report(result);
 
         for view in self.workspace.views_mut() {
