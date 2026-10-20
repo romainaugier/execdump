@@ -269,6 +269,16 @@ pub(crate) enum Command {
     SelectFrame(usize),
     /// A line of input of the program
     Input(String),
+    /// Watches a value, or a block of memory of a length
+    Watch(String, Option<usize>),
+    /// Stops watching: a number, all, the watch under the cursor
+    Unwatch(Option<String>),
+    /// The frame of the caller (up the stack), or of the callee
+    MoveFrame { up: bool },
+    /// The call stack in a popup
+    Stack,
+    /// The forms of the value of an expression (the one under the cursor without it), the form to copy
+    Value { expr: Option<String>, form: Option<String> },
 
     // Splits and tabs
     Split { dir: Dir, target: Option<String> },
@@ -437,6 +447,13 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("break", &["b", "br"], "[function or address]", "toggle a breakpoint (at the line or the instruction under the cursor without an argument)", DEBUG, C::Function),
     spec("frame", &[], "<n>", "frame of the call stack the code and the variables are shown for", DEBUG, C::Nothing),
     spec("input", &["stdin"], "[text]", "send a line to the input of the program (its terminal)", DEBUG, C::Nothing),
+    spec("watch", &["display"], "<expression>", "watch a value at each stop: a variable, a register, a global, *address, &variable, name+offset", DEBUG, C::Name),
+    spec("memory", &["mem", "examine"], "<address expression> [bytes]", "watch a block of memory in hexadecimal (64 bytes by default), live while the program runs", DEBUG, C::Name),
+    spec("unwatch", &["undisplay"], "[n|all]", "stop watching (the watch under the cursor of the debug view without a number)", DEBUG, C::Nothing),
+    spec("value", &["val"], "[expression] [form]", "the value as integers, floats, hexadecimal, a pointer, a string and bytes (Enter copies one); with a form (u32, i64, f64, hex, pointer, string, bytes, c, python, base64...) copies it; the value under the cursor without an expression", DEBUG, C::Name),
+    spec("caller", &["frame-up"], "", "select the frame of the caller (one frame up the call stack)", DEBUG, C::Nothing),
+    spec("callee", &["frame-down"], "", "select the frame of the callee (one frame down the call stack)", DEBUG, C::Nothing),
+    spec("stack", &["bt", "backtrace"], "", "the call stack, Enter selects a frame", DEBUG, C::Nothing),
     spec("split", &["sp", "new"], "[function]", "split below (on a function)", SPLITS, C::Function),
     spec("vsplit", &["vs", "vnew"], "[function]", "split on the right (on a function)", SPLITS, C::Function),
     spec("tabnew", &["tabe", "tabedit"], "[function]", "new tab (on a function)", SPLITS, C::Function),
@@ -662,6 +679,36 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
         "kill" => Command::Debugger(DebugAction::Kill),
         "break" => Command::Break(first_owned),
         "input" => Command::Input(rest.to_string()),
+        "watch" if rest.is_empty() => bail!("Usage: watch <expression>"),
+        "watch" => Command::Watch(rest.to_string(), None),
+        "memory" => {
+            // The length is the last word when there are several
+            let number = |w: &str| w.strip_prefix("0x").map_or_else(|| w.parse::<usize>().ok(), |h| usize::from_str_radix(h, 16).ok());
+
+            let (expr, length) = match rest.rsplit_once(char::is_whitespace).and_then(|(expr, last)| Some((expr.trim(), number(last)?))) {
+                Some((expr, length)) => (expr, length),
+                None => (rest, crate::watch::DEFAULT_MEMORY),
+            };
+
+            if expr.is_empty() {
+                bail!("Usage: memory <address expression> [bytes]");
+            }
+
+            Command::Watch(expr.to_string(), Some(length))
+        }
+        "unwatch" => Command::Unwatch(first_owned.clone()),
+        "value" => {
+            // The form is the last word when there are several
+            let (expr, form) = match rest.rsplit_once(char::is_whitespace) {
+                Some((expr, last)) if crate::value::FORMS.contains(&last) => (expr.trim(), Some(last.to_string())),
+                _ => (rest, None),
+            };
+
+            Command::Value { expr: (!expr.is_empty()).then(|| expr.to_string()), form }
+        }
+        "caller" => Command::MoveFrame { up: true },
+        "callee" => Command::MoveFrame { up: false },
+        "stack" => Command::Stack,
         "frame" => Command::SelectFrame(first.and_then(|n| n.parse().ok()).ok_or_else(|| usage(spec))?),
         "split" => Command::Split { dir: Dir::Down, target: first_owned },
         "vsplit" => Command::Split { dir: Dir::Right, target: first_owned },
@@ -789,6 +836,9 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Global, &[s("<F8>")], "step-over");
     bind(Global, &[s("<F4>")], "finish");
     bind(Global, &[s("<F9>")], "break");
+    bind(Global, &[s("<F2>")], "stack");
+    bind(Global, &[s("<C-k>"), s("<C-Up>")], "caller");
+    bind(Global, &[s("<C-j>"), s("<C-Down>")], "callee");
     bind(Global, &[s("gT")], "tabprevious");
 
     // Explorer
@@ -870,6 +920,12 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
 
     // Debugger
     bind(Debug, &[s("i")], "prompt input ");
+    bind(Debug, &[s("w")], "prompt watch ");
+    bind(Debug, &[s("m")], "prompt memory ");
+    bind(Debug, &[s("dd")], "unwatch");
+    bind(Debug, &[s("y")], "value");
+    bind(Source, &[s("gw")], "prompt watch {word}");
+    bind(Source, &[s("gy")], "value");
 
     // C code
     bind(Source, &[ctrl(k.page_down)], "page-down");
@@ -1237,6 +1293,11 @@ impl App {
             Command::Debugger(action) => self.debug_action(action),
             Command::Break(target) => self.toggle_breakpoint(target.as_deref()),
             Command::SelectFrame(index) => self.select_frame(index),
+            Command::Watch(expr, length) => self.add_watch(&expr, length),
+            Command::Unwatch(which) => self.remove_watch(which.as_deref()),
+            Command::MoveFrame { up } => self.move_frame(up),
+            Command::Stack => self.stack_popup(),
+            Command::Value { expr, form } => self.value_command(expr, form),
             Command::Input(text) => match self.debugger.as_mut() {
                 Some(debugger) => {
                     let result = debugger.input(&text);

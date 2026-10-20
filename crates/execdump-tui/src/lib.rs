@@ -28,7 +28,9 @@ mod session;
 mod splits;
 mod syntax;
 mod theme;
+mod value;
 mod views;
+mod watch;
 mod workspace;
 
 #[cfg(test)]
@@ -196,6 +198,10 @@ pub(crate) struct App {
     debugger: Option<debug::Debugger>,
     breakpoints: std::collections::BTreeSet<(usize, u64)>,
     debugger_config: DebuggerConfig,
+    /// What the debug view watches: values and blocks of memory
+    watches: Vec<watch::Watch>,
+    /// The value :value shows once the debugger read its memory: its expression, its length, the form to copy
+    pending_value: Option<(String, Option<usize>, Option<String>)>,
 
     clipboard: clipboard::Clipboard,
 }
@@ -265,6 +271,8 @@ impl App {
             llm: LlmConfig::default(),
             debugger: None,
             breakpoints: std::collections::BTreeSet::new(),
+            watches: Vec::new(),
+            pending_value: None,
             debugger_config: DebuggerConfig::default(),
             clipboard: clipboard::Clipboard::default(),
         };

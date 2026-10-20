@@ -740,9 +740,12 @@ The debug view shows:
   how they are shown: integers by their size and sign, floats, `char` with its character, pointers to text with their
   string (`0x555555556004 "world"`), buffers of text as strings, the other buffers as bytes. A variable that is in no
   location at that address is `?`
-- the call stack, the functions of the program by their name (`depth+0x17`), the others by the name the debugger
-  gives (the libraries); `Enter` on a frame selects it: the code, the variables and the registers are the ones of
-  that frame (unwound by the debugger)
+- the watches (`:watch`, `:memory`): values and blocks of memory, what changed since the stop before highlighted.
+  `Enter` (or `y`) on a watch or a variable shows its value in every form, as `:value` does
+- the call stack, the functions of the program by their name (`depth+0x17`) with their module, the others by the
+  name the debugger gives (the libraries); `Enter` on a frame selects it: the code, the variables, the registers and
+  the watches are the ones of that frame (unwound by the debugger). `Ctrl-k` / `Ctrl-j` (or `Ctrl-Up` / `Ctrl-Down`,
+  `:caller` / `:callee`) go up and down the call stack from anywhere, `F2` (`:stack`) shows it in a popup
 - the registers, the breakpoints (`Enter` shows the code of one) and the last lines of the output of the program, as
   it writes them
 
@@ -760,8 +763,32 @@ execdump runs and given to the debugger at the load address of the program (PIE 
 | `F6` | `:interrupt` | Stop the running program |
 | `F9`, `gb` | `:break [function or address]` | Toggle a breakpoint |
 | | `:frame <n>` | Select a frame of the call stack |
+| `Ctrl-k` / `Ctrl-j` | `:caller` / `:callee` | Select the frame of the caller / of the callee |
+| `F2` | `:stack` (`:bt`) | The call stack in a popup, `Enter` selects a frame |
+| `w` (debug view), `gw` (C code, on the word) | `:watch <expression>` | Watch a value |
+| `m` (debug view) | `:memory <address> [bytes]` | Watch a block of memory in hexadecimal (64 bytes by default, 4096 at most) |
+| `dd` (debug view) | `:unwatch [n\|all]` | Stop watching (the watch under the cursor without a number) |
+| `Enter`, `y` (debug view), `gy` (C code, on the word) | `:value [expression] [form]` | The value in every form, `Enter` copies one; with a form, copies it |
 | `i` (debug view) | `:input [text]` | Send a line to the input of the program |
 | | `:kill` | Kill the program and the debugger |
+
+A watch is an expression: a variable of the function of the selected frame, a register, a function or a global of
+the program, a number, plus or minus a number (`rsp+0x10`, without spaces), with `*` to read the word at its address
+(`*rsp`) and `&` for the address of a variable in the stack (`&v18`). `:memory` takes the address of the block: the
+value of a variable or of a register (`:memory a1 32` for the buffer a pointer points to), the address of a global
+(`:memory buffer 256`). The values and the bytes that changed since the stop before are highlighted. On Linux the
+memory is read from the process of the program (`/proc/<pid>/mem`, the program is a child of execdump), so the blocks
+of memory and the values read from memory change live while the program runs (`Watches (live)`, the changes since
+the last stop highlighted); elsewhere they are read at the stops. The watches stay from one run to the next.
+
+`:value` takes the same expressions (the watch or the variable under the cursor of the debug view, the word under
+the cursor of the C code without one) and shows the value in a popup, `Enter` copies a form to the clipboard: the
+value as the debug view shows it, hexadecimal, what it points to (`0x5555555551e2 <main>`, the string as a C literal
+and as text), the unsigned and signed integers of 1, 2, 4 and 8 bytes and the floats its first bytes make (in the
+byte order of the program), the character, and its bytes (`e2 51 55 55`, a C array `{ 0xe2, 0x51, ... }`, a Python
+`b"..."`, base64). A block of memory (`:memory`) gives its bytes and its text. With a form the value is copied
+without the popup: `:value v3 u32`, `:value rdi string`, `:value *rsp hex`. The forms are `value`, `hex`, `pointer`,
+`string`, `text`, `u8` to `i64`, `f32`, `f64`, `char`, `bytes`, `c`, `python` and `base64`.
 
 A line of C is its address (the first instruction of its statement), a step continues to the addresses of the lines
 of the function and to its return address with temporary breakpoints. A line is only a stop in the frame the step

@@ -91,12 +91,20 @@ fn session_on(kind: Kind, pie: bool) {
     let config = Config { kind, debugger, program: binary.clone(), args: Vec::new(), output: output.clone(), input: None, link_entry: program.entry.unwrap(), registers, stack_pointer: sp.to_string() };
     let session = Session::start(config);
 
-    let bias = match next(&session) {
-        Event::Started { bias, .. } => bias,
+    let (bias, pid) = match next(&session) {
+        Event::Started { bias, pid, .. } => (bias, pid),
         other => panic!("not started: {:?}", other),
     };
 
     assert_eq!(bias == 0, !pie, "load bias {:#x}", bias);
+
+    // The process of the program, its memory readable while it runs (Linux)
+    let pid = pid.expect("the process id of the program");
+    let entry = program.entry.unwrap() + bias;
+    let mut code = [0u8; 16];
+    std::os::unix::fs::FileExt::read_at(&std::fs::File::open(format!("/proc/{}/mem", pid)).unwrap(), &mut code, entry).unwrap();
+    session.send(Request::Read { addr: entry, len: 16 });
+    assert_eq!(next(&session), Event::Memory { addr: entry, bytes: code.to_vec() });
 
     // A breakpoint at the start of greet: its argument points to "world", main called it
     let greet = symbol(&program, "greet") + bias;

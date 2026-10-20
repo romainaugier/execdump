@@ -183,6 +183,12 @@ impl Backend for Lldb {
         return Ok(first.and_then(|l| l.split(']').nth(1)).and_then(|l| l.split_whitespace().next()).and_then(hex).unwrap_or(0));
     }
 
+    fn program_pid(&mut self) -> Option<u32> {
+        // Process 1234 stopped
+        let output = self.command("process status").ok()?;
+        return output.lines().find_map(|l| l.trim().strip_prefix("Process ")).and_then(|l| l.split_whitespace().next()).and_then(|p| p.parse().ok());
+    }
+
     fn insert_breakpoint(&mut self, addr: u64) -> Result<u32> {
         let output = self.command(&format!("breakpoint set -a {:#x}", addr))?;
         let id = output.lines().find_map(|l| l.trim().strip_prefix("Breakpoint ")).and_then(|l| l.split(':').next()).and_then(|n| n.trim().parse().ok());

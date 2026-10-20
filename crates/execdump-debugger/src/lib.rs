@@ -149,6 +149,9 @@ pub trait Backend: Send {
     /// Where the binary was loaded: the address of its entry point in the process minus the one of the binary
     fn load_bias(&mut self, link_entry: u64) -> Result<u64>;
 
+    /// Process id of the program, once it is started
+    fn program_pid(&mut self) -> Option<u32>;
+
     fn insert_breakpoint(&mut self, addr: u64) -> Result<u32>;
 
     fn delete_breakpoint(&mut self, id: u32) -> Result<()>;

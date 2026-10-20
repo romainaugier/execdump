@@ -1,7 +1,8 @@
 /*
  * Debug view: the state of the program under the debugger. The variables of the function of the selected frame and
- * their values, the call stack (Enter selects a frame: the code and the variables follow it), the registers, the
- * breakpoints (Enter shows the code of one) and the last lines of the output of the program.
+ * their values (Enter shows the forms of a value, as :value), the call stack (Enter selects a frame: the code and the
+ * variables follow it), the registers, the breakpoints (Enter shows the code of one) and the last lines of the output
+ * of the program.
  */
 
 use crate::commands::{Command, Motion};
@@ -28,6 +29,10 @@ pub(crate) enum Row {
     Frame(usize),
     /// Program and address of a breakpoint
     Breakpoint(usize, u64),
+    /// A line of a watch
+    Watch(usize),
+    /// A variable of the frame
+    Variable(usize),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,8 +44,16 @@ pub(crate) struct DebugView {
 }
 
 impl DebugView {
-    fn row(&self) -> Row {
+    pub fn row(&self) -> Row {
         return self.rows.get(self.cursor).copied().unwrap_or(Row::Text);
+    }
+
+    /// The watch of the line under the cursor
+    pub fn watch_row(&self) -> Option<usize> {
+        return match self.row() {
+            Row::Watch(index) => Some(index),
+            _ => None,
+        };
     }
 }
 
@@ -60,11 +73,15 @@ impl App {
         let Some(status) = self.debug_status() else {
             lines.push(dim(theme, "No program under the debugger: :debug [arguments] (or F5) runs it".to_string()));
             lines.push(dim(theme, "F9 / gb / :break toggle a breakpoint at the cursor, F7 step, F8 step over, F4 finish, F6 interrupt".to_string()));
+            lines.push(dim(theme, "w / :watch <expression> watches a value, m / :memory <address> [bytes] a block of memory, dd / :unwatch removes one".to_string()));
+            lines.push(dim(theme, "Enter / y / :value [expression] [form] shows a value as integers, floats, a pointer, a string and bytes (Enter copies one)".to_string()));
+            lines.extend(self.watch_lines(theme));
             lines.extend(self.breakpoint_lines(theme));
             return lines;
         };
 
         lines.push((Line::from(Span::styled(status, Style::default().fg(theme.fg).add_modifier(Modifier::BOLD))), Row::Text));
+        lines.extend(self.watch_lines(theme));
 
         let stopped = self.debugger.as_ref().is_some_and(|d| d.state == DebugState::Stopped && d.snapshot.is_some());
 
@@ -78,7 +95,7 @@ impl App {
 
             let width = variables.iter().map(|v| v.name.chars().count()).max().unwrap_or(0);
 
-            for variable in variables {
+            for (index, variable) in variables.into_iter().enumerate() {
                 let (value, color) = match variable.value {
                     Some(value) => (value, theme.value),
                     None => ("?".to_string(), theme.dim),
@@ -90,7 +107,7 @@ impl App {
                         Span::styled(value, Style::default().fg(color)),
                         Span::styled(format!("  {}", variable.location), Style::default().fg(theme.dim)),
                     ]),
-                    Row::Text,
+                    Row::Variable(index),
                 ));
             }
 
@@ -130,10 +147,13 @@ impl App {
                 let selected = index == snapshot.frame;
                 let marker = if selected { "▶" } else { " " };
 
+                let module = self.frame_module(frame.pc).map_or(String::new(), |m| format!("  {}", m));
+
                 let line = Line::from(vec![
                     Span::styled(format!(" {}#{:<2} ", marker, index), Style::default().fg(if selected { theme.title } else { theme.dim })),
                     Span::styled(format!("{:#014x} ", frame.pc), Style::default().fg(theme.asm_address)),
                     Span::styled(self.frame_name(frame.pc, &frame.function), Style::default().fg(theme.asm_label)),
+                    Span::styled(module, Style::default().fg(theme.dim)),
                 ]);
 
                 (line, Row::Frame(index))
@@ -220,6 +240,7 @@ impl App {
                 match view.row() {
                     Row::Frame(index) => self.select_frame(index),
                     Row::Breakpoint(program, addr) => self.open_code(program, addr),
+                    Row::Watch(_) | Row::Variable(_) => self.value_command(None, None),
                     Row::Text => {}
                 }
 

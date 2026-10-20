@@ -94,6 +94,8 @@ pub enum Target {
     Module(usize, String),
     /// Text copied to the clipboard of the terminal
     Copy(String),
+    /// A frame of the call stack of the program under the debugger
+    Frame(usize),
 }
 
 /// Keeps a cursor visible in a scrolled list
@@ -204,6 +206,7 @@ impl App {
             Target::Copy(text) => {
                 self.copy(&text);
             }
+            Target::Frame(index) => self.select_frame(index),
         }
     }
 

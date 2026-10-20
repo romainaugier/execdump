@@ -734,6 +734,91 @@ fn debugging() {
     let variables = app.variables();
     assert!(variables.iter().any(|v| v.value.as_deref() == Some("4")), "{:?}", variables.iter().map(|v| (&v.name, &v.value, &v.location)).collect::<Vec<_>>());
 
+    // Watches: the variable holding the argument, the stack pointer, the word and the bytes at it (read from the
+    // process of the program)
+    let argument = variables.iter().find(|v| v.value.as_deref() == Some("4")).unwrap().name.clone();
+    let sp = if cfg!(target_arch = "aarch64") { "sp" } else { "rsp" };
+    app.run_command(&format!("watch {}", argument));
+    app.run_command(&format!("watch {}", sp));
+    app.run_command(&format!("watch *{}", sp));
+    app.run_command(&format!("memory {} 32", sp));
+    app.run_command("watch nothing_named_so");
+    assert_eq!(app.watches.len(), 5);
+    assert!(app.debugger.as_ref().unwrap().can_read_process());
+
+    let snapshot = app.debugger.as_ref().unwrap().snapshot.clone().unwrap();
+    let stack_word = u64::from_le_bytes(snapshot.stack[..8].try_into().unwrap());
+    assert_eq!(app.watches[0].seen, Some(watch::Seen::Text("4".to_string())));
+    assert!(matches!(&app.watches[1].seen, Some(watch::Seen::Text(t)) if t.starts_with(&format!("{:#x}", snapshot.sp))), "{:?}", app.watches[1]);
+    assert!(matches!(&app.watches[2].seen, Some(watch::Seen::Text(t)) if t.starts_with(&format!("{:#x}", stack_word)) || stack_word < 10), "{:?}", app.watches[2]);
+    assert_eq!(app.watches[3].seen, Some(watch::Seen::Bytes(snapshot.stack[..32].to_vec())));
+    assert!(app.watches[4].error.is_some());
+
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert!(screen(&terminal).contains("Watches") && screen(&terminal).contains(&format!("{:016x}", snapshot.sp)), "{}", screen(&terminal));
+
+    app.run_command("unwatch 5");
+    assert_eq!(app.watches.len(), 4);
+
+    // The forms of a value: of the variable, of a function as a pointer, one of them copied
+    let form = |popup: &Popup, label: &str| popup.items.iter().find(|(l, _)| l.starts_with(&format!("{:<8}", label))).and_then(|(_, t)| match t {
+        Target::Copy(text) => Some(text.clone()),
+        _ => None,
+    });
+
+    app.run_command(&format!("value {}", argument));
+    let popup = app.popup.take().expect("the forms of the value");
+    assert_eq!(form(&popup, "value").as_deref(), Some("4"), "{:?}", popup.items);
+    assert_eq!(form(&popup, "u8").as_deref(), Some("4"));
+    assert!(form(&popup, "bytes").is_some_and(|b| b.starts_with("04 00")), "{:?}", popup.items);
+
+    app.run_command("value main pointer");
+    assert!(app.message.as_ref().is_some_and(|(text, _)| text.contains("<main>")), "{:?}", app.message);
+    app.run_command(&format!("value {} u32", argument));
+    assert!(app.message.as_ref().is_some_and(|(text, _)| text.starts_with("Copied 4")), "{:?}", app.message);
+    app.run_command("value main nothing");
+    assert!(app.popup.is_none());
+
+    // From the debug view: y on a watch, Enter on the block of memory (its bytes) and on a variable
+    for _ in 0..app.workspace.group_count() {
+        if matches!(app.workspace.view(), View::Debug(_)) {
+            break;
+        }
+
+        app.workspace.cycle_group(true);
+    }
+
+    assert!(matches!(app.workspace.view(), View::Debug(_)));
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+    let debug_row = |app: &App| match app.workspace.view() {
+        View::Debug(view) => view.row(),
+        _ => views::debug::Row::Text,
+    };
+
+    app.debug_command(&commands::Command::Move(commands::Motion::First), None);
+    app.debug_command(&commands::Command::Move(commands::Motion::Next), None);
+    assert_eq!(debug_row(&app), views::debug::Row::Watch(0));
+    app.handle_key(key('y'));
+    assert_eq!(app.popup.take().and_then(|p| form(&p, "value")).as_deref(), Some("4"));
+
+    while debug_row(&app) != views::debug::Row::Watch(3) {
+        app.debug_command(&commands::Command::Move(commands::Motion::Next), None);
+    }
+
+    enter(&mut app);
+    let popup = app.popup.take().expect("the forms of the block of memory");
+    let hex: Vec<String> = snapshot.stack[..32].iter().map(|b| format!("{:02x}", b)).collect();
+    assert_eq!(form(&popup, "bytes"), Some(hex.join(" ")), "{:?}", popup.items);
+    assert!(form(&popup, "u8").is_none());
+
+    while !matches!(debug_row(&app), views::debug::Row::Variable(_)) {
+        app.debug_command(&commands::Command::Move(commands::Motion::Next), None);
+    }
+
+    enter(&mut app);
+    assert!(app.popup.take().is_some_and(|p| form(&p, "bytes").is_some()));
+
     // Over the lines of square_sum, then out of it, back in main
     app.run_command("n");
     wait_stopped(&mut app);
@@ -768,6 +853,19 @@ fn debugging() {
     let frames = app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frames.clone();
     assert!(frames.len() >= 3 && app.frame_name(frames[1].pc, &frames[1].function).starts_with("depth+"), "{:?}", frames);
 
+    // Up and down the call stack, the stack in a popup
+    app.run_command("caller");
+    wait_stopped(&mut app);
+    assert_eq!(app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frame, 1);
+    app.run_command("callee");
+    wait_stopped(&mut app);
+    assert_eq!(app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frame, 0);
+
+    app.run_command("stack");
+    let popup = app.popup.take().expect("the call stack");
+    assert_eq!(popup.items.len(), frames.len());
+    assert!(popup.items[1].0.contains("depth+") && popup.items[1].1 == Target::Frame(1), "{:?}", popup.items);
+
     app.run_command("frame 1");
     wait_stopped(&mut app);
     assert_eq!(app.debugger.as_ref().unwrap().snapshot.as_ref().unwrap().frame, 1);
@@ -794,8 +892,85 @@ fn debugging() {
     terminal.draw(|f| ui(f, &mut app)).unwrap();
     assert!(screen(&terminal).contains("hello world"));
 
+    app.run_command("unwatch all");
+    assert!(app.watches.is_empty());
+
     app.run_command("kill");
     assert!(app.debugger.is_none());
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A global watched while the program runs: read from its process, its value changes without a stop
+#[test]
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn live_watches() {
+    if execdump_debugger::find(None, None).is_none() {
+        eprintln!("no debugger installed, skipped");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("execdump-tui-live-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let sources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/src");
+    let binary = dir.join("debuggee");
+    let built = std::process::Command::new("cc").args(["-O1", "-fno-stack-protector", "-fno-inline"]).arg(sources.join("debuggee.c")).arg(sources.join("debuggee_util.c")).arg("-o").arg(&binary).status();
+
+    if !built.is_ok_and(|s| s.success()) {
+        eprintln!("no C compiler, skipped");
+        return;
+    }
+
+    let mut app = App::new(Exec::ELF(parse_elf(&binary).unwrap()), binary.clone(), KeyBindings::default(), Some(dir.join("project")), 2);
+
+    for _ in 0..1000 {
+        app.poll_analysis();
+        app.poll_projects();
+
+        if app.projects[0].is_some() {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // Stopped in spin, then running
+    app.run_command("break spin");
+    app.run_command("debug spin");
+    wait_stopped(&mut app);
+    app.run_command("watch spins");
+    app.run_command("memory &spins 8");
+    assert_eq!(app.watches[0].seen, Some(watch::Seen::Text("0".to_string())), "{:?}", app.watches[0]);
+
+    app.run_command("continue");
+    let mut values = std::collections::BTreeSet::new();
+
+    for _ in 0..100 {
+        app.poll_debugger();
+
+        if let Some(watch::Seen::Text(text)) = app.watches[0].seen.clone() {
+            values.insert(text);
+        }
+
+        if values.len() >= 3 {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    assert!(matches!(app.debugger.as_ref().unwrap().state, debug::DebugState::Running));
+    assert!(values.len() >= 3, "the value did not change while the program runs: {:?}", values);
+    assert!(matches!(&app.watches[1].seen, Some(watch::Seen::Bytes(b)) if b.iter().any(|&b| b != 0)));
+
+    let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
+    app.run_command("vsplit");
+    app.open(View::Debug(Default::default()));
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    assert!(screen(&terminal).contains("Watches (live)"), "{}", screen(&terminal));
+
+    app.run_command("kill");
     let _ = std::fs::remove_dir_all(&dir);
 }

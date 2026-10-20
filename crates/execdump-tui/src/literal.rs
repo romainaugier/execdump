@@ -116,7 +116,7 @@ pub fn literal_at(line: &str, col: usize) -> Option<Vec<u8>> {
 }
 
 /// The bytes as text, the control characters and the bytes that are not UTF-8 escaped
-fn text(bytes: &[u8]) -> String {
+pub fn text(bytes: &[u8]) -> String {
     let mut out = String::new();
 
     for chunk in bytes.utf8_chunks() {
@@ -136,7 +136,7 @@ fn text(bytes: &[u8]) -> String {
 }
 
 /// The bytes as printable ASCII, the others escaped (\r, \xc3), the quote and the backslash too
-fn ascii(bytes: &[u8], quote: char) -> String {
+pub fn escaped(bytes: &[u8], quote: char) -> String {
     let mut out = String::new();
 
     for &b in bytes {
@@ -160,19 +160,19 @@ fn ascii(bytes: &[u8], quote: char) -> String {
 }
 
 /// C literal: the hexadecimal escapes take every hexadecimal digit after them, the literal is split there
-fn c_literal(bytes: &[u8]) -> String {
+pub fn c_literal(bytes: &[u8]) -> String {
     let mut out = String::from("\"");
     let mut hex = false;
 
     for &b in bytes {
-        let escaped = ascii(&[b], '"');
+        let form = escaped(&[b], '"');
 
         if hex && b.is_ascii_hexdigit() {
             out.push_str("\" \"");
         }
 
-        hex = escaped.starts_with("\\x");
-        out.push_str(&escaped);
+        hex = form.starts_with("\\x");
+        out.push_str(&form);
     }
 
     out.push('"');
@@ -188,8 +188,8 @@ pub fn forms(bytes: &[u8]) -> Vec<(&'static str, String)> {
         ("text", text(bytes)),
         ("C", c_literal(bytes)),
         ("bytes", hex.join(" ")),
-        ("shell", format!("$'{}'", ascii(bytes, '\''))),
-        ("python", format!("b\"{}\"", ascii(bytes, '"'))),
+        ("shell", format!("$'{}'", escaped(bytes, '\''))),
+        ("python", format!("b\"{}\"", escaped(bytes, '"'))),
         ("length", format!("{} bytes, {} characters", bytes.len(), characters)),
     ];
 }

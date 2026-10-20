@@ -80,6 +80,11 @@ pub(crate) struct Debugger {
     /// Memory read since the stop
     memory: Vec<(u64, Vec<u8>)>,
     requested: HashSet<u64>,
+    /// The memory of the process of the program (/proc/<pid>/mem): read while it runs too
+    #[cfg(target_os = "linux")]
+    process_memory: Option<std::fs::File>,
+    /// When the watches read the memory of the program last
+    pub last_live: Option<std::time::Instant>,
     /// The file the output goes to without a terminal
     pub output: Option<PathBuf>,
     #[cfg(unix)]
@@ -177,6 +182,57 @@ impl Debugger {
     fn read(&mut self, addr: u64, len: usize) {
         if self.bytes(addr, len).is_none() && self.requested.insert(addr) {
             self.session.send(Request::Read { addr, len });
+        }
+    }
+
+    /// Asks the debugger for memory (an event brings it)
+    pub fn request_read(&mut self, addr: u64, len: usize) {
+        self.read(addr, len);
+    }
+
+    /// Whether the memory of the program can be read from its process, while it runs too
+    pub fn can_read_process(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        return self.process_memory.is_some();
+
+        #[cfg(not(target_os = "linux"))]
+        return false;
+    }
+
+    /// Bytes from an address to the end of its page, at most 256 (the text a pointer points to), from the process or
+    /// what was read: no read is asked for
+    pub fn bytes_from(&self, addr: u64) -> Option<Vec<u8>> {
+        let len = (0x1000 - (addr & 0xfff) as usize).min(256);
+
+        if let Some(bytes) = self.read_process(addr, len) {
+            return Some(bytes);
+        }
+
+        let stack = self.snapshot.as_ref().map(|s| (s.sp, s.stack.as_slice()));
+        let mut blocks = stack.into_iter().chain(self.memory.iter().map(|(start, bytes)| (*start, bytes.as_slice())));
+
+        return blocks.find(|(start, bytes)| addr >= *start && addr < start + bytes.len() as u64).map(|(start, bytes)| {
+            let offset = (addr - start) as usize;
+            bytes[offset..(offset + len).min(bytes.len())].to_vec()
+        });
+    }
+
+    /// Memory read from the process of the program (Linux), None when it cannot be (not mapped)
+    pub fn read_process(&self, addr: u64, len: usize) -> Option<Vec<u8>> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::FileExt;
+
+            let file = self.process_memory.as_ref()?;
+            let mut bytes = vec![0u8; len];
+            let read = file.read_at(&mut bytes, addr).ok()?;
+            return (read == len).then_some(bytes);
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (addr, len);
+            return None;
         }
     }
 
@@ -383,6 +439,9 @@ impl App {
             snapshot: None,
             memory: Vec::new(),
             requested: HashSet::new(),
+            #[cfg(target_os = "linux")]
+            process_memory: None,
+            last_live: None,
             output: file,
             #[cfg(unix)]
             terminal,
@@ -530,6 +589,51 @@ impl App {
         return Run::Until(Until { stops, entry_sp, returns });
     }
 
+    /// The frame of the caller of the selected one (up the stack), or of its callee
+    pub(crate) fn move_frame(&mut self, up: bool) {
+        let Some(snapshot) = self.debugger.as_ref().filter(|d| d.state == DebugState::Stopped).and_then(|d| d.snapshot.as_ref()) else {
+            return self.error("The program is not stopped".to_string());
+        };
+
+        let frame = snapshot.frame;
+
+        match (up, frame) {
+            (true, f) if f + 1 >= snapshot.frames.len() => self.info("At the outermost frame".to_string()),
+            (false, 0) => self.info("At the innermost frame".to_string()),
+            (true, f) => self.select_frame(f + 1),
+            (false, f) => self.select_frame(f - 1),
+        }
+    }
+
+    /// The frames of the call stack in a popup, Enter selects one
+    pub(crate) fn stack_popup(&mut self) {
+        let Some(snapshot) = self.debugger.as_ref().filter(|d| d.state == DebugState::Stopped).and_then(|d| d.snapshot.clone()) else {
+            return self.error("The program is not stopped".to_string());
+        };
+
+        let items: Vec<(String, Target)> = snapshot
+            .frames
+            .iter()
+            .enumerate()
+            .map(|(index, frame)| {
+                let marker = if index == snapshot.frame { "▶" } else { " " };
+                let module = self.frame_module(frame.pc).map_or(String::new(), |m| format!("  {}", m));
+                (format!("{}#{:<2} {:<40} {:#014x}{}", marker, index, self.frame_name(frame.pc, &frame.function), frame.pc, module), Target::Frame(index))
+            })
+            .collect();
+
+        let cursor = snapshot.frame.min(items.len().saturating_sub(1));
+        self.popup = Some(crate::popup::Popup { title: "Call stack (Enter selects the frame)".to_string(), items, cursor });
+    }
+
+    /// Module of the function of an address of the process (in the program)
+    pub(crate) fn frame_module(&self, pc: u64) -> Option<String> {
+        let debugger = self.debugger.as_ref()?;
+        let addr = debugger.program_addr(&self.programs[debugger.program], pc)?;
+        let function = self.analyses[debugger.program].as_ref()?.function_containing(addr)?.addr;
+        return self.projects[debugger.program].as_ref()?.module_of(function).map(|m| m.to_string());
+    }
+
     pub(crate) fn select_frame(&mut self, index: usize) {
         let Some(debugger) = self.debugger.as_mut().filter(|d| d.state == DebugState::Stopped) else {
             return self.error("The program is not stopped".to_string());
@@ -617,8 +721,17 @@ impl App {
 
             while let Some(event) = debugger.session.poll() {
                 match event {
-                    Event::Started { bias, .. } => {
+                    Event::Started { bias, pid, .. } => {
                         debugger.bias = bias;
+
+                        #[cfg(target_os = "linux")]
+                        {
+                            debugger.process_memory = pid.and_then(|pid| std::fs::File::open(format!("/proc/{}/mem", pid)).ok());
+                        }
+
+                        #[cfg(not(target_os = "linux"))]
+                        let _ = pid;
+
                         debugger.state = DebugState::Stopped;
                         started = true;
                     }
@@ -672,7 +785,11 @@ impl App {
 
         if stopped || read {
             self.after_stop(stopped);
+            self.evaluate_watches(stopped);
+            self.value_read(stopped);
         }
+
+        self.watch_live();
     }
 
     /// The views follow the program counter (at a stop), the memory the variables need is read
@@ -753,7 +870,7 @@ impl App {
      */
 
     /// Function and offset of the program counter of the selected frame, in the program
-    fn frame_function(&self) -> Option<(u64, u64)> {
+    pub(crate) fn frame_function(&self) -> Option<(u64, u64)> {
         let debugger = self.debugger.as_ref()?;
         let pc = debugger.program_addr(&self.programs[debugger.program], debugger.frame_pc()?)?;
         let function = self.analyses[debugger.program].as_ref()?.function_containing(pc)?.addr;
@@ -762,7 +879,7 @@ impl App {
 
     /// Where a variable is at the program counter, its address in memory (stack slots) or its value (registers,
     /// constants), and its shape
-    fn variable_places(&mut self) -> Vec<(String, String, Shape, Option<Result<u128, u64>>)> {
+    pub(crate) fn variable_places(&mut self) -> Vec<(String, String, Shape, Option<Result<u128, u64>>)> {
         let Some((function, pc)) = self.frame_function() else {
             return Vec::new();
         };

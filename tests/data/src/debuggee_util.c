@@ -3,6 +3,8 @@
  * execdump */
 
 volatile int spinning = 1;
+/* Counts the turns of spin: memory that changes while the program runs */
+volatile unsigned long spins;
 
 __attribute__((noinline)) static int square(int i)
 {
@@ -35,5 +37,5 @@ __attribute__((noinline)) static int keep_spinning(void)
 __attribute__((noinline)) void spin(void)
 {
     while (keep_spinning())
-        ;
+        spins++;
 }

@@ -176,6 +176,12 @@ impl Backend for Gdb {
         return Ok(entry.map_or(0, |e| e.wrapping_sub(link_entry)));
     }
 
+    fn program_pid(&mut self) -> Option<u32> {
+        let (record, _) = self.command("-list-thread-groups").ok()?;
+        let groups = record.get("groups")?;
+        return groups.items().iter().find_map(|g| g.get("pid").and_then(Value::str)).and_then(|p| p.parse().ok());
+    }
+
     fn insert_breakpoint(&mut self, addr: u64) -> Result<u32> {
         let (record, _) = self.command(&format!("-break-insert *{:#x}", addr))?;
         return record.get("bkpt").and_then(|b| b.get("number")).and_then(Value::str).and_then(|n| n.parse().ok()).context("no breakpoint number");

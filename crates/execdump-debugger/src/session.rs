@@ -96,8 +96,8 @@ impl Snapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// The program is loaded and stopped at its first instruction
-    Started { bias: u64, kind: Kind },
+    /// The program is loaded and stopped at its first instruction, its process id when the debugger tells it
+    Started { bias: u64, kind: Kind, pid: Option<u32> },
     Running,
     Stopped(Snapshot),
     /// The program exited (None: killed by a signal)
@@ -211,7 +211,8 @@ impl Worker {
         }
 
         let bias = backend.load_bias(config.link_entry)?;
-        let _ = events.send(Event::Started { bias, kind: config.kind });
+        let pid = backend.program_pid();
+        let _ = events.send(Event::Started { bias, kind: config.kind, pid });
 
         return Ok(Worker { backend, events: events.clone(), registers: config.registers.clone(), stack_pointer: config.stack_pointer.clone(), breakpoints: BTreeMap::new(), exited: false });
     }
