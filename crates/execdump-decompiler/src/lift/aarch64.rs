@@ -3,7 +3,7 @@
  */
 
 use super::regs::{RegRef, RegisterFile};
-use super::{llvm, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
+use super::{llvm, Access, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
 
 use crate::analysis::function::CallTarget;
 
@@ -267,7 +267,8 @@ pub fn memory(insn: &Insn) -> Vec<MemAccess> {
     let bits = access_bits(&insn.mnemonic, first) * if is_pair(&insn.mnemonic) { 2 } else { 1 };
     let disp = if post.is_some() { 0 } else { disp };
 
-    return vec![MemAccess { base: Some(base.reg), has_index: index.is_some(), disp, bytes: bits / 8 }];
+    let kind = if is_store(&insn.mnemonic) { Access::Write } else { Access::Read };
+    return vec![MemAccess { base: Some(base.reg), has_index: index.is_some(), disp, bytes: bits / 8, kind }];
 }
 
 /*

@@ -106,7 +106,7 @@ impl<'a> Builder<'a> {
         return Some((block, index));
     }
 
-    /// No store or call between two instructions of the same block (exclusive)
+    /// No store or call between two instructions of the same block (exclusive), nor a load after a call
     fn nothing_between(&self, from: ValueId, to: ValueId) -> bool {
         let (Some((block, start)), Some((other, end))) = (self.position(from), self.position(to)) else {
             return false;
@@ -116,7 +116,9 @@ impl<'a> Builder<'a> {
             return false;
         }
 
-        return self.f.blocks[block].insts[start + 1..end].iter().all(|&i| !has_side_effects(self.f, i));
+        // A call moved to its use stays before the loads that follow it (they may read what it writes)
+        let call = self.f.op(from) == Some(Op::Call);
+        return self.f.blocks[block].insts[start + 1..end].iter().all(|&i| !has_side_effects(self.f, i) && !(call && self.f.op(i) == Some(Op::Load)));
     }
 
     /// Which values become variables, the others are inlined in their use
@@ -537,7 +539,9 @@ impl<'a> Builder<'a> {
                     Op::SRem => BinaryOp::Rem,
                     _ => BinaryOp::Shr,
                 };
-                Expr::binary(op, self.signed_operand(*x, true), self.integer(*y))
+                // Both operands of a signed division are signed (an unsigned one makes the other unsigned in C)
+                let divisor = if op == BinaryOp::Shr { self.integer(*y) } else { self.signed_operand(*y, true) };
+                Expr::binary(op, self.signed_operand(*x, true), divisor)
             }
             (Op::FAdd, _) => binary(BinaryOp::Add),
             (Op::FSub, _) => binary(BinaryOp::Sub),

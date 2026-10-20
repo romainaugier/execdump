@@ -6,11 +6,15 @@ use crate::commands::{Command, Motion};
 use crate::theme::Theme;
 use crate::{App, Focus};
 
+use execdump_core::program::{Language, Program};
+
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+
+use std::sync::Arc;
 
 impl App {
     pub(crate) fn welcome_command(&mut self, command: &Command) -> bool {
@@ -23,7 +27,7 @@ impl App {
     }
 }
 
-pub(crate) fn render(f: &mut Frame, theme: &Theme, area: Rect, analysis_errors: &[Option<String>]) {
+pub(crate) fn render(f: &mut Frame, theme: &Theme, area: Rect, analysis_errors: &[Option<String>], programs: &[Arc<Program>]) {
     let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled("Welcome to execdump", theme.title_style())),
@@ -34,6 +38,11 @@ pub(crate) fn render(f: &mut Frame, theme: &Theme, area: Rect, analysis_errors: 
         Line::from(""),
         Line::from("Ctrl-w v splits the screen, gt goes to the next tab. Press ? at any time for the key bindings."),
     ];
+
+    for program in programs.iter().filter(|p| p.language == Language::DotNet) {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(format!("{}: a .NET assembly, its code is CIL bytecode (the machine code is the stub that starts the runtime), not decompiled yet", program.name), Style::default().fg(theme.warning))));
+    }
 
     if let Some(error) = analysis_errors.iter().flatten().next() {
         lines.push(Line::from(""));

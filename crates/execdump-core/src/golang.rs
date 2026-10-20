@@ -8,8 +8,14 @@
  *   start of the text, the header has the offsets of the tables
  * - Go 1.16 and 1.17 (0xfffffffa): the same tables, the entries are addresses
  * - Go 1.2 to 1.15 (0xfffffffb): the functions follow the header, their names are offsets in the table
+ *
+ * The calling convention follows the version: Go 1.17 passes the arguments and the results in registers on x86_64
+ * (ABIInternal), 1.18 on aarch64. Before, and always on x86, both are on the stack above the return address (ABI0).
+ * 1.16 and 1.17 share a layout: the functions of 1.17 compare the stack pointer to the stack guard of the goroutine
+ * in r14 (cmp rsp, [r14+0x10]), the ones of 1.16 load the goroutine from the thread local storage first.
  */
 
+use crate::disasm::Architecture;
 use crate::program::{Program, Region};
 
 /// A function of the pclntab
@@ -20,6 +26,19 @@ pub struct GoFunction {
     pub name: String,
     /// Source file of its first instruction
     pub file: Option<String>,
+    /// Size of its arguments and results in bytes (as they are laid out on the stack), None when the assembly does not
+    /// tell it
+    pub args: Option<u32>,
+    /// Written in assembly (known from Go 1.20 on): its registers are not the ones of the convention
+    pub assembly: bool,
+}
+
+/// The functions of a Go binary and its calling convention
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GoBinary {
+    pub functions: Vec<GoFunction>,
+    /// Arguments and results in registers (ABIInternal), else on the stack (ABI0)
+    pub register_abi: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +52,14 @@ enum Layout {
 }
 
 const MAX_NAME: usize = 4096;
+
+/// funcFlag_ASM of the flags of a _func
+const FUNC_FLAG_ASM: u8 = 1 << 2;
+
+/// Functions whose prologue is looked at to tell 1.17 from 1.16
+const PROLOGUES: usize = 64;
+/// Bytes of a prologue before the comparison to the stack guard (lea r12, [rsp-0x1000] is 8 bytes long)
+const PROLOGUE_BYTES: usize = 16;
 
 fn layout(magic: u32) -> Option<Layout> {
     return match magic {
@@ -92,6 +119,8 @@ struct Table<'a> {
     files: u64,
     pcs: u64,
     functab: u64,
+    /// Go 1.20 and later (0xfffffff1): the _func have the line of the start of the function, then their flags
+    flags: bool,
 }
 
 impl<'a> Table<'a> {
@@ -100,7 +129,8 @@ impl<'a> Table<'a> {
         let pointer_size = header[7] as u64;
         let field = |index: u64| program.read_pointer(base + 8 + index * pointer_size);
 
-        let mut table = Table { program, base, layout, pointer_size, count: field(0)?, text_start: 0, names: 0, cus: 0, files: 0, pcs: 0, functab: 0 };
+        let flags = program.read_u32(base) == Some(0xfffffff1);
+        let mut table = Table { program, base, layout, pointer_size, count: field(0)?, text_start: 0, names: 0, cus: 0, files: 0, pcs: 0, functab: 0, flags };
 
         match layout {
             Layout::Go118 => {
@@ -165,7 +195,11 @@ impl<'a> Table<'a> {
         }
 
         let file = self.file(after_entry).filter(|f| !f.is_empty());
-        return Some(GoFunction { entry, end, name, file });
+        let args = u32::try_from(self.program.read_u32(after_entry + 4)? as i32).ok();
+
+        // flag follows the line of the start and funcID, funcFlag_ASM is its third bit
+        let assembly = self.flags && self.program.read(after_entry + 37, 1).is_some_and(|flag| flag[0] & FUNC_FLAG_ASM != 0);
+        return Some(GoFunction { entry, end, name, file, args, assembly });
     }
 
     /// Source file at the entry of a function: the first value of its pcfile table, an index in the files of its
@@ -207,17 +241,37 @@ fn varint(bytes: &[u8]) -> Option<(u64, usize)> {
     return None;
 }
 
-/// The functions of the pclntab of a Go program, in address order
-pub fn functions(program: &Program) -> Vec<GoFunction> {
-    let Some(base) = find(program) else {
-        return Vec::new();
+/// The function of the runtime a Go function calls from its prologue when its stack is too small: it grows the stack
+/// and runs the function again, it is not code of the function
+pub fn grows_stack(name: &str) -> bool {
+    return name.starts_with("runtime.morestack");
+}
+
+/// The functions of the pclntab of a Go program in address order, and its calling convention. None for the
+/// programs without a pclntab.
+pub fn read(program: &Program) -> Option<GoBinary> {
+    let base = find(program)?;
+    let layout = header_at(program, base)?;
+    let table = Table::new(program, base, layout)?;
+    let functions: Vec<GoFunction> = (0..table.count).filter_map(|index| table.function(index)).collect();
+
+    let register_abi = match (program.architecture(), layout) {
+        (Architecture::X86_64, Layout::Go118) | (Architecture::Aarch64, Layout::Go118) => true,
+        (Architecture::X86_64, Layout::Go116) => functions.iter().take(PROLOGUES).any(|f| checks_guard_in_r14(program, f.entry)),
+        _ => false,
     };
 
-    let Some(table) = header_at(program, base).and_then(|layout| Table::new(program, base, layout)) else {
-        return Vec::new();
+    return (!functions.is_empty()).then_some(GoBinary { functions, register_abi });
+}
+
+/// cmp rsp, [r14+0x10] or cmp r12, [r14+0x10] at the start of a function
+fn checks_guard_in_r14(program: &Program, entry: u64) -> bool {
+    let Some(bytes) = program.bytes_from(entry) else {
+        return false;
     };
 
-    return (0..table.count).filter_map(|index| table.function(index)).collect();
+    let prologue = &bytes[..bytes.len().min(PROLOGUE_BYTES)];
+    return prologue.windows(4).any(|w| matches!(w[0], 0x49 | 0x4d) && w[1..] == [0x3b, 0x66, 0x10]);
 }
 
 #[cfg(test)]
@@ -280,10 +334,12 @@ mod tests {
         let data = pclntab(0x1000);
         program.regions.push(Region { name: ".rodata".to_string(), vaddr: 0x8000, size: data.len() as u64, data, perms: Perms { read: true, write: false, exec: false } });
 
-        let functions = functions(&program);
+        let go = read(&program).unwrap();
+        let functions = go.functions;
 
+        assert!(!go.register_abi);
         assert_eq!(functions.len(), 2);
-        assert_eq!(functions[0], GoFunction { entry: 0x1000, end: 0x1020, name: "main.main".to_string(), file: Some("/src/app/main.go".to_string()) });
+        assert_eq!(functions[0], GoFunction { entry: 0x1000, end: 0x1020, name: "main.main".to_string(), file: Some("/src/app/main.go".to_string()), args: Some(0), assembly: false });
         assert_eq!((functions[1].entry, functions[1].end, functions[1].name.as_str()), (0x1020, 0x1040, "main.helper"));
     }
 

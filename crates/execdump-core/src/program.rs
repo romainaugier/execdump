@@ -133,6 +133,8 @@ pub enum Language {
     Unknown,
     Rust,
     Go,
+    /// A .NET assembly: its code is CIL bytecode in the CLR metadata, the machine code is the stub that starts the runtime
+    DotNet,
 }
 
 impl Language {
@@ -170,6 +172,13 @@ pub struct Program {
     /// Source files named by the symbol tables, in their order
     pub source_names: Vec<String>,
     pub language: Language,
+    /// Go programs: the arguments and the results are passed in registers (Go 1.17 and later), else on the stack
+    pub go_register_abi: bool,
+    /// Go programs: the size of the arguments and results of the functions (by entry), as the pclntab gives it (not for
+    /// the functions known to be written in assembly)
+    pub go_args: HashMap<u64, u32>,
+    /// Data the format puts in the sections of code (the import tables, the CLR header and metadata of PE), sorted
+    pub data: Vec<(u64, u64)>,
     /// Strings the data points to with (pointer, length) pairs (tables of &str, panic locations), address ->
     /// length. Only for the languages whose strings are not NUL terminated.
     pub sized_strings: BTreeMap<u64, u64>,
@@ -196,6 +205,12 @@ impl Program {
 
     pub fn is_executable(&self, addr: u64) -> bool {
         return self.region_at(addr).map_or(false, |r| r.perms.exec && !r.data.is_empty());
+    }
+
+    /// Data of the format in a section of code: not code, even when an instruction refers to it
+    pub fn is_data(&self, addr: u64) -> bool {
+        let index = self.data.partition_point(|&(start, _)| start <= addr);
+        return index > 0 && addr < self.data[index - 1].1;
     }
 
     /// Returns the bytes from addr to the end of the region containing it
@@ -311,11 +326,10 @@ impl Program {
         // The name breaks the ties: overlapping regions (TLS sections) are found in the same order every time
         self.regions.sort_by(|a, b| (a.vaddr, a.size, &a.name).cmp(&(b.vaddr, b.size, &b.name)));
 
-        let go = crate::golang::functions(self);
-
-        if !go.is_empty() {
+        if let Some(go) = crate::golang::read(self) {
             self.language = Language::Go;
-            self.add_go_functions(go);
+            self.go_register_abi = go.register_abi;
+            self.add_go_functions(go.functions);
         }
 
         if self.language == Language::Unknown && self.is_rust() {
@@ -389,6 +403,10 @@ impl Program {
     /// their size, and the source file of each
     fn add_go_functions(&mut self, functions: Vec<crate::golang::GoFunction>) {
         for function in functions {
+            if let Some(args) = function.args.filter(|_| !function.assembly) {
+                self.go_args.insert(function.entry, args);
+            }
+
             self.add_symbol(Symbol::new(function.entry, &function.name, SymbolKind::Function, function.end - function.entry));
             self.add_seed(function.entry, Some(function.end - function.entry), SeedSource::GoPclntab);
 
@@ -819,6 +837,35 @@ fn pe_exception_table(program: &mut Program, pe: &PE, image_base: u64) {
     }
 }
 
+/// The data directories linkers put in the sections of code (imports, debug directory, CLR header and metadata), and
+/// the language of a .NET assembly
+fn pe_data(program: &mut Program, pe: &PE, image_base: u64) {
+    let header = pe.get_optional_header();
+    let directories = [header.get_import_table_idd(), header.get_import_address_table_idd(), header.get_debug_idd(), header.get_load_config_table_idd(), header.get_delay_import_descriptor_idd(), header.get_bound_import_idd()];
+
+    for directory in directories.into_iter().filter(|d| d.virtual_address != 0 && d.size != 0) {
+        let start = image_base + directory.virtual_address as u64;
+        program.data.push((start, start + directory.size as u64));
+    }
+
+    let clr = header.get_clr_runtime_header_idd();
+
+    if clr.virtual_address != 0 && clr.size != 0 {
+        let start = image_base + clr.virtual_address as u64;
+        program.data.push((start, start + clr.size as u64));
+        program.language = Language::DotNet;
+
+        // The metadata: its address and its size follow the size of the header and the versions of the runtime
+        if let (Some(rva), Some(size)) = (program.read_u32(start + 8), program.read_u32(start + 12)) {
+            if rva != 0 {
+                program.data.push((image_base + rva as u64, image_base + rva as u64 + size as u64));
+            }
+        }
+    }
+
+    program.data.sort_unstable();
+}
+
 fn program_from_pe(pe: &PE) -> Program {
     let mut program = Program { format: Format::Pe, ..Default::default() };
 
@@ -861,6 +908,7 @@ fn program_from_pe(pe: &PE) -> Program {
     pe_import_slots(&mut program, pe, image_base);
     pe_exports(&mut program, pe, image_base);
     pe_exception_table(&mut program, pe, image_base);
+    pe_data(&mut program, pe, image_base);
 
     program.finalize();
 
@@ -1040,6 +1088,18 @@ mod tests {
         assert!(c.sized_strings.is_empty());
 
         assert!(is_text("héllo\tworld\n".as_bytes()) && !is_text(b"a\x01b") && !is_text(b"\xc3"));
+    }
+
+    #[test]
+    fn data_in_code() {
+        let program = Program { data: vec![(0x2000, 0x2008), (0x2008, 0x2050)], ..Default::default() };
+        assert!(!program.is_data(0x1fff));
+        assert!(program.is_data(0x2000) && program.is_data(0x2049));
+        assert!(!program.is_data(0x2050));
+
+        // The x86 code of the PE fixture is code
+        let pe = programs_from_exec(&Exec::PE(parse_pe(&fixture("pe_arm64.exe")).unwrap())).remove(0);
+        assert!(pe.language != Language::DotNet && !pe.is_data(pe.entry.unwrap()));
     }
 
     #[test]

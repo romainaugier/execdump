@@ -4,7 +4,7 @@
  */
 
 use super::regs::Abi;
-use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_HIGH, RETURN_SINK_INT};
+use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_HIGH, RETURN_SINK_INT, RETURN_SINK_REGS, RETURN_SINK_STACK};
 
 use inkwell::module::Module;
 use inkwell::values::{AnyValue, AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
@@ -31,7 +31,18 @@ const MAX_DEPTH: usize = 8;
 pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi, high_read: &dyn Fn() -> bool) -> Signature {
     let mut memo = DemandMemo::new();
     let sinks = [(RETURN_SINK_INT, Some(abi.int_ret)), (RETURN_SINK_FLOAT, Some(abi.float_ret)), (RETURN_SINK_HIGH, abi.int_ret_high)];
-    let own = |loc: Loc| sinks.iter().find(|(_, reg)| matches!(loc, Loc::Reg(r) if *reg == Some(r))).map(|(sink, _)| *sink);
+    let own = |loc: Loc| -> Option<&'static str> {
+        let Loc::Reg(reg) = loc else {
+            return None;
+        };
+
+        if let Some((sink, _)) = sinks.iter().find(|(_, r)| *r == Some(reg)) {
+            return Some(*sink);
+        }
+
+        let position = abi.int_args.iter().position(|&r| r == reg).filter(|&p| abi.register_results && p > 0)?;
+        return RETURN_SINK_REGS.get(position).copied();
+    };
 
     // A return register received as a parameter reaches its return sink as it was when the function does not
     // write it, the other parameters reaching a sink are the result (mov rax, rdi)
@@ -39,7 +50,7 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
     let mut keep = vec![false; discovery.params.len()];
 
     // Registers are assigned in order, a used register means the previous ones are parameters too
-    for group in [&abi.int_args, &abi.float_args] {
+    for group in [&abi.int_args, &abi.float_args].into_iter().filter(|_| abi.ordered_args) {
         let positions: Vec<usize> = discovery.params.iter().enumerate().filter(|(_, p)| matches!(p.loc, Loc::Reg(r) if group.contains(&r))).map(|(i, _)| i).collect();
 
         if let Some(last) = positions.iter().rposition(|&i| used[i].is_some()) {
@@ -50,7 +61,7 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
     }
 
     for (i, param) in discovery.params.iter().enumerate() {
-        if matches!(param.loc, Loc::Stack(_)) && used[i].is_some() {
+        if (matches!(param.loc, Loc::Stack(_)) || !abi.ordered_args) && used[i].is_some() {
             keep[i] = true;
         }
     }
@@ -94,7 +105,76 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         (low, _) => low,
     };
 
-    return Signature { params, ret: int_ret.or(float_ret), ..discovery.clone() };
+    // The results after the first one in the next argument registers, as long as they are set, up to the last one
+    // computed (a parameter returned as it is in its register is a result before another one: growslice returns its
+    // length argument then the new capacity)
+    if abi.register_results && int_ret.is_some() {
+        let mut outs = Vec::new();
+        let mut computed = 0;
+
+        for (position, &reg) in abi.int_args.iter().enumerate().skip(1).take(RETURN_SINK_REGS.len() - 1) {
+            let sink = RETURN_SINK_REGS[position];
+
+            let Some(bits) = returned(module, sink, &[]) else {
+                break;
+            };
+
+            let ty = match returned(module, sink, &kept(sink)) {
+                Some(_) if returns_address(module, sink) => LType::Ptr,
+                Some(_) => LType::Int(c_width(bits)),
+                None => LType::Int(regs_bits(&discovery.params, reg).unwrap_or(64)),
+            };
+
+            outs.push(Value { loc: Loc::Reg(reg), ty, name: None });
+
+            if returned(module, sink, &kept(sink)).is_some() {
+                computed = outs.len();
+            }
+        }
+
+        outs.truncate(computed);
+        return Signature { params, ret: int_ret, outs, ..discovery.clone() };
+    }
+
+    if abi.stack_results {
+        let mut results = stack_results(module, discovery, abi.slot_size as u32 * 8).into_iter();
+        return Signature { params, ret: results.next(), outs: results.collect(), ..discovery.clone() };
+    }
+
+    return Signature { params, ret: int_ret.or(float_ret), outs: Vec::new(), ..discovery.clone() };
+}
+
+/// The results in stack slots a value reaches on return, the lowest one first: the ones always holding an address
+/// of the width of a pointer are pointers, the others keep the width they are written with (two results may share
+/// a slot: (bool, bool))
+fn stack_results(module: &Module, discovery: &Signature, pointer_bits: u32) -> Vec<Value> {
+    return discovery
+        .outs
+        .iter()
+        .filter_map(|out| {
+            let Loc::Stack(offset) = out.loc else {
+                return None;
+            };
+
+            let sink = format!("{}{}", RETURN_SINK_STACK, offset);
+            returned(module, &sink, &[])?;
+
+            let ty = match out.ty {
+                LType::Int(bits) if bits == pointer_bits && returns_address(module, &sink) => LType::Ptr,
+                ty => ty,
+            };
+
+            Some(Value { loc: out.loc, ty, name: None })
+        })
+        .collect();
+}
+
+/// Width of the parameter of a register
+fn regs_bits(params: &[Value], reg: usize) -> Option<u32> {
+    return params.iter().find(|p| p.loc == Loc::Reg(reg)).and_then(|p| match p.ty {
+        LType::Int(bits) => Some(bits),
+        _ => None,
+    });
 }
 
 /// Integer widths of C (char and short values are promoted to int)
@@ -149,7 +229,7 @@ fn return_sink(instruction: InstructionValue) -> Option<&'static str> {
 
     let name = pointer.get_name().to_string_lossy();
 
-    return [RETURN_SINK_INT, RETURN_SINK_FLOAT, RETURN_SINK_HIGH].into_iter().find(|sink| *sink == name);
+    return [RETURN_SINK_INT, RETURN_SINK_FLOAT, RETURN_SINK_HIGH].into_iter().chain(RETURN_SINK_REGS).find(|sink| *sink == name);
 }
 
 /// Bits of a value its users need, None when nothing uses it. A value stored to a return sink is a result,
@@ -316,6 +396,16 @@ fn returns_address(module: &Module, sink: &str) -> bool {
     /// Some(true) for an address, Some(false) for null (and a join already being looked at), None otherwise
     fn address(value: BasicValueEnum, depth: usize, memo: &mut HashMap<usize, Option<bool>>) -> Option<bool> {
         if let BasicValueEnum::IntValue(int) = value {
+            // The address of a global (ptrtoint of it, folded to a constant)
+            let global = unsafe {
+                use inkwell::llvm_sys::core::{LLVMGetConstOpcode, LLVMIsAConstantExpr};
+                !LLVMIsAConstantExpr(int.as_value_ref()).is_null() && LLVMGetConstOpcode(int.as_value_ref()) == inkwell::llvm_sys::LLVMOpcode::LLVMPtrToInt
+            };
+
+            if global {
+                return Some(true);
+            }
+
             if int.is_const() {
                 return (int.get_zero_extended_constant() == Some(0)).then_some(false);
             }
@@ -437,7 +527,7 @@ mod tests {
         let module = cx.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "f")).unwrap();
         let regs = RegisterFile::new(Architecture::X86_64);
         let abi = Abi::new(&regs, false);
-        let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new());
+        let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new(), &std::collections::BTreeMap::new());
 
         return refine(&module, module.get_function("f").unwrap(), &discovery, &abi, &|| true);
     }
@@ -463,6 +553,29 @@ mod tests {
         // xmm0 left as it was is neither a parameter nor a result
         let sig = refined("  store i128 %6, ptr @__return_float");
         assert!(sig.params.is_empty() && sig.ret.is_none());
+    }
+
+    #[test]
+    fn several_register_results() {
+        // Go: return p + 1, 7 in rax and rbx, rcx left as it was is not a third result
+        let regs = RegisterFile::new(Architecture::X86_64);
+        let abi = Abi::go(&regs).unwrap();
+        let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new(), &std::collections::BTreeMap::new());
+        let args: Vec<String> = discovery.params.iter().enumerate().map(|(i, p)| format!("{} %{}", if p.ty == LType::Int(128) { "i128" } else { "i64" }, i)).collect();
+        let body = "  %sum = add i64 %0, 1\n  store i64 %sum, ptr @__return_int\n  store i64 7, ptr @__return_reg_1\n  store i64 %2, ptr @__return_reg_2";
+        let ir = format!(
+            "@__return_int = external global i64\n@__return_reg_1 = external global i64\n@__return_reg_2 = external global i64\ndefine void @f({}) {{\n{}\n  ret void\n}}\n",
+            args.join(", "),
+            body
+        );
+
+        let cx = Context::create();
+        let module = cx.create_module_from_ir(MemoryBuffer::create_from_memory_range_copy(ir.as_bytes(), "f")).unwrap();
+        let sig = refine(&module, module.get_function("f").unwrap(), &discovery, &abi, &|| false);
+
+        assert!(matches!(sig.ret, Some(Value { loc: Loc::Reg(r), .. }) if r == regs.reg("rax")));
+        assert_eq!(sig.outs.iter().map(|o| o.loc).collect::<Vec<_>>(), [Loc::Reg(regs.reg("rbx"))]);
+        assert_eq!(sig.params.len(), 1);
     }
 
     fn abi_int_ret(regs: &RegisterFile) -> usize {

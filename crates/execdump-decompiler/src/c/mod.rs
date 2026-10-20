@@ -3,14 +3,16 @@
  *
  * ir reads the LLVM function, typing infers the C types of its values, build turns them into
  * statements (out of SSA), structure gives them if/else, loops and switches, naming gives the
- * variables names from their use
+ * variables names from their use. golang removes the write barriers of the Go compiler.
  */
 
 pub mod ast;
 mod build;
 mod coalesce;
+mod conditions;
 #[cfg(test)]
 mod differential;
+mod golang;
 pub mod inline;
 pub mod ir;
 mod naming;
@@ -201,7 +203,7 @@ impl Context<'_> {
 
     /// Strings with their length in the function: a pointer to text then its length in the arguments of a call or
     /// stored next to each other (the fields of a &str), a pointer and a length returned in a pair of registers
-    /// (low and high halves of an i128)
+    /// (low and high halves of an i128) or as a result and the first result after it
     fn note_sized_strings(&self, f: &ir::Func) {
         if !self.program.language.has_sized_strings() {
             return;
@@ -249,6 +251,30 @@ impl Context<'_> {
             }
         }
 
+        // A pointer returned with its length written to the first pointer to a result (Go returns a string in two
+        // registers, the second one is the first result written through a pointer)
+        for (index, block) in f.blocks.iter().enumerate() {
+            let Some(Some((ir::Op::Ret, [returned]))) = block.insts.last().map(|&id| f.inst(id)) else {
+                continue;
+            };
+
+            // The value returned from each block (the arms of the phi of the block of the return)
+            let returns: Vec<(ir::ValueId, usize)> = match &f.values[*returned].kind {
+                ir::ValueKind::Inst { op: ir::Op::Phi, operands, blocks, block: Some(at), .. } if *at == index => operands.iter().copied().zip(blocks.iter().copied()).collect(),
+                _ => vec![(*returned, index)],
+            };
+
+            for (value, from) in returns {
+                for &id in f.blocks[from].insts.iter().chain(block.insts.iter()) {
+                    if let Some((ir::Op::Store, [stored, address])) = f.inst(id) {
+                        if f.params.contains(address) {
+                            self.sized_pairs(f, value, *stored, 0, 4, &mut found);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut sized = self.sized.borrow_mut();
 
         for (addr, len) in found {
@@ -290,8 +316,19 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
     let mut structs: Vec<(String, Aggregate)> = ctx.structs.borrow().iter().map(|(name, aggregate)| (name.clone(), aggregate.clone())).collect();
     structs.sort_by(|(a, _), (b, _)| (a.len(), a).cmp(&(b.len(), b)));
     let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false, storage, structs };
+
+    if ctx.program.language == execdump_core::program::Language::Go {
+        golang::write_barriers(&mut function);
+    }
+
     simplify::simplify(&mut function);
     structure::loops_and_exits(&mut function.body);
+
+    if conditions::simplify(&mut function) {
+        simplify::simplify(&mut function);
+        structure::loops_and_exits(&mut function.body);
+    }
+
     simplify::null_returns(&mut function);
     simplify::void_returns(&mut function);
     naming::name(&mut function, ctx);

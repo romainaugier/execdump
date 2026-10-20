@@ -74,7 +74,12 @@ fn substitute(e: &Expr, var: VarId, value: &Expr) -> Expr {
 
     return match e {
         Expr::Var(v) if *v == var => value.clone(),
-        Expr::Unary(op, a) => Expr::Unary(*op, s(a)),
+        // !c with a comparison for c is the opposite comparison
+        Expr::Unary(UnaryOp::LogicalNot, a) => match substitute(a, var, value) {
+            inner if op_negates(&inner) => inner.not(),
+            inner => Expr::unary(UnaryOp::LogicalNot, inner),
+        },
+        Expr::Unary(op, a) => Expr::unary(*op, substitute(a, var, value)),
         Expr::Binary(op, a, b) => Expr::Binary(*op, s(a), s(b)),
         Expr::Cast(ty, a) => Expr::Cast(ty.clone(), s(a)),
         Expr::Index(a, b) => Expr::Index(s(a), s(b)),
@@ -85,6 +90,15 @@ fn substitute(e: &Expr, var: VarId, value: &Expr) -> Expr {
     };
 }
 
+/// A comparison (its negation is the opposite one) or a negation
+fn op_negates(e: &Expr) -> bool {
+    return match e {
+        Expr::Binary(op, ..) => op.negated().is_some(),
+        Expr::Unary(UnaryOp::LogicalNot, _) => true,
+        _ => false,
+    };
+}
+
 /// The expression of a statement evaluated first, where a temporary can be inlined
 fn head_expr(stmt: &mut Stmt) -> Option<&mut Expr> {
     return match &mut stmt.kind {
@@ -92,6 +106,16 @@ fn head_expr(stmt: &mut Stmt) -> Option<&mut Expr> {
         StmtKind::Expr(e) | StmtKind::Return(Some(e)) | StmtKind::NoReturn(e) | StmtKind::If(e, ..) | StmtKind::Switch(e, ..) => Some(e),
         _ => None,
     };
+}
+
+/// The target of an assignment through a pointer (*p = x, p->f8 = x) when its value does not read a variable: a
+/// pointer computed just before it can be inlined in it (char **v = &s->f10; *v = a is s->f10 = a)
+fn written_through(stmt: &Stmt, var: VarId) -> Option<&Expr> {
+    let StmtKind::Assign(target, value) = &stmt.kind else {
+        return None;
+    };
+
+    return (!matches!(target, Expr::Var(_)) && !value.uses(var)).then_some(target);
 }
 
 /// Assignments immediately read once by the next statement, counted by variable
@@ -121,6 +145,13 @@ fn count_pairs(stmts: &mut Vec<Stmt>, pairs: &mut [usize]) {
         if let Some(next) = head_expr(&mut stmts[i + 1]) {
             let mut uses = 0;
             next.visit(&mut |e| uses += (*e == Expr::Var(var)) as usize);
+
+            if uses == 1 {
+                pairs[var] += 1;
+            }
+        } else if let Some(target) = written_through(&stmts[i + 1], var) {
+            let mut uses = 0;
+            target.visit(&mut |e| uses += (*e == Expr::Var(var)) as usize);
 
             if uses == 1 {
                 pairs[var] += 1;
@@ -155,6 +186,20 @@ fn inline_temporaries(stmts: &mut Vec<Stmt>, inline: &[bool]) {
         };
 
         let (var, value) = (*var, value.clone());
+
+        // The address of what the next statement writes, computed without calls
+        if inline[var] && !has_call(&value) && written_through(&stmts[i + 1], var).is_some_and(|t| t.uses(var)) {
+            if let StmtKind::Assign(target, _) = &mut stmts[i + 1].kind {
+                *target = substitute(target, var, &value);
+            }
+
+            if stmts[i + 1].addr.is_none() {
+                stmts[i + 1].addr = stmts[i].addr;
+            }
+
+            stmts.remove(i);
+            continue;
+        }
 
         let Some(next) = head_expr(&mut stmts[i + 1]) else {
             i += 1;
@@ -202,7 +247,135 @@ fn remove_dead(stmts: &mut Vec<Stmt>, uses: &[usize]) {
     stmts.retain(|s| !matches!(&s.kind, StmtKind::Assign(Expr::Var(v), value) if uses[*v] == 0 && !has_call(value)));
 }
 
+/// Occurrences of each variable (&v is one)
+fn occurrences(stmts: &[Stmt], counts: &mut [usize]) {
+    let expr = |e: &Expr, counts: &mut [usize]| {
+        e.visit(&mut |e| {
+            if let Expr::Var(v) = e {
+                counts[*v] += 1;
+            }
+        })
+    };
+
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Assign(a, b) => {
+                expr(a, counts);
+                expr(b, counts);
+            }
+            StmtKind::Expr(e) | StmtKind::Return(Some(e)) | StmtKind::NoReturn(e) => expr(e, counts),
+            StmtKind::If(c, a, b) => {
+                expr(c, counts);
+                occurrences(a, counts);
+                occurrences(b, counts);
+            }
+            StmtKind::While(c, body) | StmtKind::DoWhile(body, c) => {
+                expr(c, counts);
+                occurrences(body, counts);
+            }
+            StmtKind::For(init, c, step, body) => {
+                occurrences(std::slice::from_ref(&**init), counts);
+                expr(c, counts);
+                occurrences(std::slice::from_ref(&**step), counts);
+                occurrences(body, counts);
+            }
+            StmtKind::Switch(c, cases, default) => {
+                expr(c, counts);
+                cases.iter().for_each(|case| occurrences(&case.body, counts));
+                occurrences(default, counts);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// x = f(a, &t); y = t; with t used nowhere else is x = f(a, &y): the result written through the pointer goes to
+/// the variable it is copied to (the results of Go after the first one)
+fn forward_results(stmts: &mut Vec<Stmt>, counts: &[usize], vars: &[super::ast::Var]) {
+    for stmt in stmts.iter_mut() {
+        match &mut stmt.kind {
+            StmtKind::If(_, a, b) => {
+                forward_results(a, counts, vars);
+                forward_results(b, counts, vars);
+            }
+            StmtKind::While(_, body) | StmtKind::DoWhile(body, _) | StmtKind::For(_, _, _, body) => forward_results(body, counts, vars),
+            StmtKind::Switch(_, cases, default) => {
+                cases.iter_mut().for_each(|case| forward_results(&mut case.body, counts, vars));
+                forward_results(default, counts, vars);
+            }
+            _ => {}
+        }
+    }
+
+    let mut index = 0;
+
+    while index < stmts.len() {
+        let (target, call) = match &stmts[index].kind {
+            StmtKind::Assign(Expr::Var(target), call @ Expr::Call(..)) => (Some(*target), call),
+            StmtKind::Expr(call @ Expr::Call(..)) => (None, call),
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+
+        let Expr::Call(_, args) = call else {
+            unreachable!("a call");
+        };
+
+        let temporaries: Vec<VarId> = args
+            .iter()
+            .filter_map(|a| match a {
+                Expr::Unary(UnaryOp::AddrOf, inner) => match **inner {
+                    Expr::Var(t) if counts[t] == 2 => Some(t),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        // The copies right after the call
+        let mut forwarded: Vec<(VarId, VarId, usize)> = Vec::new();
+        let mut next = index + 1;
+
+        while let Some(StmtKind::Assign(Expr::Var(y), Expr::Var(t))) = stmts.get(next).map(|s| &s.kind) {
+            let distinct = Some(*y) != target && !temporaries.contains(y) && !forwarded.iter().any(|(other, _, _)| other == y);
+
+            if temporaries.contains(t) && distinct && vars[*y].ty == vars[*t].ty && !call.uses(*y) {
+                forwarded.push((*y, *t, next));
+            }
+
+            next += 1;
+        }
+
+        if forwarded.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        if let StmtKind::Assign(_, Expr::Call(_, args)) | StmtKind::Expr(Expr::Call(_, args)) = &mut stmts[index].kind {
+            for arg in args.iter_mut() {
+                if let Expr::Unary(UnaryOp::AddrOf, inner) = arg {
+                    if let Some((y, _, _)) = forwarded.iter().find(|(_, t, _)| **inner == Expr::Var(*t)) {
+                        **inner = Expr::Var(*y);
+                    }
+                }
+            }
+        }
+
+        for (_, _, at) in forwarded.iter().rev() {
+            stmts.remove(*at);
+        }
+
+        index += 1;
+    }
+}
+
 pub fn simplify(function: &mut CFunction) {
+    let mut counts = vec![0; function.vars.len()];
+    occurrences(&function.body, &mut counts);
+    forward_results(&mut function.body, &counts, &function.vars);
+
     for _ in 0..3 {
         let mut uses = vec![0; function.vars.len()];
         let mut assigns = vec![0; function.vars.len()];

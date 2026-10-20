@@ -68,8 +68,12 @@ impl Gdb {
     }
 
     /// A command that runs the program: waits for its stop (as long as it takes)
+    /// A command that runs the program: waits for its stop (as long as it takes). The program may not start after
+    /// ^running: a breakpoint that cannot be inserted is an error of the same command then, the program stays where
+    /// it was.
     fn run(&mut self, command: &str) -> Result<Stop> {
         let (_, others) = self.command(command)?;
+        let token = self.token;
 
         if let Some(stopped) = others.iter().find(|r| r.kind == '*' && r.class == "stopped") {
             return Ok(stop(stopped));
@@ -78,8 +82,14 @@ impl Gdb {
         loop {
             let line = self.pipe.read_line(None)?;
 
-            if let Some(record) = mi::parse(&line).filter(|r| r.kind == '*' && r.class == "stopped") {
-                return Ok(stop(&record));
+            let Some(record) = mi::parse(&line) else {
+                continue;
+            };
+
+            match (record.kind, record.class.as_str()) {
+                ('*', "stopped") => return Ok(stop(&record)),
+                ('^', "error") if record.token == Some(token) => bail!("{}", record.str("msg").unwrap_or("gdb error")),
+                _ => {}
             }
         }
     }

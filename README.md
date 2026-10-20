@@ -245,20 +245,37 @@ Analysis:
   - :heavy_check_mark: Call graph and cross references
   - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
   - :x: aarch64 jump tables
+  - :heavy_check_mark: The data PE linkers put in the sections of code (import tables, debug directory, CLR header and
+    metadata) is not taken for code when an instruction refers to it
+  - :x: .NET assemblies: recognised (their CLR header), their code is CIL bytecode and is not decompiled yet (the only
+    machine code is the stub that jumps to `_CorExeMain`)
   - :heavy_check_mark: Rust fat pointers for strings: a Rust binary (its symbols, or the paths of the standard library its
     panics keep when it is stripped) has strings that are a pointer and a length, laid out one after the other without NUL.
     The (pointer, length) pairs of the data (tables of `&str`, panic locations) are strings of their own in the strings
     table, and the decompiler cuts a string at its length when the function passes it to a call with its length, stores
-    both next to each other (the fields of a `&str`), or returns them in a pair of registers: `write_all(out, "world", 5)`
+    both next to each other (the fields of a `&str`), returns them in a pair of registers, or returns the pointer and
+    writes the length to its first result pointer (Go): `write_all(out, "world", 5)`
     instead of `write_all(out, "worldsuccesswarning: low disk space...", 5)`, `return "unknown" | ((__int128)7 << 64);`
   - :heavy_check_mark: Go binaries (PE, ELF and Mach-O, x86_64 and aarch64, stripped or not): the pclntab the Go runtime
     keeps (found by its section, else by its header in the data; layouts of Go 1.2 to 1.15, 1.16/1.17 and 1.18 and
     later) names every function, gives its bounds and its source file. The functions are in modules by package and
-    file (`runtime/proc.go`, `main/main.go`). The decompiler uses the register ABI of Go (arguments and results in
-    rax, rbx, rcx, rdi... or x0 to x15, the goroutine in r14 or x28 is `runtime_g`), leaves out the growth of the stack
-    (`cmp rsp, [r14+0x10]; jbe` to `runtime.morestack`), knows the panics and fatal errors of the runtime do not
-    return and the write barriers return their buffer in r11 (x25). Go strings are a pointer and a length like the
-    Rust ones: `return "verbose" | ((__int128)7 << 64);`
+    file (`runtime/proc.go`, `main/main.go`). The decompiler uses the calling convention of the version: the register
+    ABI of Go 1.17 on x86_64 and 1.18 on aarch64 (arguments and results in rax, rbx, rcx, rdi... or x0 to x15, the
+    goroutine in r14 or x28 is `runtime_g`), the stack ABI before (and on x86, and for the assembly of the runtime:
+    arguments then results in the slots above the return address, every register clobbered by calls). A function
+    returns its first result, the next ones are written through pointers after its parameters, its callers pass the
+    address of variables of their own: `n = fmt_Fprint(w, v, a, len, &v1, &v2)`, `*a2 = 5; return "quiet";`. The
+    results kept are the ones the callers read (the pclntab bounds them with the size of the arguments and results of
+    each function: `main.main` has none). The calls to unknown functions (methods of interfaces, closures) pass the
+    stack slots written before them and return the ones read after them (in the stack ABI), the registers read after
+    them (in the register ABI). The assembly helpers of the runtime that take registers in the stack ABI
+    (`runtime.cmpbody`) get them as parameters. The growth of the stack (`cmp rsp, [r14+0x10]; jbe` to
+    `runtime.morestack`) is left out, the panics and fatal errors of the runtime do not return, the write barriers
+    return their buffer in r11 (x25) and go from the C (`if (runtime_writeBarrier == 0) { p->f0 = v; } else {
+    runtime_writebarrierptr(&p->f0, v); }` is `p->f0 = v;`). The calls into `runtime.duffzero` and `runtime.duffcopy`
+    are `memset` and `memcpy` of the bytes left before their return, `runtime.deferproc` of Go 1.9 returns in rax and
+    takes the arguments of the deferred function after its own (`runtime_deferproc(8, &f, &err)`). Go strings are a
+    pointer and a length like the Rust ones.
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
@@ -320,7 +337,11 @@ Decompiler:
     their declarations would move out of them). An if left with an empty branch is turned
     around (`if (!c) { x }`), and goes away when both are empty. The statements both branches of an if end
     with follow it (and the jump an if ends with when it is the one after it), an if whose body is an if
-    without else is one with both conditions (`if (a && b)`)
+    without else is one with both conditions (`if (a && b)`). The conditions known where a statement runs (after
+    `if (!c) break;` c is true, in the branches of a test its condition is true or false) make the tests of the same
+    conditions on variables go: LLVM joins the paths after a test and tests again where they split. The tests that
+    follow each other with a first condition in common are one: `if (a) { x } if (a && b) { y }` is
+    `if (a) { x if (b) { y } }`
   - :heavy_check_mark: Switches split by the compilers are one switch again: the tests of the same value that follow
     each other (a range check before a jump table, the sparse values tested before it, the search trees of
     comparisons LLVM makes) are taken for every value of interest (the boundaries of the comparisons, the cases,
@@ -708,7 +729,9 @@ backend = "lldb"                   # gdb or lldb
 ```
 
 gdb is driven through GDB/MI, lldb through its command line (with formats of its own for its stops and its frames),
-see `crates/execdump-debugger`. The tests of the debugger build a small C program with `cc` and run it under each
+see `crates/execdump-debugger`. `EXECDUMP_DEBUGGER_LOG=<file>` appends what execdump writes to the debugger and what
+it answers to a file. The program of Go stops at `main.main` (its `main` is the entry of the runtime), a step into the
+calls does not stop in the growth of the stack (`runtime.morestack`). The tests of the debugger build a small C program with `cc` and run it under each
 debugger installed.
 
 ![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)

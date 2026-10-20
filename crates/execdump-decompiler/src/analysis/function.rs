@@ -158,23 +158,40 @@ pub fn is_noreturn_name(name: &str) -> bool {
         "ZSt28__throw_bad_array_new_lengthv" | "ZSt16__throw_bad_castv" | "ZSt21__throw_bad_variant_accessPKc"
     ) || name.starts_with("ZN4core9panicking") || name.starts_with("ZN3std7process4exit") || name.starts_with("ZN5alloc5alloc18handle_alloc_error")
       || name.starts_with("rust_panic") || name.starts_with("rust_begin_unwind") || RUST_STD_PANICS.iter().any(|p| name.starts_with(p))
-      || GO_NORETURN.iter().any(|p| name.starts_with(p))
+      || go_noreturn(name)
 }
 
-/// The Go runtime functions that do not return: the panics, the fatal errors, and the growth of the stack (it runs the
-/// function again from its start, the jump back after the call is never taken)
+/// The Go runtime functions that do not return: the panics, the fatal errors, the exits, and the growth of the stack
+/// (it runs the function again from its start, the jump back after the call is never taken). runtime.panicCheck1
+/// returns (it only throws in the runtime), runtime.exitsyscall too.
 const GO_NORETURN: &[&str] = &[
     "runtime.gopanic",
-    "runtime.goPanic",
-    "runtime.panic",
     "runtime.throw",
     "runtime.fatal",
-    "runtime.morestack",
+    "runtime.fatalthrow",
+    "runtime.fatalpanic",
     "runtime.goexit",
+    "runtime.goexit0",
+    "runtime.goexit1",
     "runtime.Goexit",
     "runtime.exit",
+    "runtime.abort",
     "os.Exit",
+    "syscall.Exit",
 ];
+
+/// Prefixes of the families of panics (runtime.panicIndex, runtime.goPanicSliceB, runtime.panicdottypeE...)
+const GO_NORETURN_PREFIXES: &[&str] = &["runtime.goPanic", "runtime.panic", "runtime.morestack"];
+
+fn go_noreturn(name: &str) -> bool {
+    let name = name.strip_suffix(".abi0").unwrap_or(name);
+
+    if GO_NORETURN.contains(&name) {
+        return true;
+    }
+
+    return GO_NORETURN_PREFIXES.iter().any(|p| name.starts_with(p)) && !name.starts_with("runtime.panicCheck") && !name.contains(".func");
+}
 
 /// The functions of std::panicking that panic (set_hook, take_hook, panic_count::... return)
 const RUST_STD_PANICS: &[&str] = &[
@@ -701,6 +718,13 @@ fn compute_noreturn(ctx: &RecoveryContext, function: &Function) -> bool {
                     if !ctx.call_is_noreturn(&call.target) {
                         return false;
                     }
+                }
+            }
+            // The code goes on into another function (an entry in the middle of runtime.duffzero of Go): it returns
+            // when that one does
+            Flow::Seq if block.succs.is_empty() && ctx.known_starts.contains(&last.end()) => {
+                if !ctx.call_is_noreturn(&CallTarget::Function(last.end())) {
+                    return false;
                 }
             }
             _ => {}

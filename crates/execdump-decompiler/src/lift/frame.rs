@@ -630,7 +630,7 @@ unsafe fn constant_store(instruction: LLVMValueRef, alloca: LLVMValueRef) -> Opt
 }
 
 /// Runs of stores of constants that write a string in a slot become one memcpy of the string (volatile:
-/// the string stays in the code when nothing reads it)
+/// the string stays in the code when nothing reads it), and the runs of overlapping stores one memcpy of their bytes
 unsafe fn write_strings(module: LLVMModuleRef, context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, size: u64) {
     unsafe {
         if byte_array(LLVMGetAllocatedType(alloca)).is_none() || size < 4 {
@@ -680,6 +680,205 @@ unsafe fn write_strings(module: LLVMModuleRef, context: LLVMContextRef, builder:
     }
 }
 
+/// The byte arrays of the variables of a function (the frame split by the optimizations or here) copied from a global
+/// by overlapping loads and stores are written by one copy of it
+pub fn copy_global_arrays(function: FunctionValue) {
+    unsafe {
+        let function = function.as_value_ref();
+        let entry = LLVMGetEntryBasicBlock(function);
+        let context = LLVMGetModuleContext(LLVMGetGlobalParent(function));
+        let builder = LLVMCreateBuilderInContext(context);
+        let mut instruction = LLVMGetFirstInstruction(entry);
+
+        while !instruction.is_null() {
+            let next = LLVMGetNextInstruction(instruction);
+
+            if !LLVMIsAAllocaInst(instruction).is_null() && byte_array(LLVMGetAllocatedType(instruction)).is_some() {
+                let mut blocks = BTreeSet::new();
+
+                for user in users(instruction) {
+                    blocks.insert(LLVMGetInstructionParent(user) as usize);
+
+                    for inner in users(user) {
+                        if !LLVMIsAInstruction(inner).is_null() {
+                            blocks.insert(LLVMGetInstructionParent(inner) as usize);
+                        }
+                    }
+                }
+
+                for block in blocks {
+                    copy_globals(context, builder, instruction, block as LLVMBasicBlockRef);
+                }
+            }
+
+            instruction = next;
+        }
+
+        LLVMDisposeBuilder(builder);
+    }
+}
+
+/// Store to a slot of a value loaded from a global: the store, its offset, the global and the offset read in it, the
+/// load and the size
+struct Copied {
+    store: LLVMValueRef,
+    offset: u64,
+    global: LLVMValueRef,
+    from: u64,
+    load: LLVMValueRef,
+    bytes: u64,
+}
+
+unsafe fn copied_store(instruction: LLVMValueRef, alloca: LLVMValueRef) -> Option<Copied> {
+    unsafe {
+        if LLVMGetInstructionOpcode(instruction) != LLVMOpcode::LLVMStore || LLVMGetVolatile(instruction) != 0 {
+            return None;
+        }
+
+        let pointer = LLVMGetOperand(instruction, 1);
+        let value = LLVMGetOperand(instruction, 0);
+
+        let offset = if pointer == alloca {
+            0
+        } else if !LLVMIsAInstruction(pointer).is_null() && LLVMGetInstructionOpcode(pointer) == LLVMOpcode::LLVMGetElementPtr && LLVMGetOperand(pointer, 0) == alloca && LLVMGetNumOperands(pointer) == 2 {
+            u64::try_from(constant(LLVMGetOperand(pointer, 1))?).ok()?
+        } else {
+            return None;
+        };
+
+        if LLVMIsALoadInst(value).is_null() || LLVMGetVolatile(value) != 0 || LLVMGetInstructionParent(value) != LLVMGetInstructionParent(instruction) {
+            return None;
+        }
+
+        let source = LLVMGetOperand(value, 0);
+
+        let (global, from) = if !LLVMIsAGlobalVariable(source).is_null() {
+            (source, 0)
+        } else if !LLVMIsAConstantExpr(source).is_null() && LLVMGetConstOpcode(source) == LLVMOpcode::LLVMGetElementPtr && LLVMGetNumOperands(source) == 2 && !LLVMIsAGlobalVariable(LLVMGetOperand(source, 0)).is_null() {
+            (LLVMGetOperand(source, 0), u64::try_from(constant(LLVMGetOperand(source, 1))?).ok()?)
+        } else {
+            return None;
+        };
+
+        let ty = LLVMTypeOf(value);
+
+        if LLVMGetTypeKind(ty) != LLVMTypeKind::LLVMIntegerTypeKind {
+            return None;
+        }
+
+        return Some(Copied { store: instruction, offset, global, from, load: value, bytes: LLVMGetIntTypeWidth(ty) as u64 / 8 });
+    }
+}
+
+/// Overlapping copies of a global to a slot become one memcpy of the global (Go copies a [14]byte from its static
+/// data with two loads and two stores of eight bytes that overlap). Nothing between the loads and the last store
+/// writes memory.
+unsafe fn copy_globals(context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, block: LLVMBasicBlockRef) {
+    unsafe {
+        let mut instruction = LLVMGetFirstInstruction(block);
+        let mut run: Vec<Copied> = Vec::new();
+
+        while !instruction.is_null() {
+            let next = LLVMGetNextInstruction(instruction);
+
+            if let Some(copied) = copied_store(instruction, alloca) {
+                let follows = run.first().is_some_and(|first| {
+                    let end = run.iter().map(|c| c.offset + c.bytes).max().unwrap_or(0);
+                    copied.global == first.global && copied.offset >= first.offset && copied.offset <= end && copied.offset - first.offset == copied.from.wrapping_sub(first.from)
+                });
+
+                if !follows {
+                    replace_copies(context, builder, alloca, &run);
+                    run.clear();
+                }
+
+                run.push(copied);
+            } else if writes_memory(instruction) {
+                replace_copies(context, builder, alloca, &run);
+                run.clear();
+            }
+
+            instruction = next;
+        }
+
+        replace_copies(context, builder, alloca, &run);
+    }
+}
+
+unsafe fn replace_copies(context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, run: &[Copied]) {
+    let overlaps = run.windows(2).any(|w| w[1].offset < w[0].offset + w[0].bytes);
+
+    if run.len() < 2 || !overlaps {
+        return;
+    }
+
+    unsafe {
+        // Nothing writes memory from the first load on but the copy
+        let first_load = run.iter().map(|c| c.load).min_by_key(|&load| position(load)).unwrap();
+        let last = run.last().unwrap().store;
+        let mut current = first_load;
+
+        while current != last {
+            if writes_memory(current) && !run.iter().any(|c| c.store == current) {
+                return;
+            }
+
+            current = LLVMGetNextInstruction(current);
+        }
+
+        let start = run[0].offset;
+        let size = run.iter().map(|c| c.offset + c.bytes).max().unwrap() - start;
+
+        LLVMPositionBuilderBefore(builder, last);
+
+        let i8 = LLVMInt8TypeInContext(context);
+        let i64 = LLVMInt64TypeInContext(context);
+        let mut index = [LLVMConstInt(i64, start, 0)];
+        let destination = if start == 0 { alloca } else { LLVMBuildInBoundsGEP2(builder, i8, alloca, index.as_mut_ptr(), 1, c"".as_ptr()) };
+        let mut from = [LLVMConstInt(i64, run[0].from, 0)];
+        let source = if run[0].from == 0 { run[0].global } else { LLVMConstInBoundsGEP2(i8, run[0].global, from.as_mut_ptr(), 1) };
+
+        let call = LLVMBuildMemCpy(builder, destination, 1, source, 1, LLVMConstInt(i64, size, 0));
+        LLVMSetOperand(call, 3, LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0));
+        LLVMInstructionSetDebugLoc(call, LLVMInstructionGetDebugLoc(last));
+
+        for copied in run.iter() {
+            let pointer = LLVMGetOperand(copied.store, 1);
+            LLVMInstructionEraseFromParent(copied.store);
+
+            if pointer != alloca && LLVMGetFirstUse(pointer).is_null() {
+                LLVMInstructionEraseFromParent(pointer);
+            }
+
+            if LLVMGetFirstUse(copied.load).is_null() {
+                LLVMInstructionEraseFromParent(copied.load);
+            }
+        }
+    }
+}
+
+/// Stores and calls (but the debug information)
+unsafe fn writes_memory(instruction: LLVMValueRef) -> bool {
+    unsafe {
+        return !LLVMIsAStoreInst(instruction).is_null() || (!LLVMIsACallInst(instruction).is_null() && LLVMIsADbgInfoIntrinsic(instruction).is_null());
+    }
+}
+
+/// Position of an instruction in its block
+unsafe fn position(instruction: LLVMValueRef) -> usize {
+    unsafe {
+        let mut count = 0;
+        let mut current = LLVMGetPreviousInstruction(instruction);
+
+        while !current.is_null() {
+            count += 1;
+            current = LLVMGetPreviousInstruction(current);
+        }
+
+        return count;
+    }
+}
+
 /// Stores of constants that follow each other in a slot: the bytes they write from the first one, which the
 /// next ones extend or overlap with the same bytes (gcc copies "secret" with two overlapping stores of four
 /// bytes: "secr" at 0 and "ret\0" at 3)
@@ -688,12 +887,14 @@ struct Run {
     stores: Vec<LLVMValueRef>,
     start: u64,
     bytes: Vec<u8>,
+    /// A store wrote some of the bytes of the one before again: the run is a copy of bytes, not fields set one by one
+    overlaps: bool,
 }
 
 impl Run {
     fn extend(&mut self, store: LLVMValueRef, offset: u64, bytes: &[u8]) -> bool {
         if self.stores.is_empty() {
-            *self = Run { stores: vec![store], start: offset, bytes: bytes.to_vec() };
+            *self = Run { stores: vec![store], start: offset, bytes: bytes.to_vec(), overlaps: false };
             return true;
         }
 
@@ -712,6 +913,7 @@ impl Run {
 
         self.bytes.extend_from_slice(&bytes[overlap..]);
         self.stores.push(store);
+        self.overlaps |= overlap > 0;
         return true;
     }
 }
@@ -719,7 +921,10 @@ impl Run {
 unsafe fn replace_run(module: LLVMModuleRef, context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, run: &Run) {
     let bytes = &run.bytes;
 
-    if run.stores.len() < 2 || !is_text(bytes) {
+    // Bytes copied with overlapping stores are an array too (Go copies [14]byte{...} with two stores of eight bytes)
+    let copied = run.overlaps && bytes.iter().any(|&b| b != 0);
+
+    if run.stores.len() < 2 || !(is_text(bytes) || copied) {
         return;
     }
 

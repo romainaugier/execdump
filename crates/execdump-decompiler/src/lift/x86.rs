@@ -3,7 +3,7 @@
  */
 
 use super::regs::{RegRef, RegisterFile};
-use super::{llvm, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
+use super::{llvm, Access, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
 
 use crate::analysis::function::CallTarget;
 
@@ -210,12 +210,25 @@ pub fn track(insn: &Insn, regs: &RegisterFile, tracker: &mut Tracker) {
     }
 }
 
+/// Moves to memory, their destination is only written
+const PURE_STORES: &[&str] = &["mov", "movss", "movsd", "movaps", "movups", "movapd", "movupd", "movdqa", "movdqu", "movq", "movd", "movnti", "movntdq", "movntps"];
+
 pub fn memory(insn: &Insn) -> Vec<MemAccess> {
     let mut accesses: Vec<MemAccess> = insn
         .ops
         .iter()
-        .filter_map(|op| match op {
-            Op::Mem(mem) if insn.mnemonic != "lea" && mem.segment.is_none() => Some(MemAccess { base: mem.base.map(|b| b.reg), has_index: mem.index.is_some(), disp: mem.disp, bytes: mem.bits / 8 }),
+        .enumerate()
+        .filter_map(|(index, op)| match op {
+            Op::Mem(mem) if mem.segment.is_none() => {
+                let (kind, bytes) = match insn.mnemonic.as_str() {
+                    "lea" => (Access::Address, 0),
+                    m if index == 0 && insn.ops.len() == 2 && PURE_STORES.contains(&m) => (Access::Write, mem.bits / 8),
+                    m if index == 0 && !m.starts_with("cmp") && !m.starts_with("test") && !m.starts_with("ucomis") && !m.starts_with("comis") => (Access::Update, mem.bits / 8),
+                    _ => (Access::Read, mem.bits / 8),
+                };
+
+                Some(MemAccess { base: mem.base.map(|b| b.reg), has_index: mem.index.is_some(), disp: mem.disp, bytes, kind })
+            }
             _ => None,
         })
         .collect();
@@ -231,7 +244,8 @@ pub fn memory(insn: &Insn) -> Vec<MemAccess> {
 
     if let Some(disp) = sp_access {
         // The stack pointer is the register at index 4 of both register files (rsp, esp)
-        accesses.push(MemAccess { base: Some(4), has_index: false, disp, bytes: slot as u32 });
+        let kind = if insn.mnemonic == "pop" { Access::Read } else { Access::Write };
+        accesses.push(MemAccess { base: Some(4), has_index: false, disp, bytes: slot as u32, kind });
     }
 
     return accesses;
@@ -276,8 +290,15 @@ fn segment_access<'ctx>(l: &Lifter<'ctx, '_>, mem: &Mem, value: Option<IntValue<
 
     return match value {
         None => {
+            // A read only reads: the ones whose value is not used go (the stack check of Go reads its goroutine)
             let name = format!("__read{}{}", segment, size);
-            Ok(l.call_intrinsic(&name, &[offset.into()], Some(l.int(mem.bits).into()))?.map(|v| v.into_int_value()))
+            let value = l.call_intrinsic(&name, &[offset.into()], Some(l.int(mem.bits).into()))?.map(|v| v.into_int_value());
+
+            if let Some(function) = l.module.get_function(&name) {
+                super::read_only(l.cx, function);
+            }
+
+            Ok(value)
         }
         Some(value) => {
             let name = format!("__write{}{}", segment, size);
@@ -347,12 +368,27 @@ fn pop<'ctx>(l: &Lifter<'ctx, '_>, slot: i64) -> Result<IntValue<'ctx>> {
     return Ok(value);
 }
 
-/// Unsupported instructions are kept as inline assembly
+/// Unsupported instructions are kept as inline assembly. The register they write first (pmovmskb eax, xmm1) is its
+/// result: the register no longer holds what it held before.
 fn unsupported(l: &Lifter, insn: &Insn) -> Result<()> {
-    let asm_type = l.cx.void_type().fn_type(&[], false);
-    let asm = l.cx.create_inline_asm(asm_type, insn.text.clone(), String::new(), true, false, Some(InlineAsmDialect::Intel), false);
-    llvm!(l.builder.build_indirect_call(asm_type, asm, &[], ""));
-    return Ok(());
+    let compares = ["cmp", "test", "ucomi", "comi", "bt", "ptest", "vptest"].iter().any(|p| insn.mnemonic.starts_with(p));
+
+    let destination = match insn.ops.first() {
+        Some(Op::Reg(r)) if !compares && insn.ops.len() >= 2 && r.reg != l.env.abi.stack_pointer => Some(*r),
+        _ => None,
+    };
+
+    let Some(dst) = destination else {
+        let asm_type = l.cx.void_type().fn_type(&[], false);
+        let asm = l.cx.create_inline_asm(asm_type, insn.text.clone(), String::new(), true, false, Some(InlineAsmDialect::Intel), false);
+        llvm!(l.builder.build_indirect_call(asm_type, asm, &[], ""));
+        return Ok(());
+    };
+
+    let asm_type = l.int(dst.bits).fn_type(&[], false);
+    let asm = l.cx.create_inline_asm(asm_type, insn.text.clone(), "=r".to_string(), true, false, Some(InlineAsmDialect::Intel), false);
+    let value = llvm!(l.builder.build_indirect_call(asm_type, asm, &[], "")).try_as_basic_value().basic().context("inline assembly without a result")?;
+    return set(l, &Op::Reg(dst), value.into_int_value(), insn.wide);
 }
 
 /*
@@ -546,11 +582,20 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
             let signed = mnemonic == "idiv";
             let (lo, hi) = accumulator(l, bits)?;
 
-            let low = l.resize(l.read(lo)?, bits * 2, false)?;
-            let high = l.resize(l.read(hi)?, bits * 2, false)?;
-            let high = llvm!(b.build_left_shift(high, l.constant(bits * 2, bits as u64), ""));
-            let dividend = llvm!(b.build_or(high, low, ""));
-            let divisor = l.resize(get(l, src, bits)?, bits * 2, signed)?;
+            // A dividend sign extended by cqo is the low register alone: the division keeps its width (the quotient
+            // that does not fit traps on both)
+            let extended = signed && l.sign_of.get() == Some((hi.reg, lo.reg, bits));
+            let width = if extended { bits } else { bits * 2 };
+
+            let dividend = if extended {
+                l.read(lo)?
+            } else {
+                let low = l.resize(l.read(lo)?, bits * 2, false)?;
+                let high = l.resize(l.read(hi)?, bits * 2, false)?;
+                let high = llvm!(b.build_left_shift(high, l.constant(bits * 2, bits as u64), ""));
+                llvm!(b.build_or(high, low, ""))
+            };
+            let divisor = l.resize(get(l, src, bits)?, width, signed)?;
 
             let (quotient, remainder) = if signed {
                 (llvm!(b.build_int_signed_div(dividend, divisor, "")), llvm!(b.build_int_signed_rem(dividend, divisor, "")))
@@ -583,6 +628,7 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
             let value = l.read(lo)?;
             let sign = llvm!(b.build_right_shift(value, l.constant(bits, bits as u64 - 1), true, ""));
             set(l, &Op::Reg(hi), sign, wide)?;
+            l.sign_of.set(Some((hi.reg, lo.reg, bits)));
         }
 
         (m, [dst]) if m.starts_with("set") => {
@@ -920,8 +966,8 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         return Some(true);
     }
 
-    // xor eax, eax and sub eax, eax write the register without reading it
-    if let (true, [Op::Reg(a), Op::Reg(b)]) = (matches!(mnemonic, "xor" | "sub"), insn.ops.as_slice()) {
+    // xor eax, eax and sub eax, eax write the register without reading it, sbb eax, eax only reads the carry
+    if let (true, [Op::Reg(a), Op::Reg(b)]) = (matches!(mnemonic, "xor" | "sub" | "sbb" | "pxor" | "xorps"), insn.ops.as_slice()) {
         if a.reg == b.reg && a.reg == reg {
             return Some(false);
         }
@@ -944,7 +990,8 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
     // xor eax, eax clears the register without reading it
     let zeroing = matches!(mnemonic, "xor" | "sub") && insn.ops.get(1) == insn.ops.first();
 
-    return if write_only && dst.bits >= 32 || zeroing {
+    // A write of the low bits (setb sil) keeps the others, it does not read what the register held as a value
+    return if write_only || zeroing {
         Some(false)
     } else if writes_first_operand(mnemonic) || matches!(mnemonic, "cmp" | "test" | "push") {
         Some(true)

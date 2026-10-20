@@ -216,6 +216,8 @@ pub struct Abi {
     pub float_args: Vec<Reg>,
     /// Integer and floating point arguments share their slots (Win64)
     pub positional: bool,
+    /// The argument registers are given in order: a used one means the ones before it are arguments too
+    pub ordered_args: bool,
     pub int_ret: Reg,
     /// High half of the integer results twice as wide as a register (rdx of __int128 and of the Rust slices, edx of
     /// long long on x86)
@@ -231,6 +233,10 @@ pub struct Abi {
     pub callee_saved: Vec<Reg>,
     /// Registers that hold a value of the runtime in every function (the goroutine of Go), named after it
     pub runtime: Vec<(Reg, &'static str)>,
+    /// The results are in the stack slots above the arguments (Go ABI0), not in the return registers
+    pub stack_results: bool,
+    /// Several results in the integer argument registers, in order (Go ABIInternal), not a pair in the high half
+    pub register_results: bool,
 }
 
 impl Abi {
@@ -243,6 +249,7 @@ impl Abi {
                 int_args: r(&["rcx", "rdx", "r8", "r9"]),
                 float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3"]),
                 positional: true,
+                ordered_args: true,
                 int_ret: regs.reg("rax"),
                 int_ret_high: None,
                 float_ret: regs.reg("xmm0"),
@@ -252,11 +259,14 @@ impl Abi {
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "rdi", "rsi", "r12", "r13", "r14", "r15", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"]),
                 runtime: Vec::new(),
+                stack_results: false,
+                register_results: false,
             },
             Architecture::X86_64 => Abi {
                 int_args: r(&["rdi", "rsi", "rdx", "rcx", "r8", "r9"]),
                 float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"]),
                 positional: false,
+                ordered_args: true,
                 int_ret: regs.reg("rax"),
                 int_ret_high: Some(regs.reg("rdx")),
                 float_ret: regs.reg("xmm0"),
@@ -266,11 +276,14 @@ impl Abi {
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "r12", "r13", "r14", "r15"]),
                 runtime: Vec::new(),
+                stack_results: false,
+                register_results: false,
             },
             Architecture::X86 => Abi {
                 int_args: Vec::new(),
                 float_args: Vec::new(),
                 positional: false,
+                ordered_args: true,
                 int_ret: regs.reg("eax"),
                 int_ret_high: Some(regs.reg("edx")),
                 float_ret: regs.reg("xmm0"),
@@ -280,11 +293,14 @@ impl Abi {
                 return_address: 4,
                 callee_saved: r(&["ebx", "ebp", "esi", "edi"]),
                 runtime: Vec::new(),
+                stack_results: false,
+                register_results: false,
             },
             _ => Abi {
                 int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]),
                 float_args: r(&["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"]),
                 positional: false,
+                ordered_args: true,
                 int_ret: regs.reg("x0"),
                 int_ret_high: Some(regs.reg("x1")),
                 float_ret: regs.reg("v0"),
@@ -295,12 +311,15 @@ impl Abi {
                 // x30 holds the return address of the function, v8 to v15 keep their low 64 bits
                 callee_saved: r(&["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
                 runtime: Vec::new(),
+                stack_results: false,
+                register_results: false,
             },
         }
     }
 
     /// The register ABI of Go (ABIInternal, Go 1.17 on x86_64 and 1.18 on aarch64), on every system: the results in
-    /// the registers of the arguments (a string is its pointer then its length), every other register clobbered by
+    /// the registers of the arguments (a string is its pointer then its length, an error its type then its data, after
+    /// the other results), every other register clobbered by
     /// calls but the ones the runtime keeps (the goroutine in r14 or x28, the zero xmm15, the frame pointer)
     pub fn go(regs: &RegisterFile) -> Option<Self> {
         let r = |names: &[&str]| -> Vec<Reg> { names.iter().map(|n| regs.reg(n)).collect() };
@@ -310,8 +329,9 @@ impl Abi {
                 int_args: r(&["rax", "rbx", "rcx", "rdi", "rsi", "r8", "r9", "r10", "r11"]),
                 float_args: r(&["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14"]),
                 positional: false,
+                ordered_args: true,
                 int_ret: regs.reg("rax"),
-                int_ret_high: Some(regs.reg("rbx")),
+                int_ret_high: None,
                 float_ret: regs.reg("xmm0"),
                 stack_pointer: regs.reg("rsp"),
                 stack_args: 8,
@@ -319,13 +339,16 @@ impl Abi {
                 return_address: 8,
                 callee_saved: r(&["rbp", "r14", "r15", "xmm15"]),
                 runtime: vec![(regs.reg("r14"), "runtime_g")],
+                stack_results: false,
+                register_results: true,
             }),
             Architecture::Aarch64 => Some(Abi {
                 int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15"]),
                 float_args: r(&["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
                 positional: false,
+                ordered_args: true,
                 int_ret: regs.reg("x0"),
-                int_ret_high: Some(regs.reg("x1")),
+                int_ret_high: None,
                 float_ret: regs.reg("v0"),
                 stack_pointer: regs.reg("sp"),
                 stack_args: 8,
@@ -333,9 +356,47 @@ impl Abi {
                 return_address: 0,
                 callee_saved: r(&["x28", "x29", "x30"]),
                 runtime: vec![(regs.reg("x28"), "runtime_g")],
+                stack_results: false,
+                register_results: true,
             }),
             _ => None,
         };
+    }
+
+    /// The stack ABI of Go (ABI0: before 1.17 on x86_64 and 1.18 on aarch64, always on x86, and the functions written
+    /// in assembly): the arguments then the results in the slots above the return address, every register clobbered
+    /// by calls but the frame pointer (and the goroutine in x28 on aarch64). The functions read no register, but the
+    /// closures their context (rdx, x26) and the helpers of the assembly of the runtime the registers they are given
+    /// (runtime.cmpbody): any of them may be a parameter.
+    pub fn go_stack(regs: &RegisterFile) -> Self {
+        let r = |names: &[&str]| -> Vec<Reg> { names.iter().map(|n| regs.reg(n)).collect() };
+        let mut abi = Abi::new(regs, false);
+
+        abi.float_args = Vec::new();
+        abi.ordered_args = false;
+        abi.int_ret_high = None;
+        abi.stack_results = true;
+
+        match regs.arch {
+            Architecture::X86_64 => {
+                abi.int_args = r(&["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"]);
+                abi.callee_saved = vec![regs.reg("rbp")];
+            }
+            Architecture::X86 => {
+                abi.int_args = r(&["eax", "ebx", "ecx", "edx", "esi", "edi"]);
+                abi.callee_saved = vec![regs.reg("ebp")];
+            }
+            Architecture::Aarch64 => {
+                abi.int_args = (0..28).filter(|&i| i != 18).map(|i| regs.reg(&format!("x{}", i))).collect();
+                // The caller keeps the slot of the return address the callee saves its link register to
+                abi.stack_args = 8;
+                abi.callee_saved = vec![regs.reg("x28"), regs.reg("x29")];
+                abi.runtime = vec![(regs.reg("x28"), "runtime_g")];
+            }
+            Architecture::Unsupported => {}
+        }
+
+        return abi;
     }
 }
 

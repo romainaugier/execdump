@@ -131,8 +131,20 @@ fn session_on(kind: Kind, pie: bool) {
     let returned = stopped(&session);
     assert_eq!(returned.pc, first.frames[1].pc, "stopped in a recursive call instead of the return");
 
-    session.send(Request::Run(Run::Continue));
-    assert_eq!(next(&session), Event::Exited(Some(0)));
+    // A return address that is not code (the unwinding of the entry of a process gives such values): gdb refuses
+    // the breakpoint, the step is an error and the program stays where it is; lldb leaves it unresolved and the
+    // program runs to its end
+    session.send(Request::Run(Run::Until(Until { returns: vec![1], ..Until::default() })));
+
+    match (kind, next(&session)) {
+        (Kind::Gdb, Event::Error(_)) => {
+            session.send(Request::Run(Run::Continue));
+            assert_eq!(next(&session), Event::Exited(Some(0)));
+        }
+        (Kind::Lldb, Event::Exited(Some(0))) => {}
+        (_, other) => panic!("unexpected {:?}", other),
+    }
+
     assert_eq!(std::fs::read_to_string(&output).unwrap(), "hello world\n30 3\n");
 
     session.send(Request::Kill);

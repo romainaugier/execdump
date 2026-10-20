@@ -75,7 +75,7 @@ pub fn analyze(program: &Program, progress: Option<&AtomicUsize>) -> Result<Anal
 
         for function in analysis.functions.values() {
             for &(_, target) in function.refs.iter() {
-                if program.is_executable(target) && !analysis.functions.contains_key(&target) {
+                if program.is_executable(target) && !program.is_data(target) && !analysis.functions.contains_key(&target) {
                     referenced.insert(target);
                 }
             }
@@ -221,7 +221,7 @@ impl Discovery<'_> {
 
             for call in function.calls.iter() {
                 if let CallTarget::Function(target) = call.target {
-                    if program.is_executable(target) && !analysis.functions.contains_key(&target) {
+                    if program.is_executable(target) && !program.is_data(target) && !analysis.functions.contains_key(&target) {
                         let source = if call.tail { FunctionSource::TailCall } else { FunctionSource::Call };
 
                         // A fragment is a start once it is recovered: the code it jumps to may be in a function

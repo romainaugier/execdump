@@ -208,8 +208,11 @@ impl<'a> Decompiler<'a> {
 
         let windows = program.format == Format::Pe;
         let regs = RegisterFile::new(arch);
-        let go = (program.language == Language::Go).then(|| Abi::go(&regs)).flatten();
-        let abi = go.unwrap_or_else(|| Abi::new(&regs, windows));
+        let abi = match program.language {
+            Language::Go if program.go_register_abi => Abi::go(&regs).unwrap_or_else(|| Abi::go_stack(&regs)),
+            Language::Go => Abi::go_stack(&regs),
+            _ => Abi::new(&regs, windows),
+        };
         let model = DataModel::new(arch, windows);
         let typedb = TypeDb::bundled(if windows { Platform::Windows } else { Platform::Unix }, model);
 
@@ -769,7 +772,7 @@ impl<'a> Decompiler<'a> {
     }
 
     fn env<'e>(&'e self, signature: &'e dyn Fn(&CallTarget) -> Signature, global_name: &'e dyn Fn(u64) -> String) -> Env<'e> {
-        return Env { program: self.program, analysis: self.analysis, regs: &self.regs, abi: &self.abi, signature, global_name };
+        return Env { program: self.program, analysis: self.analysis, regs: &self.regs, abi: &self.abi, signature, global_name, cs: &self.cs };
     }
 
     fn module<'ctx>(&self, cx: &'ctx Context, name: &str) -> Result<Module<'ctx>> {
@@ -825,6 +828,10 @@ impl<'a> Decompiler<'a> {
                     lift::declare_slots(module, function);
                 }
             }
+        }
+
+        for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
+            lift::copy_global_arrays(function);
         }
 
         // Helpers and globals the optimizations made useless
@@ -1088,16 +1095,36 @@ impl<'a> Decompiler<'a> {
     }
 
     /// The functions of the Go runtime with their own conventions: the write barriers return the buffer the
-    /// caller writes the pointers to in r11 (x25 on aarch64), the registers of the arguments untouched
+    /// caller writes the pointers to in r11 (x25 on aarch64), the registers of the arguments untouched, deferproc of the
+    /// stack ABI returns in rax
     fn go_runtime_signature(&self, symbol: &str, name: &str) -> Option<Signature> {
-        if self.program.language != Language::Go || !symbol.starts_with("runtime.gcWriteBarrier") {
+        if self.program.language != Language::Go {
+            return None;
+        }
+
+        // The stack ABI: runtime.deferproc returns in rax whether a deferred function recovered from a panic (the code
+        // after the call tests it), its arguments are on the stack
+        if self.abi.stack_results && matches!(symbol, "runtime.deferproc" | "runtime.deferprocStack") {
+            let slot = LType::Int(self.abi.slot_size as u32 * 8);
+            let mut params = vec![Value { loc: Loc::Stack(self.abi.stack_args), ty: slot, name: None }];
+
+            if symbol == "runtime.deferproc" {
+                params[0].ty = LType::Int(32);
+                params.push(Value { loc: Loc::Stack(self.abi.stack_args + self.abi.slot_size), ty: LType::Ptr, name: None });
+            }
+
+            let ret = Value { loc: Loc::Reg(self.abi.int_ret), ty: LType::Int(32), name: None };
+            return Some(Signature { name: name.to_string(), params, ret: Some(ret), outs: Vec::new(), variadic: false, noreturn: false, guessed: false, clobbers: lift::CLOBBERS_ALL });
+        }
+
+        if !symbol.starts_with("runtime.gcWriteBarrier") {
             return None;
         }
 
         let buffer = self.regs.reg(if self.program.architecture() == Architecture::Aarch64 { "x25" } else { "r11" });
         let ret = Value { loc: Loc::Reg(buffer), ty: LType::Ptr, name: None };
 
-        return Some(Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: false, noreturn: false, guessed: false, clobbers: 1 << buffer });
+        return Some(Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), outs: Vec::new(), variadic: false, noreturn: false, guessed: false, clobbers: 1 << buffer });
     }
 
     fn compute_signature_without_clobbers(&self, addr: u64) -> Signature {
@@ -1110,6 +1137,10 @@ impl<'a> Decompiler<'a> {
         }
 
         if let Some(prototype) = self.user_prototypes.borrow().get(&addr).cloned() {
+            if self.abi.stack_results || self.abi.register_results {
+                return Signature { noreturn, ..self.stack_signature_from_prototype(&prototype, addr, &name) };
+            }
+
             return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
         }
 
@@ -1136,9 +1167,41 @@ impl<'a> Decompiler<'a> {
 
         let mut discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
 
+        // The pclntab of Go gives the size of the arguments and results: none means none (main.main), else as many
+        // words at most of each
+        if let Some(&size) = self.program.go_args.get(&addr) {
+            let words = (size as i64 / self.abi.slot_size) as usize;
+
+            if self.abi.register_results {
+                discovered.params.truncate(words);
+            }
+
+            if words == 0 {
+                discovered.ret = None;
+            }
+
+            discovered.outs.truncate(words.saturating_sub(1));
+        }
+
         // A result nobody reads is a leftover in the return register
-        if discovered.ret.is_some() && !self.result_read_by_callers(addr) {
+        if discovered.ret.as_ref().is_some_and(|r| matches!(r.loc, Loc::Reg(_))) && discovered.outs.is_empty() && !self.result_read_by_callers(addr) {
             discovered.ret = None;
+        }
+
+        // Several results in registers: up to the last one a caller reads (the functions called from elsewhere only
+        // return the first one)
+        if self.abi.register_results && discovered.ret.is_some() {
+            let first = self.result_read_by_callers(addr);
+            let last = discovered.outs.iter().rposition(|out| match out.loc {
+                Loc::Reg(reg) => self.result_read(addr, reg, false, &mut HashSet::new(), MAX_RESULT_DEPTH),
+                Loc::Stack(_) => true,
+            });
+
+            match last {
+                Some(last) => discovered.outs.truncate(last + 1),
+                None if first => discovered.outs.clear(),
+                None => discovered = Signature { ret: None, outs: Vec::new(), ..discovered },
+            }
         }
 
         // main has its standard parameters, as many as it reads
@@ -1279,7 +1342,7 @@ impl<'a> Decompiler<'a> {
         let env = self.env(&signature, &global_name);
 
         let frame = self.frame(&env, function)?;
-        let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params);
+        let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params, &frame.stack_results);
         let (llvm, _) = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true, false)?;
 
         let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
@@ -1328,7 +1391,8 @@ impl<'a> Decompiler<'a> {
             LType::Ptr => CType::ptr(CType::Unknown(0)),
         };
 
-        let params = sig.params.iter().map(|p| Param { name: p.name.clone(), ty: ctype(p.ty) }).collect();
+        let mut params: Vec<Param> = sig.params.iter().map(|p| Param { name: p.name.clone(), ty: ctype(p.ty) }).collect();
+        params.extend(sig.outs.iter().map(|out| Param { name: out.name.clone(), ty: CType::ptr(ctype(out.ty)) }));
         let ret = sig.ret.as_ref().map_or(CType::Void, |r| ctype(r.ty));
 
         return Prototype { name: sig.name.clone(), ty: FuncType { ret, params, variadic: sig.variadic } };
@@ -1344,7 +1408,9 @@ impl<'a> Decompiler<'a> {
             let ty = self.ltype(&param.ty).unwrap_or(LType::Int(self.model.pointer_bits as u32));
             let float = matches!(ty, LType::Float(_));
 
-            let reg = if abi.positional {
+            let reg = if abi.stack_results {
+                None
+            } else if abi.positional {
                 if float { abi.float_args.get(index) } else { abi.int_args.get(index) }
             } else if float {
                 next_float += 1;
@@ -1375,7 +1441,28 @@ impl<'a> Decompiler<'a> {
             self.add_prototype(Prototype { name: name.to_string(), ty: prototype.ty.clone() });
         }
 
-        return Signature { name: name.to_string(), params, ret, variadic: prototype.ty.variadic, noreturn: false, guessed: false, clobbers: lift::CLOBBERS_ALL };
+        return Signature { name: name.to_string(), params, ret, outs: Vec::new(), variadic: prototype.ty.variadic, noreturn: false, guessed: false, clobbers: lift::CLOBBERS_ALL };
+    }
+
+    /// Signature of a prototype given to a function with several results (in stack slots or registers): its last
+    /// parameters are the pointers to the results after the first one, as many as the discovery found, the results stay
+    /// where they are
+    fn stack_signature_from_prototype(&self, prototype: &Prototype, addr: u64, name: &str) -> Signature {
+        let discovered = self.discover(addr, name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
+        let count = discovered.outs.len().min(prototype.ty.params.len());
+        let (params, outs) = prototype.ty.params.split_at(prototype.ty.params.len() - count);
+
+        let inputs = Prototype { name: prototype.name.clone(), ty: FuncType { params: params.to_vec(), ..prototype.ty.clone() } };
+        let sig = self.signature_from_prototype(&inputs, name);
+        let pointee = |ty: &CType| match self.typedb.resolve(ty) {
+            CType::Pointer(to) => self.ltype(to),
+            _ => None,
+        };
+
+        let ret = self.ltype(&prototype.ty.ret).and_then(|ty| discovered.ret.map(|r| Value { ty, ..r }));
+        let outs = discovered.outs.iter().zip(outs.iter()).map(|(out, param)| Value { ty: pointee(&param.ty).unwrap_or(out.ty), name: param.name.clone(), ..out.clone() }).collect();
+
+        return Signature { ret, outs, ..sig };
     }
 
     /// Machine level type of a C type, None for void

@@ -13,7 +13,7 @@ use execdump_decompiler::storage::Place;
 use execdump_decompiler::Decompiler;
 
 use crate::config::Config;
-use execdump_core::program::programs_from_exec;
+use execdump_core::program::{programs_from_exec, Language};
 use execdump_core::pe::PE;
 
 use regex::Regex;
@@ -240,6 +240,10 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<()> {
     let filter = Regex::new(&args.functions_filter)?;
 
     for program in programs_from_exec(exec) {
+        if program.language == Language::DotNet {
+            eprintln!("{}: a .NET assembly, its code is CIL bytecode (the machine code is the stub that starts the runtime), not decompiled yet", program.name);
+        }
+
         let analysis = analyze(&program, None)?;
         let decoder = Decoder::new(program.architecture())?;
 

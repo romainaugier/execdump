@@ -154,7 +154,7 @@ impl App {
         let active = group.active;
 
         match &mut group.tabs[active].view {
-            View::Welcome => welcome::render(f, theme, area, analysis_errors),
+            View::Welcome => welcome::render(f, theme, area, analysis_errors, programs),
             View::Dump(view) => dump::render(view, f, theme, area),
             View::Hex(view) => hex::render(view, f, theme, area),
             View::Disasm(view) => disasm::render(view, f, theme, area, programs, analyses, decoders, &marks),

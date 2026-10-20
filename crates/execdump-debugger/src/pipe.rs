@@ -1,6 +1,8 @@
 /*
  * A debugger process: commands written to its input, its output and errors read from one pipe by a thread (so
  * that their order is kept), until a pattern (a prompt, the end of a line)
+ *
+ * With EXECDUMP_DEBUGGER_LOG=<file>, what is written to the debugger and what it answers is appended to the file
  */
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -17,6 +19,7 @@ pub struct Pipe {
     output: Receiver<Vec<u8>>,
     buffer: Vec<u8>,
     name: String,
+    log: Option<std::fs::File>,
 }
 
 impl Pipe {
@@ -60,7 +63,9 @@ impl Pipe {
         })?;
 
         let name = path.file_name().map_or("debugger".to_string(), |n| n.to_string_lossy().to_string());
-        return Ok(Pipe { child, input, output, buffer: Vec::new(), name });
+        let log = std::env::var_os("EXECDUMP_DEBUGGER_LOG").and_then(|path| std::fs::OpenOptions::new().create(true).append(true).open(path).ok());
+
+        return Ok(Pipe { child, input, output, buffer: Vec::new(), name, log });
     }
 
     pub fn pid(&self) -> u32 {
@@ -68,6 +73,10 @@ impl Pipe {
     }
 
     pub fn write_line(&mut self, line: &str) -> Result<()> {
+        if let Some(log) = self.log.as_mut() {
+            let _ = writeln!(log, ">> {}", line);
+        }
+
         self.input.write_all(line.as_bytes())?;
         self.input.write_all(b"\n")?;
         self.input.flush()?;
@@ -93,6 +102,10 @@ impl Pipe {
                 },
                 None => self.output.recv().map_err(|_| self.exited())?,
             };
+
+            if let Some(log) = self.log.as_mut() {
+                let _ = log.write_all(&chunk);
+            }
 
             self.buffer.extend(chunk);
         }

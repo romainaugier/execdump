@@ -131,6 +131,12 @@ impl Debugger {
         return program.region_at(local).filter(|r| r.perms.exec).map(|_| local);
     }
 
+    /// A frame the debugger unwound to code: the program, or a function it knows (the unwinding of the first functions of
+    /// a process, or of code without unwind information, gives values of the stack that are not return addresses)
+    pub fn is_code(&self, program: &Program, frame: &execdump_debugger::Frame) -> bool {
+        return self.program_addr(program, frame.pc).is_some() || (frame.pc >= 0x1000 && !frame.function.is_empty() && frame.function != "??");
+    }
+
     /// Program counter of the selected frame
     pub fn frame_pc(&self) -> Option<u64> {
         let snapshot = self.snapshot.as_ref().filter(|_| self.state == DebugState::Stopped)?;
@@ -265,7 +271,9 @@ impl App {
         let config = SessionConfig { kind, debugger: path, program: self.exec_path.clone(), args, output: output.clone(), link_entry: entry, registers: read, stack_pointer };
 
         // At the first breakpoint, or at main (the entry point without it)
-        let main = self.analyses[program].as_ref().and_then(|a| a.function_by_name("main")).map(|f| f.addr);
+        // The main of the language (main.main of Go: its main is the entry of the runtime), else the one of C
+        let names: &[&str] = if program_ref.language == execdump_core::program::Language::Go { &["main.main", "main"] } else { &["main"] };
+        let main = names.iter().find_map(|name| self.analyses[program].as_ref().and_then(|a| a.function_by_name(name))).map(|f| f.addr);
         let first_stop = if self.breakpoints.iter().any(|(p, _)| *p == program) { None } else { Some(main.unwrap_or(entry)) };
 
         self.debugger = Some(Debugger {
@@ -397,11 +405,14 @@ impl App {
 
         let mut stops: Vec<(u64, Option<i64>)> = Vec::new();
 
-        // The functions it calls (their entry in any frame: a recursive call is a step into it)
+        // The functions it calls (their entry in any frame: a recursive call is a step into it), not the growth of the
+        // stack of Go
         if into {
             for call in function.calls.iter() {
                 if let CallTarget::Function(callee) = call.target {
-                    if project.analysis.functions.get(&callee).is_some_and(|f| f.thunk.is_none()) && !stops.iter().any(|(a, _)| *a == callee + bias) {
+                    let code = project.analysis.functions.get(&callee).is_some_and(|f| f.thunk.is_none() && !execdump_core::golang::grows_stack(&f.name));
+
+                    if code && !stops.iter().any(|(a, _)| *a == callee + bias) {
                         stops.push((callee + bias, None));
                     }
                 }
@@ -412,7 +423,7 @@ impl App {
         stops.extend(lines.into_iter().map(|a| (a + bias, offset(a))));
 
         let entry_sp = offset(pc).map(|o| (snapshot.sp).wrapping_sub(o as u64));
-        let returns = snapshot.frames.get(1).map(|f| f.pc).into_iter().collect();
+        let returns = snapshot.frames.get(1).filter(|f| debugger.is_code(program, f)).map(|f| f.pc).into_iter().collect();
 
         return Run::Until(Until { stops, entry_sp, returns });
     }

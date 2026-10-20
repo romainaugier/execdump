@@ -18,7 +18,7 @@ mod refine;
 mod x86;
 mod aarch64;
 
-pub use frame::{declare_slots, fold_frame_addresses, split_frame, stack_offset};
+pub use frame::{copy_global_arrays, declare_slots, fold_frame_addresses, split_frame, stack_offset};
 pub use protector::{remove_stack_protector, Protector};
 pub use refine::refine;
 
@@ -52,6 +52,13 @@ use std::num::NonZeroU32;
 pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
 pub(crate) const RETURN_SINK_HIGH: &str = "__return_high";
+/// Prefix of the sinks of the results in stack slots, followed by the offset of the slot
+pub(crate) const RETURN_SINK_STACK: &str = "__return_stack_";
+/// Sinks of the argument registers after the first one of the ABIs with several results in registers, by position
+pub(crate) const RETURN_SINK_REGS: [&str; 16] = [
+    "__return_reg_0", "__return_reg_1", "__return_reg_2", "__return_reg_3", "__return_reg_4", "__return_reg_5", "__return_reg_6", "__return_reg_7",
+    "__return_reg_8", "__return_reg_9", "__return_reg_10", "__return_reg_11", "__return_reg_12", "__return_reg_13", "__return_reg_14", "__return_reg_15",
+];
 
 /// The register of the high half of a result twice as wide as the return register (rdx:rax)
 pub fn high_half(abi: &Abi, regs: &RegisterFile, value: &Value) -> Option<Reg> {
@@ -61,6 +68,9 @@ pub fn high_half(abi: &Abi, regs: &RegisterFile, value: &Value) -> Option<Reg> {
 
     return abi.int_ret_high.filter(|_| reg == abi.int_ret && bits == 2 * regs.regs[reg].bits);
 }
+
+/// Characters of the shortest text without a known length in the programs whose strings have one
+const MIN_UNSIZED_TEXT: usize = 4;
 
 /// Values followed back to the constant stored as a format string (casts, registers)
 const MAX_STORED_TEXT_STEPS: usize = 8;
@@ -109,6 +119,9 @@ pub struct Signature {
     pub name: String,
     pub params: Vec<Value>,
     pub ret: Option<Value>,
+    /// Results after the first one (Go returns several in stack slots): pointers the function writes them to, after
+    /// the parameters
+    pub outs: Vec<Value>,
     pub variadic: bool,
     pub noreturn: bool,
     /// Unknown parameters: a call passes the argument registers written before it
@@ -162,11 +175,13 @@ pub struct Env<'a> {
     pub signature: &'a dyn Fn(&CallTarget) -> Signature,
     /// Name of a global variable at an address
     pub global_name: &'a dyn Fn(u64) -> String,
+    pub cs: &'a capstone::Capstone,
 }
 
 /// Signature of a function before its parameters are known: every argument register and the
-/// stack slots it reads, the return registers are stored to sinks to see which ones are set
-pub fn discovery_signature(name: &str, abi: &Abi, regs: &RegisterFile, stack_params: &BTreeSet<i64>) -> Signature {
+/// stack slots it reads, the return registers are stored to sinks to see which ones are set (and the
+/// stack slots of the results, kept in outs, with an ABI that has them)
+pub fn discovery_signature(name: &str, abi: &Abi, regs: &RegisterFile, stack_params: &BTreeSet<i64>, stack_results: &BTreeMap<i64, u32>) -> Signature {
     let int_bits = regs.regs[abi.int_ret].bits;
     let mut params: Vec<Value> = Vec::new();
 
@@ -176,14 +191,15 @@ pub fn discovery_signature(name: &str, abi: &Abi, regs: &RegisterFile, stack_par
     params.extend(int);
     params.extend(float);
     params.extend(stack_params.iter().map(|&offset| Value { loc: Loc::Stack(offset), ty: LType::Int(abi.slot_size as u32 * 8), name: None }));
+    let outs = stack_results.iter().map(|(&offset, &bytes)| Value { loc: Loc::Stack(offset), ty: LType::Int(bytes * 8), name: None }).collect();
 
-    return Signature { name: name.to_string(), params, ret: None, variadic: false, noreturn: false, guessed: false, clobbers: CLOBBERS_ALL };
+    return Signature { name: name.to_string(), params, ret: None, outs, variadic: false, noreturn: false, guessed: false, clobbers: CLOBBERS_ALL };
 }
 
 /// Signature of a function nothing is known about: int f(...), with the arguments of each call guessed
 pub fn guessed_signature(name: &str, abi: &Abi) -> Signature {
     let ret = Value { loc: Loc::Reg(abi.int_ret), ty: LType::Int(32), name: None };
-    return Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), variadic: true, noreturn: false, guessed: true, clobbers: CLOBBERS_ALL };
+    return Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), outs: Vec::new(), variadic: true, noreturn: false, guessed: true, clobbers: CLOBBERS_ALL };
 }
 
 /// Printable text: ASCII, UTF-8 characters or a few other bytes
@@ -198,9 +214,22 @@ pub fn text_bytes(bytes: &[u8]) -> bool {
     return ascii == bytes.len() || std::str::from_utf8(bytes).is_ok() || ascii * 4 >= bytes.len() * 3;
 }
 
-/// Bytes of a printable C string at an address
+/// Bytes of a printable C string at an address. Text shorter than a pointer is a pointer when it reads as an address
+/// of the program (the low bytes of 0x4c82de are a character and an L).
 pub fn text_bytes_at(program: &Program, addr: u64) -> Option<&[u8]> {
-    return program.c_string_bytes(addr, 4096).filter(|bytes| text_bytes(bytes));
+    let bytes = program.c_string_bytes(addr, 4096).filter(|bytes| text_bytes(bytes))?;
+
+    if bytes.len() < program.pointer_size as usize && program.read_pointer(addr).is_some_and(|p| program.region_at(p).is_some()) {
+        return None;
+    }
+
+    // The strings of Go and Rust are not NUL terminated: a few characters followed by a NUL are other data (the size
+    // of a Go type, 0x30, reads as "0") unless a pointer and length pair points to them
+    if program.language.has_sized_strings() && bytes.len() < MIN_UNSIZED_TEXT && !program.sized_strings.contains_key(&addr) {
+        return None;
+    }
+
+    return Some(bytes);
 }
 
 /// A printable C string at an address, as the text of a C literal (see literal)
@@ -265,6 +294,19 @@ pub struct MemAccess {
     pub has_index: bool,
     pub disp: i64,
     pub bytes: u32,
+    pub kind: Access,
+}
+
+/// What an instruction does with a memory operand
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    Read,
+    /// Written without being read first (mov [rsp+8], rax)
+    Write,
+    /// Read and written (add [rsp+8], 1)
+    Update,
+    /// Its address is computed, nothing is read (lea)
+    Address,
 }
 
 impl Insn {
@@ -333,6 +375,21 @@ pub struct Frame {
     /// Stack offsets read at or above the first stack argument (the stack arguments of a tail call are
     /// the ones the function received)
     pub stack_params: BTreeSet<i64>,
+    /// With an ABI whose results are in stack slots: the slots above the arguments the function writes, and
+    /// their size
+    pub stack_results: BTreeMap<i64, u32>,
+    /// With the same ABIs, the stack slots around each call (by address of the call)
+    pub call_slots: HashMap<u64, CallSlots>,
+}
+
+/// Slots above the stack pointer of a call (offsets from it, and sizes): the ones written before it in its block are
+/// its arguments, the ones read after it its results. The calls whose signature is not known pass and return them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CallSlots {
+    pub args: BTreeMap<i64, u32>,
+    pub results: BTreeMap<i64, u32>,
+    /// With several results in registers: the argument registers read after the call before being written
+    pub registers: Vec<Reg>,
 }
 
 impl Frame {
@@ -405,7 +462,10 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
     let arch = env.program.architecture();
     let sp = env.abi.stack_pointer;
 
-    let mut frame = Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: 0, high: 0, stack_params: BTreeSet::new() };
+    let mut frame = Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: 0, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::new() };
+    let mut incoming: BTreeMap<i64, (u32, bool)> = BTreeMap::new();
+    let mut around: Vec<Around> = Vec::new();
+    let mut writes: BTreeSet<i64> = BTreeSet::new();
 
     for block in function.blocks.values() {
         let mut insns = Vec::new();
@@ -427,7 +487,29 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
             continue;
         };
 
+        // Stack accesses of the block in order (entry offset, size, written) and its calls (index in them, stack pointer)
+        let mut accesses: Vec<(i64, u32, bool)> = Vec::new();
+        let mut calls: Vec<(u64, usize, i64)> = Vec::new();
+
         for (insn, info) in frame.blocks[&addr].iter().zip(function.blocks[&addr].insns.iter()) {
+            // The memory a duff device writes or reads in the frame belongs to it
+            if let Flow::Call(target) = info.flow {
+                if let Some((_, bytes)) = duff_device(env, target) {
+                    for reg in ["rdi", "rsi"] {
+                        if let Some(Known::Stack(offset)) = tracker.get(env.regs.reg(reg)) {
+                            frame.low = frame.low.min(offset);
+                            frame.high = frame.high.max(offset + bytes as i64);
+                        }
+                    }
+                }
+            }
+
+            if env.abi.stack_results && matches!(info.flow, Flow::Call(_) | Flow::IndirectCall) {
+                if let Some(Known::Stack(sp)) = tracker.get(sp) {
+                    calls.push((info.addr, accesses.len(), sp));
+                }
+            }
+
             if let (Some(site), Some(Known::Stack(at))) = (function.calls.iter().find(|c| c.tail && c.addr == info.addr), tracker.get(sp)) {
                 for param in (env.signature)(&site.target).params.iter() {
                     if let Loc::Stack(offset) = param.loc {
@@ -440,6 +522,20 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
                 let Some(Known::Stack(offset)) = access.base.and_then(|b| tracker.offset(b, access.disp)) else {
                     continue;
                 };
+
+                if offset >= env.abi.stack_args && !access.has_index {
+                    let slot = incoming.entry(offset).or_insert((access.bytes, false));
+                    slot.0 = slot.0.max(access.bytes);
+                    slot.1 |= matches!(access.kind, Access::Read | Access::Update);
+                }
+
+                if access.kind == Access::Address {
+                    continue;
+                }
+
+                if env.abi.stack_results && !access.has_index {
+                    accesses.push((offset, access.bytes, access.kind == Access::Write));
+                }
 
                 frame.low = frame.low.min(offset);
                 frame.high = frame.high.max(offset + access.bytes as i64);
@@ -459,9 +555,252 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
         for edge in function.blocks[&addr].succs.iter() {
             frame.entry_trackers.entry(edge.to).or_insert_with(|| tracker.clone());
         }
+
+        for (index, &(call, at, sp)) in calls.iter().enumerate() {
+            let previous = if index == 0 { 0 } else { calls[index - 1].1 };
+            let next = calls.get(index + 1).map_or(accesses.len(), |c| c.1);
+            around.push(Around { call, sp, before: accesses[previous..at].to_vec(), after: accesses[at..next].to_vec() });
+        }
+
+        writes.extend(accesses.iter().filter(|a| a.2).map(|a| a.0));
+    }
+
+    if env.abi.stack_results {
+        frame.call_slots = call_slots(&around, &writes, env.abi.slot_size);
+    }
+
+    if env.abi.register_results {
+        result_registers(env, function, &mut frame);
+    }
+
+    if env.abi.stack_results {
+        // The slots written first on every path (named results are cleared at the entry) are results even when read
+        for offset in written_first(env, function, &frame) {
+            if let Some(slot) = incoming.get_mut(&offset) {
+                slot.1 = false;
+            }
+        }
+
+        stack_results(&mut frame, &incoming, env.abi.slot_size);
     }
 
     return Ok(frame);
+}
+
+fn align(offset: i64, to: i64) -> i64 {
+    return (offset + to - 1) / to * to;
+}
+
+/// Bytes of the arguments of a deferred function passed with it
+const MAX_DEFERRED_ARGS: u64 = 256;
+
+/// Instructions followed from an entry of a duff device to its return
+const MAX_DUFF_INSNS: usize = 1024;
+
+/// A call into runtime.duffzero or runtime.duffcopy of Go (x86_64): the compiler zeroes and copies blocks of memory by
+/// calling their code at the offset that leaves the right number of 16-byte moves before the return. Whether it copies,
+/// and the bytes the moves from the entry write through rdi.
+pub fn duff_device(env: &Env, addr: u64) -> Option<(bool, u64)> {
+    let program = env.program;
+
+    if program.language != Language::Go || program.architecture() != Architecture::X86_64 {
+        return None;
+    }
+
+    let (symbol, _) = program.symbol_near(addr)?;
+
+    let copy = match symbol.name.as_str() {
+        "runtime.duffzero" => false,
+        "runtime.duffcopy" => true,
+        _ => return None,
+    };
+
+    let rdi = env.regs.reg("rdi");
+    let mut at = addr;
+    let mut bytes = 0u64;
+
+    for _ in 0..MAX_DUFF_INSNS {
+        let code = program.bytes_from(at)?;
+        let insn = Insn::decode(Architecture::X86_64, env.regs, env.cs, &code[..code.len().min(16)], at)?;
+
+        if let Insn::X86(x86) = &insn {
+            if x86.mnemonic.starts_with("ret") {
+                return (bytes > 0).then_some((copy, bytes));
+            }
+        }
+
+        bytes += insn.memory().iter().filter(|a| a.kind == Access::Write && a.base == Some(rdi)).map(|a| a.bytes as u64).sum::<u64>();
+        at = insn.end();
+    }
+
+    return None;
+}
+
+/// The argument registers read after each call before being written, in its block (the results of the calls
+/// whose signature is not known)
+fn result_registers(env: &Env, function: &Function, frame: &mut Frame) {
+    for (addr, insns) in frame.blocks.iter() {
+        let infos = &function.blocks[addr].insns;
+        let is_call = |i: usize| matches!(infos[i].flow, Flow::Call(_) | Flow::IndirectCall);
+
+        for index in (0..insns.len()).filter(|&i| is_call(i)) {
+            let mut decided: Vec<Reg> = Vec::new();
+            let mut read: Vec<Reg> = Vec::new();
+
+            for (after, insn) in insns.iter().enumerate().skip(index + 1) {
+                if is_call(after) {
+                    break;
+                }
+
+                for &reg in env.abi.int_args.iter() {
+                    if decided.contains(&reg) {
+                        continue;
+                    }
+
+                    match insn.register_access(reg) {
+                        Some(true) => {
+                            read.push(reg);
+                            decided.push(reg);
+                        }
+                        Some(false) => decided.push(reg),
+                        None => {}
+                    }
+                }
+            }
+
+            frame.call_slots.entry(infos[index].addr).or_default().registers = env.abi.int_args.iter().copied().filter(|r| read.contains(r)).collect();
+        }
+    }
+}
+
+/// A call and the stack accesses of its block before it (since the previous call) and after it (until the next one):
+/// entry offset, size, written
+struct Around {
+    call: u64,
+    sp: i64,
+    before: Vec<(i64, u32, bool)>,
+    after: Vec<(i64, u32, bool)>,
+}
+
+/// The slots of the calls (offsets from the stack pointer of the call). The arguments are the slots written before a
+/// call from its stack pointer on, without a gap. Above them the outgoing area ends at the first local variable (a
+/// slot written that is not an argument): its results are the slots in between read after it before being written.
+fn call_slots(around: &[Around], writes: &BTreeSet<i64>, slot_size: i64) -> HashMap<u64, CallSlots> {
+    let mut slots: Vec<CallSlots> = Vec::new();
+    let mut arguments: BTreeSet<i64> = BTreeSet::new();
+
+    for call in around.iter() {
+        let written: BTreeMap<i64, u32> = call.before.iter().filter(|a| a.2 && a.0 >= call.sp).map(|a| (a.0 - call.sp, a.1)).collect();
+        let mut args = BTreeMap::new();
+        let mut end = 0i64;
+
+        for (&offset, &bytes) in written.iter() {
+            if offset > align(end, slot_size) {
+                break;
+            }
+
+            args.insert(offset, bytes);
+            arguments.insert(call.sp + offset);
+            end = end.max(offset + bytes as i64);
+        }
+
+        slots.push(CallSlots { args, ..CallSlots::default() });
+    }
+
+    let locals: BTreeSet<i64> = writes.iter().copied().filter(|offset| !arguments.contains(offset)).collect();
+
+    for (call, slots) in around.iter().zip(slots.iter_mut()) {
+        let end = align(slots.args.iter().map(|(&offset, &bytes)| offset + bytes as i64).max().unwrap_or(0), slot_size);
+        let limit = locals.range(call.sp + end..).next().map_or(i64::MAX, |&local| local - call.sp);
+        let mut overwritten = BTreeSet::new();
+
+        for &(offset, bytes, written) in call.after.iter().filter(|a| a.0 >= call.sp + end && a.0 < call.sp + limit) {
+            if written {
+                overwritten.insert(offset);
+            } else if !overwritten.contains(&offset) {
+                slots.results.entry(offset - call.sp).or_insert(bytes);
+            }
+        }
+    }
+
+    return around.iter().map(|a| a.call).zip(slots).collect();
+}
+
+/// Blocks followed from the entry to find the slots written first
+const ENTRY_BLOCKS: usize = 4;
+
+/// The slots above the return address that the blocks every path runs first (the entry, and the block after it while
+/// there is one: the check of the stack of Go goes to a block that does not return) write before reading them
+fn written_first(env: &Env, function: &Function, frame: &Frame) -> BTreeSet<i64> {
+    let mut written = BTreeSet::new();
+    let mut read = BTreeSet::new();
+    let mut addr = function.addr;
+
+    for _ in 0..ENTRY_BLOCKS {
+        let (Some(insns), Some(tracker)) = (frame.blocks.get(&addr), frame.entry_trackers.get(&addr)) else {
+            break;
+        };
+
+        let mut tracker = tracker.clone();
+
+        for insn in insns.iter() {
+            for access in insn.memory() {
+                let Some(Known::Stack(offset)) = access.base.and_then(|b| tracker.offset(b, access.disp)) else {
+                    continue;
+                };
+
+                if offset < env.abi.stack_args || access.has_index || written.contains(&offset) || read.contains(&offset) {
+                    continue;
+                }
+
+                match access.kind {
+                    Access::Write => {
+                        written.insert(offset);
+                    }
+                    _ => {
+                        read.insert(offset);
+                    }
+                }
+            }
+
+            insn.track(env.regs, &mut tracker);
+        }
+
+        // The only successor that goes on (the others end with a call that does not return)
+        let block = &function.blocks[&addr];
+        let mut next = block.succs.iter().map(|e| e.to).filter(|to| function.blocks.get(to).is_some_and(|b| !b.succs.is_empty() || !matches!(b.last().flow, Flow::Call(_))));
+
+        match (next.next(), next.next()) {
+            (Some(to), None) => addr = to,
+            _ => break,
+        }
+    }
+
+    return written;
+}
+
+/// The results of a function of an ABI that returns them in stack slots: the slots above its arguments are the
+/// highest ones it only writes or takes the address of (the assembly of the Go runtime writes its results through
+/// a pointer: lea r9, [rsp+0x38]), no argument is above them. They are not parameters.
+fn stack_results(frame: &mut Frame, incoming: &BTreeMap<i64, (u32, bool)>, slot_size: i64) {
+    let slot = slot_size as u32;
+
+    for (&offset, &(bytes, read)) in incoming.iter().rev() {
+        if read {
+            break;
+        }
+
+        frame.stack_params.remove(&offset);
+
+        // A wider write sets several results (movups [rsp+0x20], xmm0 clears a string), an address one at least
+        for part in 0..bytes.div_ceil(slot).max(1) {
+            let size = if bytes == 0 { slot } else { bytes.min(slot) };
+            let known = frame.stack_results.entry(offset + (part * slot) as i64).or_insert(size);
+            *known = (*known).max(size);
+        }
+
+        frame.high = frame.high.max(offset + (bytes.max(slot) as i64));
+    }
 }
 
 /// What the instructions after a call do with its result (the register it is returned in)
@@ -731,6 +1070,8 @@ pub struct Lifter<'ctx, 'a> {
     pub builder: Builder<'ctx>,
     pub env: &'a Env<'a>,
     pub function: &'a Function,
+    /// Stack slots around the calls (the ABIs with stack results)
+    call_slots: &'a HashMap<u64, CallSlots>,
     pub llvm: FunctionValue<'ctx>,
     pub sig: Signature,
     regs: Vec<PointerValue<'ctx>>,
@@ -765,6 +1106,8 @@ pub struct Lifter<'ctx, 'a> {
     reads_flags: Cell<bool>,
     /// Flags of the lifted blocks, to remove the unread computations of their last producer
     block_flags: HashMap<u64, BlockFlags<'ctx>>,
+    /// A register holding the sign of another one, and their width (rdx after cqo: rdx:rax is rax sign extended)
+    pub sign_of: Cell<Option<(Reg, Reg, u32)>>,
 }
 
 struct BlockFlags<'ctx> {
@@ -815,6 +1158,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         builder,
         env,
         function,
+        call_slots: &frame.call_slots,
         llvm,
         sig: sig.clone(),
         regs,
@@ -837,6 +1181,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         produced_flags: Cell::new(false),
         reads_flags: Cell::new(false),
         block_flags: HashMap::new(),
+        sign_of: Cell::new(None),
     };
 
     lifter.declare_registers();
@@ -933,13 +1278,32 @@ fn debug_info<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, function: Function
     return (builder, subprogram.as_debug_info_scope());
 }
 
+/// The parameters, then a pointer per result after the first (none in a discovery)
 fn function_type<'ctx>(cx: &'ctx Context, sig: &Signature, discovery: bool) -> FunctionType<'ctx> {
-    let params: Vec<BasicMetadataTypeEnum> = sig.params.iter().map(|p| llvm_type(cx, p.ty).into()).collect();
+    let mut params: Vec<BasicMetadataTypeEnum> = sig.params.iter().map(|p| llvm_type(cx, p.ty).into()).collect();
+
+    if !discovery {
+        params.extend(sig.outs.iter().map(|_| BasicMetadataTypeEnum::from(cx.ptr_type(AddressSpace::default()))));
+    }
 
     return match (&sig.ret, discovery) {
         (Some(ret), false) => llvm_type(cx, ret.ty).fn_type(&params, sig.variadic),
         _ => cx.void_type().fn_type(&params, sig.variadic),
     };
+}
+
+/// Marks a function as only reading memory, returning and not unwinding: its calls whose result is not used are dead
+pub fn read_only<'ctx>(cx: &'ctx Context, function: FunctionValue<'ctx>) {
+    use inkwell::attributes::{Attribute, AttributeLoc};
+
+    // memory(read): a reference (1) to each of the three kinds of locations, two bits each
+    for (name, value) in [("memory", 0b01_01_01), ("nounwind", 0), ("willreturn", 0)] {
+        let kind = Attribute::get_named_enum_kind_id(name);
+
+        if function.get_enum_attribute(AttributeLoc::Function, kind).is_none() {
+            function.add_attribute(AttributeLoc::Function, cx.create_enum_attribute(kind, value));
+        }
+    }
 }
 
 pub fn int_type(cx: &Context, bits: u32) -> IntType<'_> {
@@ -1086,6 +1450,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.flags = None;
         self.branch = None;
         self.jump = None;
+        self.sign_of.set(None);
         self.produced_flags.set(false);
         self.reads_flags.set(false);
 
@@ -1223,7 +1588,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         };
 
         return self.function.calls.iter().filter(|c| c.addr >= block.start && c.addr < block.end).any(|c| match c.target {
-            CallTarget::Function(callee) => self.env.program.symbol_at(callee).is_some_and(|s| s.name.starts_with("runtime.morestack")),
+            CallTarget::Function(callee) => self.env.program.symbol_at(callee).is_some_and(|s| execdump_core::golang::grows_stack(&s.name)),
             _ => false,
         });
     }
@@ -1254,9 +1619,36 @@ impl<'ctx> Lifter<'ctx, '_> {
             // The return registers go to sinks, the decompiler looks at what reaches them
             let sinks = [(RETURN_SINK_INT, Some(self.env.abi.int_ret)), (RETURN_SINK_FLOAT, Some(self.env.abi.float_ret)), (RETURN_SINK_HIGH, self.env.abi.int_ret_high)];
 
-            for (sink, reg) in sinks.into_iter().filter_map(|(sink, reg)| Some((sink, reg?))) {
+            for (sink, reg) in sinks.into_iter().filter_map(|(sink, reg)| Some((sink, reg?))).filter(|_| !self.env.abi.stack_results) {
                 let value = self.read(self.env.regs.full(reg))?;
                 let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
+                llvm!(self.builder.build_store(global.as_pointer_value(), value));
+            }
+
+            // The argument registers after the first one, results with the ABIs that return several in them
+            if self.env.abi.register_results {
+                for (position, &reg) in self.env.abi.int_args.iter().enumerate().skip(1).take(RETURN_SINK_REGS.len()) {
+                    let value = self.read(self.env.regs.full(reg))?;
+                    let sink = RETURN_SINK_REGS[position];
+                    let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
+                    llvm!(self.builder.build_store(global.as_pointer_value(), value));
+                }
+            }
+
+            // The candidate results in stack slots, each to a sink of its own
+            for out in self.sig.outs.clone().iter() {
+                let Loc::Stack(offset) = out.loc else {
+                    continue;
+                };
+
+                let bits = match out.ty {
+                    LType::Int(bits) | LType::Float(bits) => bits,
+                    LType::Ptr => self.pointer_bits(),
+                };
+
+                let value = self.load(self.frame_ptr(offset)?, bits)?;
+                let sink = format!("{}{}", RETURN_SINK_STACK, offset);
+                let global = self.module.get_global(&sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, &sink));
                 llvm!(self.builder.build_store(global.as_pointer_value(), value));
             }
 
@@ -1264,11 +1656,22 @@ impl<'ctx> Lifter<'ctx, '_> {
             return Ok(());
         }
 
+        // The results after the first one are written where the caller wants them
+        for (index, out) in self.sig.outs.clone().iter().enumerate() {
+            let value = match out.loc {
+                Loc::Stack(_) => self.frame_value(out)?,
+                Loc::Reg(_) => self.read_value(out, 0)?,
+            };
+            let pointer = self.llvm.get_nth_param((self.sig.params.len() + index) as u32).context("missing result pointer")?;
+            llvm!(self.builder.build_store(pointer.into_pointer_value(), value));
+        }
+
         match self.sig.ret.clone() {
             Some(ret) => {
-                let value = match high_half(self.env.abi, self.env.regs, &ret) {
-                    Some(high) => self.pair(high)?.into(),
-                    None => self.read_value(&ret, 0)?,
+                let value = match (high_half(self.env.abi, self.env.regs, &ret), ret.loc) {
+                    (Some(high), _) => self.pair(high)?.into(),
+                    (None, Loc::Stack(_)) => self.frame_value(&ret)?,
+                    (None, Loc::Reg(_)) => self.read_value(&ret, 0)?,
                 };
 
                 llvm!(self.builder.build_return(Some(&value)));
@@ -1323,6 +1726,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         let full_bits = self.env.regs.regs[r.reg].bits;
         let value = self.resize(value, r.bits, false)?;
 
+        self.forget_sign(r.reg);
         self.written.borrow_mut().insert(r.reg, r.bits);
         self.note_register(r, value);
 
@@ -1351,12 +1755,19 @@ impl<'ctx> Lifter<'ctx, '_> {
     /// Writes a register view zero extended to the full register (x86 32-bit writes)
     pub fn write_zext(&self, r: RegRef, value: IntValue<'ctx>) -> Result<()> {
         let full_bits = self.env.regs.regs[r.reg].bits;
+        self.forget_sign(r.reg);
         self.written.borrow_mut().insert(r.reg, value.get_type().get_bit_width());
         self.note_register(RegRef { bits: value.get_type().get_bit_width(), ..r }, value);
 
         let value = self.resize(value, full_bits, false)?;
         llvm!(self.builder.build_store(self.regs[r.reg], value));
         return Ok(());
+    }
+
+    fn forget_sign(&self, reg: Reg) {
+        if self.sign_of.get().is_some_and(|(high, low, _)| reg == high || reg == low) {
+            self.sign_of.set(None);
+        }
     }
 
     pub fn read_reg(&self, reg: Reg) -> Result<IntValue<'ctx>> {
@@ -1430,6 +1841,21 @@ impl<'ctx> Lifter<'ctx, '_> {
                 self.int_to_float(value)?.into()
             }
         });
+    }
+
+    /// A result in a stack slot of the function (its offset is from the stack pointer at the entry)
+    fn frame_value(&self, value: &Value) -> Result<BasicValueEnum<'ctx>> {
+        let Loc::Stack(offset) = value.loc else {
+            bail!("a result in a register is not in the frame");
+        };
+
+        let bits = match value.ty {
+            LType::Int(bits) | LType::Float(bits) => bits,
+            LType::Ptr => self.pointer_bits(),
+        };
+
+        let raw = self.load(self.frame_ptr(offset)?, bits)?;
+        return self.from_int(raw, value.ty);
     }
 
     /// Reads a parameter or return value at its location (stack offsets relative to sp_offset)
@@ -1716,6 +2142,116 @@ impl<'ctx> Lifter<'ctx, '_> {
      * Calls
      */
 
+    /// runtime.deferproc(siz, fn) and runtime.newproc(siz, fn) of the stack ABI of Go: the siz bytes of the arguments of
+    /// the deferred function (or of the new goroutine) follow their own arguments, they are arguments of the call too
+    /// (defer f(x, y) is runtime_deferproc(16, &f, x, y))
+    fn deferred_arguments(&self, target: &CallTarget, mut sig: Signature) -> Signature {
+        let CallTarget::Function(addr) = target else {
+            return sig;
+        };
+
+        let abi = self.env.abi;
+        let name = self.env.program.symbol_at(*addr).map_or("", |s| s.name.as_str());
+
+        if !abi.stack_results || !matches!(name, "runtime.deferproc" | "runtime.newproc") {
+            return sig;
+        }
+
+        let size = self.stored_value(abi.stack_args - abi.return_address).and_then(|v| v.into_int_value().get_zero_extended_constant()).filter(|&s| s <= MAX_DEFERRED_ARGS);
+
+        let Some(size) = size else {
+            return sig;
+        };
+
+        let first = abi.stack_args + 2 * abi.slot_size;
+
+        for word in 0..(size as i64 + abi.slot_size - 1) / abi.slot_size {
+            sig.params.push(Value { loc: Loc::Stack(first + word * abi.slot_size), ty: LType::Int(abi.slot_size as u32 * 8), name: None });
+        }
+
+        return sig;
+    }
+
+    /// A call into a duff device of Go: memset(rdi, 0, n) or memcpy(rdi, rsi, n), the pointers move past the bytes
+    fn duff(&mut self, copy: bool, bytes: u64) -> Result<()> {
+        let (rdi, rsi) = (self.env.regs.reg("rdi"), self.env.regs.reg("rsi"));
+        let destination = self.address(Some(rdi), None, 0)?;
+        let size = self.constant(64, bytes);
+
+        if copy {
+            let source = self.address(Some(rsi), None, 0)?;
+            llvm!(self.builder.build_memcpy(destination, 1, source, 1, size));
+            let moved = llvm!(self.builder.build_int_add(self.read_reg(rsi)?, size, ""));
+            self.write_reg(rsi, moved)?;
+        } else {
+            llvm!(self.builder.build_memset(destination, 1, self.cx.i8_type().const_zero(), size));
+        }
+
+        let moved = llvm!(self.builder.build_int_add(self.read_reg(rdi)?, size, ""));
+        self.write_reg(rdi, moved)?;
+        self.flags = None;
+
+        return Ok(());
+    }
+
+    /// Signature of a call whose callee is not known, from the stack slots around it (ABIs with stack results): its
+    /// arguments are the slots written before it, its results the ones read after it, the first one returned
+    fn slots_signature(&self, sig: Signature, slots: &CallSlots) -> Signature {
+        let slot = self.env.abi.slot_size;
+        let above = self.env.abi.return_address;
+
+        let values = |slots: &BTreeMap<i64, u32>| -> Vec<Value> {
+            let mut values: Vec<Value> = Vec::new();
+
+            for (&offset, &bytes) in slots.iter() {
+                for part in 0..((bytes as i64 + slot - 1) / slot).max(1) {
+                    let bits = (bytes as i64 - part * slot).clamp(1, slot) as u32 * 8;
+                    let loc = Loc::Stack(offset + part * slot + above);
+
+                    if !values.iter().any(|v| v.loc == loc) {
+                        values.push(Value { loc, ty: LType::Int(bits), name: None });
+                    }
+                }
+            }
+
+            values
+        };
+
+        let mut results = values(&slots.results).into_iter();
+        return Signature { params: values(&slots.args), ret: results.next(), outs: results.collect(), variadic: false, guessed: false, ..sig };
+    }
+
+    /// Signature of a call whose callee is not known with an ABI that returns several results in the argument
+    /// registers: the ones read after it up to the last one are results too
+    fn registers_signature(&self, sig: Signature, slots: &CallSlots) -> Signature {
+        let int_args = &self.env.abi.int_args;
+        let last = int_args.iter().rposition(|r| slots.registers.contains(r)).unwrap_or(0);
+        let outs = int_args.get(1..=last).unwrap_or_default().iter().map(|&reg| Value { loc: Loc::Reg(reg), ty: LType::Int(self.env.regs.regs[reg].bits), name: None }).collect();
+        let ret = sig.ret.clone().map(|r| Value { ty: LType::Int(self.env.regs.regs[self.env.abi.int_ret].bits), ..r });
+
+        return Signature { ret, outs, ..sig };
+    }
+
+    fn value_bits(&self, ty: LType) -> u32 {
+        return match ty {
+            LType::Int(bits) | LType::Float(bits) => bits,
+            LType::Ptr => self.pointer_bits(),
+        };
+    }
+
+    /// A variable in the entry block of the function
+    fn entry_alloca(&self, ty: BasicTypeEnum<'ctx>) -> Result<PointerValue<'ctx>> {
+        let entry = self.llvm.get_first_basic_block().context("function without an entry")?;
+        let builder = self.cx.create_builder();
+
+        match entry.get_first_instruction() {
+            Some(first) => builder.position_before(&first),
+            None => builder.position_at_end(entry),
+        }
+
+        return Ok(llvm!(builder.build_alloca(ty, "result")));
+    }
+
     /// Declares a function of the module with a signature
     pub fn declare(&self, sig: &Signature) -> FunctionValue<'ctx> {
         return self.module.get_function(&sig.name).unwrap_or_else(|| {
@@ -1755,7 +2291,21 @@ impl<'ctx> Lifter<'ctx, '_> {
     /// Calls a function: the arguments are read where its signature puts them, the result is written back.
     /// A tail call (a jump) passes the arguments above the return address of the function.
     pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<()> {
+        if let (CallTarget::Function(addr), false) = (target, tail) {
+            if let Some((copy, bytes)) = duff_device(self.env, *addr) {
+                return self.duff(copy, bytes);
+            }
+        }
+
         let sig = (self.env.signature)(target);
+
+        let sig = self.deferred_arguments(target, sig);
+
+        let sig = match self.call_slots.get(&self.addr) {
+            Some(slots) if sig.guessed && !tail && self.env.abi.stack_results => self.slots_signature(sig, slots),
+            Some(slots) if sig.guessed && !tail && self.env.abi.register_results => self.registers_signature(sig, slots),
+            _ => sig,
+        };
 
         // Stack arguments are above the return address the call pushes
         let sp_offset = if tail { 0 } else { -self.env.abi.return_address };
@@ -1766,7 +2316,13 @@ impl<'ctx> Lifter<'ctx, '_> {
             args.push(self.read_value(param, sp_offset)?.into());
         }
 
-        if sig.guessed {
+        // The results after the first one are written to variables of their own (the frame does not escape), their
+        // pointers follow the parameters (before the arguments of a variadic call)
+        let outs: Vec<(PointerValue<'ctx>, &Value)> = sig.outs.iter().map(|out| Ok((self.entry_alloca(llvm_type(self.cx, out.ty))?, out))).collect::<Result<_>>()?;
+        args.extend(outs.iter().map(|(pointer, _)| BasicMetadataValueEnum::from(*pointer)));
+
+        // The arguments of the stack ABIs that return their results on the stack are not known
+        if sig.guessed && !self.env.abi.stack_results {
             let written = self.written.borrow().clone();
             let int_args = &self.env.abi.int_args;
             let count = int_args.iter().rposition(|r| written.contains_key(r)).map_or(0, |i| i + 1);
@@ -1816,6 +2372,28 @@ impl<'ctx> Lifter<'ctx, '_> {
             }
         }
 
+        // The results in stack slots are where the caller passed its arguments, above the return address
+        if let (Some(ret @ Value { loc: Loc::Stack(offset), .. }), Some(value)) = (&sig.ret, call.try_as_basic_value().basic()) {
+            let bits = self.value_bits(ret.ty);
+            let value = self.to_int(value, bits)?;
+            self.store(self.sp_address(offset + sp_offset)?, value)?;
+        }
+
+        for (pointer, out) in outs {
+            let value = llvm!(self.builder.build_load(llvm_type(self.cx, out.ty), pointer, ""));
+
+            match out.loc {
+                Loc::Stack(offset) => {
+                    let value = self.to_int(value, self.value_bits(out.ty))?;
+                    self.store(self.sp_address(offset + sp_offset)?, value)?;
+                }
+                Loc::Reg(reg) => {
+                    let value = self.to_int(value, self.env.regs.regs[reg].bits)?;
+                    self.write_reg(reg, value)?;
+                }
+            }
+        }
+
         if let (Some(ret), Some(value)) = (&sig.ret, call.try_as_basic_value().basic()) {
             if let Loc::Reg(reg) = ret.loc {
                 let bits = self.env.regs.regs[reg].bits;
@@ -1833,6 +2411,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         // The flags and the argument registers do not survive a call
         self.flags = None;
+        self.sign_of.set(None);
         self.written.borrow_mut().clear();
 
         return Ok(());
@@ -2236,5 +2815,49 @@ mod tests {
         assert_eq!(format_conversions("%d %s %5.2f%%\n"), [false, false, true]);
         assert_eq!(format_conversions("%*d %lu %c"), [false, false, false, false]);
         assert!(format_conversions("no conversion").is_empty());
+    }
+
+    fn empty_frame() -> Frame {
+        return Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: -0x40, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::new() };
+    }
+
+    #[test]
+    fn results_above_the_arguments() {
+        // func f(s string) (n int, ok bool): s read at 8 and 16, n written at 24, ok at 32
+        let mut frame = empty_frame();
+        frame.stack_params.extend([8, 16, 24, 32]);
+        let incoming = BTreeMap::from([(8, (8, true)), (16, (8, true)), (24, (8, false)), (32, (1, false))]);
+        stack_results(&mut frame, &incoming, 8);
+
+        assert_eq!(frame.stack_results, BTreeMap::from([(24, 8), (32, 1)]));
+        assert_eq!(frame.stack_params, BTreeSet::from([8, 16]));
+
+        // lea r9, [rsp+0x38]: the result written through a pointer, movups clearing two results at once
+        let mut frame = empty_frame();
+        let incoming = BTreeMap::from([(8, (8, true)), (0x38, (0, false)), (0x40, (16, false))]);
+        stack_results(&mut frame, &incoming, 8);
+
+        assert_eq!(frame.stack_results, BTreeMap::from([(0x38, 8), (0x40, 8), (0x48, 8)]));
+        assert!(frame.high >= 0x50);
+    }
+
+    #[test]
+    fn slots_around_calls() {
+        // The stack pointer of the call is at -0x60: the receiver and an argument written before it, a local saved at
+        // +0x40 before it too, three results read after it, then the local (another local at +0x28 ends the outgoing
+        // area)
+        let call = Around {
+            call: 0x1000,
+            sp: -0x60,
+            before: vec![(-0x20, 8, true), (-0x60, 8, true), (-0x58, 8, true)],
+            after: vec![(-0x50, 8, false), (-0x48, 8, false), (-0x40, 8, false), (-0x20, 8, false)],
+        };
+
+        let writes = BTreeSet::from([-0x60, -0x58, -0x20, -0x38]);
+        let slots = call_slots(&[call], &writes, 8);
+        let slots = &slots[&0x1000];
+
+        assert_eq!(slots.args, BTreeMap::from([(0, 8), (8, 8)]));
+        assert_eq!(slots.results, BTreeMap::from([(0x10, 8), (0x18, 8), (0x20, 8)]));
     }
 }

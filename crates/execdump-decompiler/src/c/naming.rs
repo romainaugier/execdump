@@ -71,7 +71,7 @@ impl Hints {
                 };
 
                 for (arg, param) in args.iter().zip(prototype.ty.params.iter()) {
-                    if let (Expr::Var(var), Some(param)) = (arg, &param.name) {
+                    if let (Expr::Var(var), Some(param)) = (arg, param.name.as_ref().filter(|n| !generated(n))) {
                         self.names.entry(*var).or_insert_with(|| param.clone());
                     }
                 }
@@ -128,6 +128,12 @@ impl Hints {
             }
         }
     }
+}
+
+/// Names given when nothing better is known (a1, v3): they tell nothing about what is passed
+fn generated(name: &str) -> bool {
+    let digits = name.get(1..).unwrap_or_default();
+    return (name.starts_with('a') || name.starts_with('v')) && !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
 }
 
 pub fn name(function: &mut CFunction, ctx: &Context) {
