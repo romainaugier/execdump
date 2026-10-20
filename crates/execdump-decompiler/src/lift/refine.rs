@@ -559,7 +559,7 @@ mod tests {
     fn several_register_results() {
         // Go: return p + 1, 7 in rax and rbx, rcx left as it was is not a third result
         let regs = RegisterFile::new(Architecture::X86_64);
-        let abi = Abi::go(&regs).unwrap();
+        let abi = crate::lang::go::abi::register_abi(&regs).unwrap();
         let discovery = discovery_signature("f", &abi, &regs, &BTreeSet::new(), &std::collections::BTreeMap::new());
         let args: Vec<String> = discovery.params.iter().enumerate().map(|(i, p)| format!("{} %{}", if p.ty == LType::Int(128) { "i128" } else { "i64" }, i)).collect();
         let body = "  %sum = add i64 %0, 1\n  store i64 %sum, ptr @__return_int\n  store i64 7, ptr @__return_reg_1\n  store i64 %2, ptr @__return_reg_2";

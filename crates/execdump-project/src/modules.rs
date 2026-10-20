@@ -2,18 +2,19 @@
  * Modules: the source files the functions are organized in.
  *
  * The initial grouping is found automatically, from the most to the least reliable source:
- * - the Go pclntab, which gives the package of every function and the source file it is in
+ * - the metadata of the language (the Go pclntab gives the package of every function and the source file it is in,
+ *   the paths of the Rust names their module)
  * - the ELF FILE symbols, which give the object file of the local functions
  * - the functions between two functions of the same object file (linkers lay out each object file
  *   contiguously)
- * - the namespaces and classes of the demangled C++ names
+ * - the modules the languages guess from the names (the namespaces and classes of the demangled C++ names)
  * - a default module for the rest
  * The module given by the user to a function always wins.
  */
 
-use execdump_core::demangle::{detect_mangling_scheme, ManglingScheme};
-use execdump_core::program::{Language, Program};
+use execdump_core::program::Program;
 use execdump_decompiler::analysis::Analysis;
+use execdump_decompiler::lang::Languages;
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -22,21 +23,11 @@ pub fn auto_modules(program: &Program, analysis: &Analysis, default: &str) -> BT
     let functions: Vec<u64> = analysis.functions.values().filter(|f| f.thunk.is_none()).map(|f| f.addr).collect();
     let mut modules: BTreeMap<u64, String> = BTreeMap::new();
 
-    // Go: the package of the function and its source file (runtime.gopark of /usr/lib/go/src/runtime/proc.go ->
-    // runtime/proc.go)
-    if program.language == Language::Go {
-        for &addr in functions.iter() {
-            if let Some(module) = program.symbol_at(addr).map(|s| go_module(&s.name, program.source_files.get(&addr).map(String::as_str))) {
-                modules.insert(addr, module);
-            }
-        }
-    }
+    // What the languages know of the modules of their functions
+    let languages = Languages::new(program);
 
-    // Rust paths name the module of a function (its object files are codegen units, not source files)
     for &addr in functions.iter() {
-        let symbol = program.symbol_at(addr).filter(|s| !modules.contains_key(&addr) && matches!(detect_mangling_scheme(&s.name), ManglingScheme::RustLegacy | ManglingScheme::RustV0));
-
-        if let Some(module) = symbol.and_then(|s| rust_module(&s.demangled)) {
+        if let Some(module) = languages.source_module(program, addr) {
             modules.insert(addr, module);
         }
     }
@@ -71,8 +62,8 @@ pub fn auto_modules(program: &Program, analysis: &Analysis, default: &str) -> BT
             continue;
         }
 
-        let class = program.symbol_at(addr).and_then(|s| namespace_module(&s.demangled));
-        modules.insert(addr, class.unwrap_or_else(|| default.to_string()));
+        let guessed = languages.guessed_module(program, addr);
+        modules.insert(addr, guessed.unwrap_or_else(|| default.to_string()));
     }
 
     return modules;
@@ -88,146 +79,6 @@ pub(crate) fn source_module(file: &str) -> String {
     }
 
     return format!("{}.c", name.trim_end_matches(".o"));
-}
-
-/// Package of a Go function: its path to the first dot after the last slash (internal/poll.(*FD).Write ->
-/// internal/poll, example.com/app/sub.Run -> example.com/app/sub)
-fn go_package(name: &str) -> &str {
-    let last_slash = name.rfind('/').map_or(0, |i| i + 1);
-    let end = name[last_slash..].find('.').map_or(name.len(), |i| last_slash + i);
-    return &name[..end];
-}
-
-/// Module of a Go function: its package and the name of its source file (runtime/proc.go), the package alone without
-/// a file
-fn go_module(name: &str, file: Option<&str>) -> String {
-    let clean = |text: &str| -> String { text.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/') { c } else { '_' }).collect() };
-    let package = clean(go_package(name).trim_matches('/'));
-    let package = if package.is_empty() { "go".to_string() } else { package };
-
-    let stem = file.and_then(|f| f.rsplit(['/', '\\']).next()).map(|f| f.strip_suffix(".go").unwrap_or(f)).filter(|f| !f.is_empty());
-
-    return match stem {
-        Some(stem) => format!("{}/{}.go", package, clean(stem)),
-        None => format!("{}.go", package),
-    };
-}
-
-/// ns::Class::method(int) -> ns/Class.cpp
-fn namespace_module(demangled: &str) -> Option<String> {
-    let mut depth = 0;
-    let mut name = String::new();
-
-    // Template arguments and parameters are dropped
-    for c in demangled.chars() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            '(' if depth == 0 => break,
-            _ if depth == 0 => name.push(c),
-            _ => {}
-        }
-    }
-
-    let parts: Vec<&str> = name.split("::").map(str::trim).filter(|p| !p.is_empty()).collect();
-
-    if parts.len() < 2 || parts.iter().any(|p| p.contains(' ') || p.starts_with('{')) {
-        return None;
-    }
-
-    let path: Vec<String> = parts[..parts.len() - 1].iter().map(|p| p.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()).collect();
-
-    return Some(format!("{}.cpp", path.join("/")));
-}
-
-/// Path of a Rust item without its generic arguments, closures and vendor suffix
-fn rust_path(demangled: &str) -> Vec<String> {
-    let text = demangled.split(" (.").next().unwrap_or(demangled);
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0;
-    let mut chars = text.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ':' if depth == 0 && chars.peek() == Some(&':') => {
-                chars.next();
-                parts.push(std::mem::take(&mut current));
-            }
-            _ if depth == 0 => current.push(c),
-            _ => {}
-        }
-    }
-
-    parts.push(current);
-    return parts.into_iter().filter(|p| !p.is_empty() && !p.starts_with('{')).collect();
-}
-
-/// Module of a Rust item: crate::module::Type::method -> crate/module.rs, the impls are in the module of
-/// their type (<alloc::vec::Vec<T> as Drop>::drop -> alloc/vec.rs)
-fn rust_module(demangled: &str) -> Option<String> {
-    let demangled = demangled.trim();
-
-    let path = if let Some(inner) = demangled.strip_prefix('<') {
-        // The type of the impl, or its trait when the type is not a path ([T], &str...)
-        let mut depth = 0;
-        let mut end = inner.len();
-
-        for (i, c) in inner.char_indices() {
-            match c {
-                '<' => depth += 1,
-                '>' if depth == 0 => {
-                    end = i;
-                    break;
-                }
-                '>' => depth -= 1,
-                _ => {}
-            }
-        }
-
-        let (ty, tr) = inner[..end].split_once(" as ").map_or((&inner[..end], None), |(t, r)| (t, Some(r)));
-
-        let primitive = match ty.trim_start_matches(['&', '*']).trim_start_matches("mut ").trim_start_matches("const ") {
-            "str" => Some("str"),
-            "bool" => Some("bool"),
-            "char" => Some("char"),
-            "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => Some("num"),
-            t if t.starts_with('[') => Some("slice"),
-            _ => None,
-        };
-
-        let item = match (primitive, tr) {
-            (Some(_), Some(tr)) => tr,
-            (Some(module), None) => return Some(format!("core/{}.rs", module)),
-            (None, tr) if !ty.starts_with(|c: char| c.is_alphabetic() || c == '_') => tr?,
-            (None, _) => ty,
-        };
-
-        let mut path = rust_path(item);
-        path.push(String::new());
-        path
-    } else {
-        rust_path(demangled)
-    };
-
-    // The item itself, and the types and traits it is in
-    let name = path.last()?.clone();
-    let modules: Vec<&String> = path[..path.len() - 1].iter().take_while(|p| !p.starts_with(|c: char| c.is_uppercase())).collect();
-    let (krate, rest) = modules.split_first()?;
-    let sanitize = |p: &str| -> String { p.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect() };
-
-    if rest.is_empty() {
-        let file = if name == "main" { "main.rs" } else { "lib.rs" };
-        return Some(format!("{}/{}", sanitize(krate), file));
-    }
-
-    let mut module: Vec<String> = modules.iter().map(|p| sanitize(p)).collect();
-    let last = module.pop()?;
-    module.push(format!("{}.rs", last));
-
-    return Some(module.join("/"));
 }
 
 /// Functions of each module, in address order
@@ -319,21 +170,6 @@ mod tests {
     fn names() {
         assert_eq!(source_module("src/net/socket.c"), "socket.c");
         assert_eq!(source_module("crtstuff.o"), "crtstuff.c");
-        assert_eq!(namespace_module("net::Socket::connect(int, char const*)").as_deref(), Some("net/Socket.cpp"));
-        assert_eq!(namespace_module("std::vector<int, std::allocator<int> >::push_back(int const&)").as_deref(), Some("std/vector.cpp"));
-        assert_eq!(namespace_module("main"), None);
-        assert_eq!(rust_module("execdump_tui::views::DisasmView::render").as_deref(), Some("execdump_tui/views.rs"));
-        assert_eq!(rust_module("<alloc::vec::Vec<u8> as core::ops::drop::Drop>::drop").as_deref(), Some("alloc/vec.rs"));
-        assert_eq!(rust_module("<execdump_project::cache::Cache>::put::{closure#0} (.llvm.42)").as_deref(), Some("execdump_project/cache.rs"));
-        assert_eq!(rust_module("<str>::starts_with::<char>").as_deref(), Some("core/str.rs"));
-        assert_eq!(rust_module("<[u8] as core::fmt::Debug>::fmt").as_deref(), Some("core/fmt.rs"));
-        assert_eq!(rust_module("core::ptr::drop_in_place::<alloc::string::String>").as_deref(), Some("core/ptr.rs"));
-        assert_eq!(rust_module("execdump::main").as_deref(), Some("execdump/main.rs"));
-        assert_eq!(go_module("runtime.gopark", Some("/usr/lib/go/src/runtime/proc.go")), "runtime/proc.go");
-        assert_eq!(go_module("internal/poll.(*FD).Write", Some("internal/poll/fd_unix.go")), "internal/poll/fd_unix.go");
-        assert_eq!(go_module("example.com/app/sub.Run", None), "example.com/app/sub.go");
-        assert_eq!(go_module("main.main", Some("C:\\src\\app\\main.go")), "main/main.go");
-        assert_eq!(go_module("type:.eq.main.T", None), "type_.go");
     }
 
     #[test]

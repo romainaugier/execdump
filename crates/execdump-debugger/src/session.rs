@@ -32,8 +32,10 @@ pub struct Config {
     pub debugger: PathBuf,
     pub program: PathBuf,
     pub args: Vec<String>,
-    /// File the output of the program goes to
+    /// File (or terminal) the output of the program goes to
     pub output: PathBuf,
+    /// Terminal the program reads its input from, empty without one
+    pub input: Option<PathBuf>,
     /// Entry point of the binary (its address in the file), to find where it was loaded
     pub link_entry: u64,
     /// Registers read at every stop, the stack pointer among them
@@ -202,7 +204,7 @@ impl Worker {
         let mut backend = backend(config.kind, &config.debugger)?;
         pid.store(backend.pid(), Ordering::Relaxed);
 
-        let stop = backend.launch(&config.program, &config.args, &config.output)?;
+        let stop = backend.launch(&config.program, &config.args, &config.output, config.input.as_deref())?;
 
         if let StopReason::Exited(code) = stop.reason {
             return Err(anyhow!("the program exited before its first instruction (code {:?})", code));

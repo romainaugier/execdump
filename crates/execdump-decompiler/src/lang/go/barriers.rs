@@ -9,7 +9,7 @@
  * The test and the calls go, the stores stay.
  */
 
-use super::ast::{BinaryOp, CFunction, Expr, Stmt, StmtKind, UnaryOp, VarId};
+use crate::c::ast::{BinaryOp, CFunction, Expr, Stmt, StmtKind, UnaryOp, VarId};
 
 const BARRIER_FLAG: &str = "runtime_writeBarrier";
 

@@ -201,7 +201,9 @@ impl App {
             Target::Address(program, addr) => self.goto_address(program, addr),
             Target::CallGraph { program, root, depth, imports, select } => self.open_call_graph_at(program, root, depth, imports, select),
             Target::Module(program, module) => self.open_module(program, &module),
-            Target::Copy(text) => self.copy(&text),
+            Target::Copy(text) => {
+                self.copy(&text);
+            }
         }
     }
 

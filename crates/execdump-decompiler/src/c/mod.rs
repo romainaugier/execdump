@@ -3,7 +3,7 @@
  *
  * ir reads the LLVM function, typing infers the C types of its values, build turns them into
  * statements (out of SSA), structure gives them if/else, loops and switches, naming gives the
- * variables names from their use. golang removes the write barriers of the Go compiler.
+ * variables names from their use. The language of the function rewrites the idioms of its compiler.
  */
 
 pub mod ast;
@@ -12,7 +12,6 @@ mod coalesce;
 mod conditions;
 #[cfg(test)]
 mod differential;
-mod golang;
 pub mod inline;
 pub mod ir;
 mod naming;
@@ -63,6 +62,8 @@ pub struct Context<'a> {
     pub imported: BTreeMap<String, Aggregate>,
     /// Strings the function passes or returns with their length (address -> length)
     pub sized: RefCell<HashMap<u64, u64>>,
+    /// The language of the function
+    pub language: &'a dyn crate::lang::Language,
 }
 
 impl Context<'_> {
@@ -317,9 +318,7 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
     structs.sort_by(|(a, _), (b, _)| (a.len(), a).cmp(&(b.len(), b)));
     let mut function = CFunction { name: f.name.clone(), ret, params: built.params, variadic: f.variadic, vars: built.vars, body, addr, globals: built.globals, inlined: false, storage, structs };
 
-    if ctx.program.language == execdump_core::program::Language::Go {
-        golang::write_barriers(&mut function);
-    }
+    ctx.language.rewrite_c(&mut function);
 
     simplify::simplify(&mut function);
     structure::loops_and_exits(&mut function.body);
@@ -436,7 +435,7 @@ mod tests {
 
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
         assert_eq!(ctx.string_at(0x2003, false).as_deref(), Some("pi"));
@@ -463,9 +462,54 @@ mod tests {
         let prototypes: HashMap<String, Prototype> =
             module.get_functions().filter_map(|f| f.get_name().to_str().ok().and_then(|name| Some((name.to_string(), typedb.function(name)?)))).collect();
         let (globals, noreturn) = (HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         return decompile(&module, function, &ctx, None, 0).print().text;
+    }
+
+    #[test]
+    fn addresses_of_the_frame_are_constants() {
+        // The address of a part of a buffer used twice is not a variable: the accesses through it are the part
+        let code = c_of_ir(
+            "define i64 @f(i64 %0) {
+            entry:
+              %buf = alloca [16 x i8]
+              %field = getelementptr i8, ptr %buf, i64 8
+              store i64 %0, ptr %field
+              %r = call i32 @use(ptr %buf)
+              %v = load i64, ptr %field
+              ret i64 %v
+            }
+            declare i32 @use(ptr)",
+        );
+
+        assert!(code.contains(".f8 = a1;") && code.contains("return v1.f8;") && !code.contains("*v"), "{}", code);
+    }
+
+    #[test]
+    fn buffers_of_the_structs_of_the_headers() {
+        // A buffer of the frame bigger than the struct it is passed as, and one of two of them
+        let code = c_of_ir(
+            "define i32 @f(ptr %0) {
+            entry:
+              %ts = alloca [24 x i8]
+              store i64 1, ptr %ts
+              %ns = getelementptr i8, ptr %ts, i64 8
+              store i64 5, ptr %ns
+              %r = call i32 @nanosleep(ptr %ts, ptr null)
+              %times = alloca [32 x i8]
+              store i64 2, ptr %times
+              %second = getelementptr i8, ptr %times, i64 16
+              store i64 3, ptr %second
+              %u = call i32 @utimensat(i32 0, ptr %0, ptr %times, i32 0)
+              ret i32 %u
+            }
+            declare i32 @nanosleep(ptr, ptr)
+            declare i32 @utimensat(i32, ptr, ptr, i32)",
+        );
+
+        assert!(code.contains("struct timespec v") && code.contains(".tv_sec = 1;") && code.contains(".tv_nsec = 5;"), "{}", code);
+        assert!(code.contains("[0].tv_sec = 2;") && code.contains("[1].tv_sec = 3;") && !code.contains("struct st_"), "{}", code);
     }
 
     #[test]

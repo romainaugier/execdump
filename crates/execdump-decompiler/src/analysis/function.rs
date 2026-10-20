@@ -140,67 +140,10 @@ impl Function {
     }
 }
 
-/// Well known functions that never return
+/// Well known functions that never return, of every language
 pub fn is_noreturn_name(name: &str) -> bool {
-    let name = name.rsplit('!').next().unwrap_or(name);
-    let name = name.split('@').next().unwrap_or(name);
-    let name = name.trim_start_matches('_');
-
-    return matches!(
-        name,
-        "exit" | "Exit" | "abort" | "stack_chk_fail" | "assert_fail" | "assert_rtn" | "libc_start_main" |
-        "cxa_throw" | "cxa_rethrow" | "cxa_bad_cast" | "cxa_bad_typeid" | "Unwind_Resume" | "longjmp" | "siglongjmp" |
-        "longjmp_chk" | "pthread_exit" | "fortify_fail" | "chk_fail" | "err" | "errx" | "verr" | "verrx" |
-        "ExitProcess" | "ExitThread" | "FatalExit" | "FatalAppExitA" | "FatalAppExitW" | "RaiseFailFastException" |
-        "invalid_parameter_noinfo_noreturn" | "report_gsfailure" | "report_rangecheckfailure" | "CxxThrowException" |
-        "ZSt9terminatev" | "ZSt17__throw_bad_allocv" | "ZSt20__throw_length_errorPKc" | "ZSt24__throw_out_of_range_fmtPKcz" |
-        "ZSt19__throw_logic_errorPKc" | "ZSt20__throw_out_of_rangePKc" | "ZSt25__throw_bad_function_callv" |
-        "ZSt28__throw_bad_array_new_lengthv" | "ZSt16__throw_bad_castv" | "ZSt21__throw_bad_variant_accessPKc"
-    ) || name.starts_with("ZN4core9panicking") || name.starts_with("ZN3std7process4exit") || name.starts_with("ZN5alloc5alloc18handle_alloc_error")
-      || name.starts_with("rust_panic") || name.starts_with("rust_begin_unwind") || RUST_STD_PANICS.iter().any(|p| name.starts_with(p))
-      || go_noreturn(name)
+    return crate::lang::is_noreturn_name(name);
 }
-
-/// The Go runtime functions that do not return: the panics, the fatal errors, the exits, and the growth of the stack
-/// (it runs the function again from its start, the jump back after the call is never taken). runtime.panicCheck1
-/// returns (it only throws in the runtime), runtime.exitsyscall too.
-const GO_NORETURN: &[&str] = &[
-    "runtime.gopanic",
-    "runtime.throw",
-    "runtime.fatal",
-    "runtime.fatalthrow",
-    "runtime.fatalpanic",
-    "runtime.goexit",
-    "runtime.goexit0",
-    "runtime.goexit1",
-    "runtime.Goexit",
-    "runtime.exit",
-    "runtime.abort",
-    "os.Exit",
-    "syscall.Exit",
-];
-
-/// Prefixes of the families of panics (runtime.panicIndex, runtime.goPanicSliceB, runtime.panicdottypeE...)
-const GO_NORETURN_PREFIXES: &[&str] = &["runtime.goPanic", "runtime.panic", "runtime.morestack"];
-
-fn go_noreturn(name: &str) -> bool {
-    let name = name.strip_suffix(".abi0").unwrap_or(name);
-
-    if GO_NORETURN.contains(&name) {
-        return true;
-    }
-
-    return GO_NORETURN_PREFIXES.iter().any(|p| name.starts_with(p)) && !name.starts_with("runtime.panicCheck") && !name.contains(".func");
-}
-
-/// The functions of std::panicking that panic (set_hook, take_hook, panic_count::... return)
-const RUST_STD_PANICS: &[&str] = &[
-    "ZN3std9panicking11begin_panic",
-    "ZN3std9panicking15begin_panic_fmt",
-    "ZN3std9panicking19begin_panic_handler",
-    "ZN3std9panicking20rust_panic_with_hook",
-    "ZN3std9panicking23rust_panic_without_hook",
-];
 
 /// Context shared by all function recoveries
 pub struct RecoveryContext<'a> {
@@ -738,15 +681,6 @@ fn compute_noreturn(ctx: &RecoveryContext, function: &Function) -> bool {
 mod tests {
     use super::*;
     use execdump_core::program::{Perms, Region};
-
-    #[test]
-    fn rust_panics_never_return() {
-        assert!(is_noreturn_name("_ZN3std9panicking20rust_panic_with_hook17h0123456789abcdefE"));
-        assert!(is_noreturn_name("_ZN3std9panicking19begin_panic_handler17h0123456789abcdefE"));
-        assert!(is_noreturn_name("_ZN4core9panicking9panic_fmt17h0123456789abcdefE"));
-        assert!(!is_noreturn_name("_ZN3std9panicking8set_hook17hdba0096e3f6ed0afE"));
-        assert!(!is_noreturn_name("_ZN3std9panicking11panic_count17is_zero_slow_path17h0123456789abcdefE"));
-    }
 
     fn program(arch: Architecture, code: &[u8]) -> Program {
         let mut program = Program::default();

@@ -9,6 +9,8 @@ use super::Context;
 
 use crate::types::CType;
 
+use std::collections::HashMap;
+
 const ROUNDS: usize = 6;
 
 pub fn base_type(ty: Ty) -> CType {
@@ -50,6 +52,8 @@ struct Inference<'a> {
     webs: Vec<Vec<ValueId>>,
     /// (used as signed, used as unsigned)
     signs: Vec<(bool, bool)>,
+    /// The places of the frame stored to once: the value stored, the values loaded from them
+    slots: Vec<(ValueId, Vec<ValueId>)>,
     changed: bool,
 }
 
@@ -74,8 +78,13 @@ impl Inference<'_> {
             None => true,
             Some(CType::Void) | Some(CType::Unknown(_)) => !matches!(to, CType::Void | CType::Unknown(_)),
             Some(current) if is_pointer(&to) && !is_pointer(current) && matches!(current, CType::Int { bits: 64, .. }) => true,
-            // A struct a callee recovered is the type of what is pointed to (its fields are the accesses)
-            Some(current) if matches!(&to, CType::Struct(name) if name.starts_with("st_")) && !matches!(current, CType::Struct(_) | CType::Union(_)) => true,
+            // A struct a callee recovered is the type of what is pointed to (its fields are the accesses), a struct of
+            // the headers the one of a buffer of the frame passed to a function
+            Some(current) if !matches!(current.unqualified(), CType::Struct(_) | CType::Union(_)) && match to.unqualified() {
+                CType::Struct(name) if name.starts_with("st_") => true,
+                CType::Struct(name) | CType::Union(name) => self.f.allocated.contains_key(&id) && self.ctx.typedb.aggregates.contains_key(name),
+                _ => false,
+            } => true,
             // A pointer to anything becomes a pointer to something (void ** to const char **)
             Some(CType::Pointer(inner)) if matches!(**inner, CType::Void) => pointee(&to).is_some_and(|p| !matches!(p.unqualified(), CType::Void) && !p.is_unknown()),
             _ => false,
@@ -247,6 +256,27 @@ impl Inference<'_> {
     fn round(&mut self) {
         let f = self.f;
 
+        // A pointer to a struct of the type database kept in the frame (the variables of Go live there between the
+        // calls) is the same pointer loaded
+        let aggregates = &self.ctx.typedb.aggregates;
+        let aggregate = |ty: &CType| pointee(ty).filter(|p| matches!(p.unqualified(), CType::Struct(n) | CType::Union(n) if aggregates.contains_key(n))).cloned();
+
+        for i in 0..self.slots.len() {
+            let stored = self.slots[i].0;
+
+            for j in 0..self.slots[i].1.len() {
+                let loaded = self.slots[i].1[j];
+
+                if let Some(to) = aggregate(&self.types[stored]) {
+                    self.set_pointer(loaded, to);
+                }
+
+                if let Some(to) = aggregate(&self.types[loaded]) {
+                    self.set_pointer(stored, to);
+                }
+            }
+        }
+
         for id in 0..f.values.len() {
             let ValueKind::Inst { op, operands, callee, pred, .. } = &f.values[id].kind else {
                 continue;
@@ -298,6 +328,17 @@ impl Inference<'_> {
                     }
                 }
                 (Op::Call, args) => {
+                    // What the language knows a call returns a pointer to from its arguments (the type descriptor given
+                    // to an allocation of Go)
+                    let globals: Vec<Option<u64>> = args.iter().map(|&a| match &f.values[a].kind {
+                        ValueKind::Global(name) => self.ctx.globals.get(name).copied(),
+                        _ => None,
+                    }).collect();
+
+                    if let Some(to) = callee.as_deref().and_then(|c| self.ctx.language.returned_pointee(self.ctx.program, c, &globals)) {
+                        self.set_pointer(id, to);
+                    }
+
                     let Some(prototype) = callee.as_ref().and_then(|c| self.ctx.prototype(c)) else {
                         continue;
                     };
@@ -393,7 +434,7 @@ pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
     }
 
     let signs = vec![(false, false); f.values.len()];
-    let mut inference = Inference { f, ctx, types, webs: webs(f), signs, changed: true };
+    let mut inference = Inference { f, ctx, types, webs: webs(f), signs, slots: slots(f), changed: true };
 
     for _ in 0..ROUNDS {
         if !inference.changed {
@@ -426,6 +467,68 @@ pub fn infer(f: &Func, ctx: &Context, params: &[CType]) -> Vec<CType> {
     }
 
     return inference.types;
+}
+
+/// Place of the frame an address is at: its variable and the offset in it
+pub(super) fn frame_place(f: &Func, mut id: ValueId) -> Option<(ValueId, i64)> {
+    let mut offset = 0i64;
+
+    loop {
+        if f.allocated.contains_key(&id) {
+            return Some((id, offset));
+        }
+
+        match &f.values[id].kind {
+            ValueKind::Inst { op: Op::BitCast | Op::IntToPtr | Op::PtrToInt, operands, .. } => id = operands[0],
+            ValueKind::Inst { op: Op::Add, operands, .. } => {
+                offset = offset.checked_add(f.int(operands[1])? as i64)?;
+                id = operands[0];
+            }
+            ValueKind::Inst { op: Op::Gep, operands, scales, .. } => {
+                for (&index, &scale) in operands[1..].iter().zip(scales.iter()) {
+                    offset = offset.checked_add((f.int(index)? as i64).checked_mul(scale)?)?;
+                }
+
+                id = operands[0];
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// The pointer-sized places of the frame stored to once, with the loads of the same width from them
+fn slots(f: &Func) -> Vec<(ValueId, Vec<ValueId>)> {
+    let mut places: HashMap<(ValueId, i64), (Vec<ValueId>, Vec<ValueId>)> = HashMap::new();
+
+    for (id, value) in f.values.iter().enumerate() {
+        match &value.kind {
+            ValueKind::Inst { op: Op::Store, operands, .. } => {
+                if let Some(place) = frame_place(f, operands[1]) {
+                    places.entry(place).or_default().0.push(operands[0]);
+                }
+            }
+            ValueKind::Inst { op: Op::Load, operands, .. } => {
+                if let Some(place) = frame_place(f, operands[0]) {
+                    places.entry(place).or_default().1.push(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut slots: Vec<(ValueId, Vec<ValueId>)> = places
+        .into_values()
+        .filter_map(|(stores, loads)| match stores.as_slice() {
+            [stored] if !loads.is_empty() && matches!(f.values[*stored].ty, Ty::Ptr | Ty::Int(64)) => {
+                let loads: Vec<ValueId> = loads.into_iter().filter(|&l| f.values[l].ty == f.values[*stored].ty).collect();
+                Some((*stored, loads))
+            }
+            _ => None,
+        })
+        .collect();
+
+    slots.sort();
+    return slots;
 }
 
 /// The pointers stored through, and the ones they are computed from, do not point to const data (a const

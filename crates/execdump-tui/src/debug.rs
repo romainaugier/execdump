@@ -5,6 +5,10 @@
  * where the decompiler says they are at that address (a register, a stack slot from the stack pointer at the entry
  * of the function), the registers, the call stack, the breakpoints and the output of the program.
  *
+ * The program runs on a pseudo-terminal: its output is there as it writes it (the C library flushes a terminal at
+ * each line, a file only when its buffer is full), what :input sends is its input. Without one (Windows) its output
+ * goes to a file and its input is empty.
+ *
  * Steps go by lines of C: the program continues to the addresses of the lines of the function (in its frame, not in
  * a recursive call) and to the return address; a step into the calls also stops at the entry of the functions it
  * calls. A function not decompiled yet has no lines: its steps are instructions.
@@ -17,9 +21,12 @@ use super::*;
 
 use crate::views::debug::DebugView;
 
+use anyhow::bail;
+
 use execdump_debugger::session::Config as SessionConfig;
 use execdump_debugger::{find, Event, Kind, Request, Run, Session, Snapshot, Until};
 use execdump_decompiler::analysis::function::CallTarget;
+use execdump_decompiler::lang::Languages;
 use execdump_decompiler::lift::regs::RegisterFile;
 use execdump_decompiler::storage::{location_at, stack_offset_at, Place, Shape};
 
@@ -29,6 +36,8 @@ use std::collections::{BTreeSet, HashSet};
 const TEXT_READ: usize = 96;
 /// Lines of the output of the program kept for the view
 const OUTPUT_LINES: usize = 200;
+/// Bytes of the end of the output the lines are read from
+const OUTPUT_TAIL: usize = 64 << 10;
 
 /// The [debugger] section of ~/.execdumprc
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -71,7 +80,12 @@ pub(crate) struct Debugger {
     /// Memory read since the stop
     memory: Vec<(u64, Vec<u8>)>,
     requested: HashSet<u64>,
-    pub output: PathBuf,
+    /// The file the output goes to without a terminal
+    pub output: Option<PathBuf>,
+    #[cfg(unix)]
+    terminal: Option<execdump_debugger::terminal::Terminal>,
+    /// The end of the output
+    output_bytes: Vec<u8>,
     pub output_tail: Vec<String>,
     output_len: u64,
     pub regs: RegisterFile,
@@ -80,6 +94,8 @@ pub(crate) struct Debugger {
     /// The first stop: at the breakpoints, or at main (the entry without it)
     first_stop: Option<u64>,
     pub last_error: Option<String>,
+    /// The languages of the program: the calls a step goes over
+    languages: Languages,
 }
 
 /// A variable of the function of the selected frame, its location and its value there
@@ -164,9 +180,28 @@ impl Debugger {
         }
     }
 
-    /// The last lines of the output of the program, when the file grew
+    /// The last lines of the output of the program, when it wrote some
     fn refresh_output(&mut self) {
-        let Ok(len) = std::fs::metadata(&self.output).map(|m| m.len()) else {
+        #[cfg(unix)]
+        if let Some(terminal) = self.terminal.as_ref() {
+            let bytes = terminal.read();
+
+            if bytes.is_empty() {
+                return;
+            }
+
+            self.output_bytes.extend(bytes);
+            let excess = self.output_bytes.len().saturating_sub(OUTPUT_TAIL);
+            self.output_bytes.drain(..excess);
+            self.output_tail = terminal_lines(&self.output_bytes, OUTPUT_LINES);
+            return;
+        }
+
+        let Some(output) = self.output.as_ref() else {
+            return;
+        };
+
+        let Ok(len) = std::fs::metadata(output).map(|m| m.len()) else {
             return;
         };
 
@@ -176,21 +211,71 @@ impl Debugger {
 
         self.output_len = len;
 
-        let Ok(bytes) = std::fs::read(&self.output) else {
+        let Ok(bytes) = std::fs::read(output) else {
             return;
         };
 
-        let start = bytes.len().saturating_sub(64 << 10);
-        let text = String::from_utf8_lossy(&bytes[start..]);
-        let lines: Vec<&str> = text.lines().collect();
-        self.output_tail = lines[lines.len().saturating_sub(OUTPUT_LINES)..].iter().map(|l| l.to_string()).collect();
+        self.output_tail = terminal_lines(&bytes[bytes.len().saturating_sub(OUTPUT_TAIL)..], OUTPUT_LINES);
+    }
+
+    /// A line of input of the program
+    pub fn input(&mut self, text: &str) -> Result<()> {
+        #[cfg(unix)]
+        if let Some(terminal) = self.terminal.as_mut() {
+            return terminal.write(format!("{}\n", text).as_bytes());
+        }
+
+        let _ = text;
+        bail!("the program has no terminal to send its input to");
     }
 }
 
 impl Drop for Debugger {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.output);
+        if let Some(output) = self.output.as_ref() {
+            let _ = std::fs::remove_file(output);
+        }
     }
+}
+
+/// The last lines of what a program wrote to its terminal: the escape sequences (colors, cursor moves) left out, a
+/// carriage return starts its line again (progress bars), the line not ended yet (a prompt) is the last one
+pub(crate) fn terminal_lines(bytes: &[u8], max: usize) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\n' => lines.push(std::mem::take(&mut line)),
+            '\r' if chars.peek() == Some(&'\n') => {}
+            '\r' => line.clear(),
+            // CSI: ESC [ parameters, then a final byte; OSC: ESC ] text, then BEL or ESC \
+            '\x1b' => match chars.next() {
+                Some('[') => {
+                    while chars.next().is_some_and(|c| !('@'..='~').contains(&c)) {}
+                }
+                Some(']') => {
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\t' => line.push_str("    "),
+            c if c.is_control() => {}
+            c => line.push(c),
+        }
+    }
+
+    if !line.is_empty() {
+        lines.push(line);
+    }
+
+    return lines.split_off(lines.len().saturating_sub(max));
 }
 
 /// A value of a shape from its little endian bytes
@@ -265,14 +350,27 @@ impl App {
 
         let regs = RegisterFile::new(program_ref.architecture());
         let (read, shown, stack_pointer) = register_names(&regs);
-        let output = std::env::temp_dir().join(format!("execdump-{}-output.txt", std::process::id()));
-        let _ = std::fs::remove_file(&output);
+        // A terminal for the program, else a file for its output
+        #[cfg(unix)]
+        let terminal = execdump_debugger::terminal::Terminal::open().ok();
+        #[cfg(unix)]
+        let tty = terminal.as_ref().map(|t| t.path.clone());
+        #[cfg(not(unix))]
+        let tty: Option<PathBuf> = None;
 
-        let config = SessionConfig { kind, debugger: path, program: self.exec_path.clone(), args, output: output.clone(), link_entry: entry, registers: read, stack_pointer };
+        let file = tty.is_none().then(|| std::env::temp_dir().join(format!("execdump-{}-output.txt", std::process::id())));
 
-        // At the first breakpoint, or at main (the entry point without it)
-        // The main of the language (main.main of Go: its main is the entry of the runtime), else the one of C
-        let names: &[&str] = if program_ref.language == execdump_core::program::Language::Go { &["main.main", "main"] } else { &["main"] };
+        if let Some(file) = file.as_ref() {
+            let _ = std::fs::remove_file(file);
+        }
+
+        let output = tty.clone().or(file.clone()).unwrap_or_default();
+        let config = SessionConfig { kind, debugger: path, program: self.exec_path.clone(), args, output, input: tty, link_entry: entry, registers: read, stack_pointer };
+
+        // At the first breakpoint, or at main (the entry point without it): the main of the language (main.main of Go:
+        // its main is the entry of the runtime), else the one of C
+        let languages = Languages::new(&program_ref);
+        let names = languages.entry_points();
         let main = names.iter().find_map(|name| self.analyses[program].as_ref().and_then(|a| a.function_by_name(name))).map(|f| f.addr);
         let first_stop = if self.breakpoints.iter().any(|(p, _)| *p == program) { None } else { Some(main.unwrap_or(entry)) };
 
@@ -285,13 +383,17 @@ impl App {
             snapshot: None,
             memory: Vec::new(),
             requested: HashSet::new(),
-            output,
+            output: file,
+            #[cfg(unix)]
+            terminal,
+            output_bytes: Vec::new(),
             output_tail: Vec::new(),
             output_len: 0,
             regs,
             shown_registers: shown,
             first_stop,
             last_error: None,
+            languages,
         });
 
         self.show_debug_view();
@@ -410,7 +512,7 @@ impl App {
         if into {
             for call in function.calls.iter() {
                 if let CallTarget::Function(callee) = call.target {
-                    let code = project.analysis.functions.get(&callee).is_some_and(|f| f.thunk.is_none() && !execdump_core::golang::grows_stack(&f.name));
+                    let code = project.analysis.functions.get(&callee).is_some_and(|f| f.thunk.is_none() && !debugger.languages.steps_over(&f.name));
 
                     if code && !stops.iter().any(|(a, _)| *a == callee + bias) {
                         stops.push((callee + bias, None));
@@ -824,5 +926,12 @@ mod tests {
         assert_eq!(format_value(Shape::Pointer { text: false }, &[0; 8], None), "NULL");
         assert_eq!(format_value(Shape::Bytes(3), &[1, 2, 255], None), "01 02 ff");
         assert_eq!(format_value(Shape::Text(8), b"hello\0\x01\x02", None), "\"hello\"");
+    }
+
+    #[test]
+    fn lines_of_a_terminal() {
+        let text = b"\x1b[1;32mok\x1b[0m\r\nprogress 10%\rprogress 100%\r\n\x1b]0;title\x07name: ";
+        assert_eq!(terminal_lines(text, 10), ["ok", "progress 100%", "name: "]);
+        assert_eq!(terminal_lines(b"a\nb\nc\n", 2), ["b", "c"]);
     }
 }

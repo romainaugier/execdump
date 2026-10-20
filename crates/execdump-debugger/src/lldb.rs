@@ -164,11 +164,12 @@ fn register_value(text: &str) -> Option<u128> {
 }
 
 impl Backend for Lldb {
-    fn launch(&mut self, program: &Path, args: &[String], output: &Path) -> Result<Stop> {
+    fn launch(&mut self, program: &Path, args: &[String], output: &Path, input: Option<&Path>) -> Result<Stop> {
         self.command(&format!("target create {}", quote(&program.to_string_lossy())))?;
 
         let output = quote(&output.to_string_lossy());
-        let input = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        let input = input.map_or(empty.to_string(), |i| quote(&i.to_string_lossy()));
         let args: Vec<String> = args.iter().map(|a| quote(a)).collect();
         let separator = if args.is_empty() { "" } else { " -- " };
 

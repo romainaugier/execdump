@@ -7,7 +7,8 @@
  * accessed, the optimizations then turn the slots that do not escape into values:
  *
  * - an address that escapes (taken, passed, indexed by a variable) is the start of an object that
- *   extends to the next escaping address, or to the end of the frame: what it points to may be
+ *   extends to the next escaping address, or to the end of the frame (unless the callee it is passed to is known
+ *   to access a number of bytes from it: a sized buffer, the buffers of a runtime): what it points to may be
  *   reached from it, the slot keeps it whole. The slot of the stack protector canary (removed
  *   before, see protector.rs) ends the objects below it too: the buffers it protects end there, and
  *   the return address ends the locals (the arguments are above it)
@@ -59,7 +60,7 @@ struct Slot {
 /// Splits the byte arrays of the stack frame of a function, true when one was split. The bounds are
 /// offsets in frames where the objects end (the slots of the stack protector canary), the saved slots are
 /// offsets from the stack pointer at the entry where they end too.
-pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValueRef, u64)], saved: &[i64]) -> bool {
+pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValueRef, u64)], saved: &[i64], extent: &dyn Fn(&str, u32) -> Option<u64>) -> bool {
     let mut split = false;
 
     unsafe {
@@ -74,7 +75,7 @@ pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValu
                 ends.extend([0].iter().chain(saved.iter()).map(|&offset| offset - start).filter(|&index| index > 0 && (index as u64) < size).map(|index| index as u64));
             }
 
-            split |= split_one(module, frame, &ends);
+            split |= split_one(module, frame, &ends, extent);
         }
     }
 
@@ -298,7 +299,7 @@ unsafe fn constant_bytes(value: LLVMValueRef) -> Option<Vec<u8>> {
 }
 
 /// How an instruction accesses the frame through a pointer at an offset
-unsafe fn access(user: LLVMValueRef, pointer: LLVMValueRef, offset: u64, layout: LLVMTargetDataRef) -> Access {
+unsafe fn access(user: LLVMValueRef, pointer: LLVMValueRef, offset: u64, layout: LLVMTargetDataRef, extent: &dyn Fn(&str, u32) -> Option<u64>) -> Access {
     let escape = Access { offset, size: 1, kind: Kind::Escape, ty: None };
 
     unsafe {
@@ -330,6 +331,16 @@ unsafe fn access(user: LLVMValueRef, pointer: LLVMValueRef, offset: u64, layout:
                         if let Some(length) = constant(LLVMGetOperand(user, length)).filter(|&n| n > 0) {
                             return Access { offset, size: length as u64, kind: if writes { Kind::Store(None) } else { Kind::Load }, ty: None };
                         }
+                    }
+                }
+
+                // The bytes the language knows a function accesses from an argument (the 32 bytes of the buffers of the
+                // runtime of Go): the object ends there
+                let arguments = LLVMGetNumArgOperands(user);
+
+                if let Some(index) = (0..arguments).find(|&i| LLVMGetOperand(user, i) == pointer) {
+                    if let Some(size) = extent(&name, index).filter(|&n| n > 0) {
+                        return Access { offset, size, kind: Kind::Store(None), ty: None };
                     }
                 }
 
@@ -487,7 +498,7 @@ unsafe fn fold_integer_addresses(frame: LLVMValueRef, size: u64) {
     }
 }
 
-unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSet<u64>) -> bool {
+unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSet<u64>, extent: &dyn Fn(&str, u32) -> Option<u64>) -> bool {
     unsafe {
         let Some(size) = byte_array(LLVMGetAllocatedType(frame)) else {
             return false;
@@ -523,13 +534,13 @@ unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSe
                 let mut indices = Vec::new();
 
                 for inner in users(user) {
-                    accesses.push(access(inner, user, offset, layout_data));
+                    accesses.push(access(inner, user, offset, layout_data, extent));
                     indices.push(accesses.len() - 1);
                 }
 
                 pointers.push((user, offset, indices));
             } else {
-                accesses.push(access(user, frame, 0, layout_data));
+                accesses.push(access(user, frame, 0, layout_data, extent));
             }
         }
 

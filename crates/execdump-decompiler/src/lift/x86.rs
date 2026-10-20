@@ -955,6 +955,11 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         Op::Imm(..) => false,
     };
 
+    // The long nops have a memory operand they do not read
+    if mnemonic.starts_with("nop") {
+        return None;
+    }
+
     // Implicit uses of the accumulator (rax is the first register of both files)
     let accumulator = reg == 0;
 
@@ -985,7 +990,11 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         return if accumulator && mnemonic == "call" { Some(false) } else { None };
     }
 
-    let write_only = matches!(mnemonic, "mov" | "movabs" | "lea" | "movzx" | "movsx" | "movsxd" | "pop") || mnemonic.starts_with("set") || mnemonic.starts_with("cvt");
+    let write_only = matches!(mnemonic, "mov" | "movabs" | "lea" | "movzx" | "movsx" | "movsxd" | "pop" | "movd" | "movq" | "movbe")
+        || matches!(mnemonic, "popcnt" | "lzcnt" | "tzcnt" | "andn" | "shlx" | "shrx" | "sarx" | "rorx" | "pdep" | "pext")
+        || (mnemonic == "imul" && insn.ops.len() == 3)
+        || mnemonic.starts_with("set")
+        || mnemonic.starts_with("cvt");
 
     // xor eax, eax clears the register without reading it
     let zeroing = matches!(mnemonic, "xor" | "sub") && insn.ops.get(1) == insn.ops.first();

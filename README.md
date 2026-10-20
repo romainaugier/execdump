@@ -230,7 +230,7 @@ Disassembly:
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
   - :heavy_check_mark: Shared libraries a binary needs, found where the loader looks for them (ELF: RPATH, LD_LIBRARY_PATH, RUNPATH, ld.so.conf, default directories; PE: next to the binary, PATH; Mach-O: @rpath, @loader_path, @executable_path)
-  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...)
+  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...). Each language adds a database of its runtime to the programs that have its code (`data/typedb/go.h`: the strings, slices, interfaces, itabs and types of Go, the allocations, conversions, channels and maps of the runtime, `fmt`, `strings`, `strconv`...; `data/typedb/rust.h`: `&str`, the allocator, the panics)
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
@@ -256,6 +256,21 @@ Analysis:
     both next to each other (the fields of a `&str`), returns them in a pair of registers, or returns the pointer and
     writes the length to its first result pointer (Go): `write_all(out, "world", 5)`
     instead of `write_all(out, "worldsuccesswarning: low disk space...", 5)`, `return "unknown" | ((__int128)7 << 64);`
+  - :heavy_check_mark: Languages (`crates/execdump-decompiler/src/lang`): what the decompiler knows of each language other
+    than C is a module of its own behind one trait, with a hook per stage (the functions that do not return, the calling
+    convention and the signatures of the runtime, the calls the lifter turns into operations of its own, the idioms in
+    the C, the modules of the functions, where the debugger stops first and which calls a step goes over). The built-in
+    languages are Go, Rust, C++ (its demangled prototypes, the classes they name, its exceptions, the modules of its
+    namespaces) and C, the default of every hook. A language has a type database of its runtime, its prototypes are
+    the ones of the C names of its functions (`runtime_makeslice` of `runtime.makeslice`) and become signatures with
+    its calling convention, checked against what the binary says of the function (the size of the arguments of the
+    pclntab: a prototype of another version of the runtime is not used), its parameters name the variables passed to
+    them: `const char *str = main_level(v1, &v4); int64_t len = v4; int64_t val = main_add(v1, 4); void *v9 =
+    runtime_convTstring(str, len); void *v10 = runtime_convT64(val);`. Each function belongs to a language, with its hooks and its calling
+    convention: the functions of the pclntab of a Go program are Go, the other ones are C (the C code of cgo has the
+    calling convention of the platform: `_cgo_try_pthread_create(pthread_t *newthread, const pthread_attr_t *attr,
+    ...)` retries `pthread_create` in a loop instead of reading the registers of Go). The bytecode languages (.NET,
+    Java) will be front ends of their own
   - :heavy_check_mark: Go binaries (PE, ELF and Mach-O, x86_64 and aarch64, stripped or not): the pclntab the Go runtime
     keeps (found by its section, else by its header in the data; layouts of Go 1.2 to 1.15, 1.16/1.17 and 1.18 and
     later) names every function, gives its bounds and its source file. The functions are in modules by package and
@@ -266,7 +281,9 @@ Analysis:
     returns its first result, the next ones are written through pointers after its parameters, its callers pass the
     address of variables of their own: `n = fmt_Fprint(w, v, a, len, &v1, &v2)`, `*a2 = 5; return "quiet";`. The
     results kept are the ones the callers read (the pclntab bounds them with the size of the arguments and results of
-    each function: `main.main` has none). The calls to unknown functions (methods of interfaces, closures) pass the
+    each function in the stack ABI, the size of the spill slots of the parameters in the register ABI: `main.main`, the
+    `init` functions of the packages and the functions without parameters called only through function values have
+    none). The calls to unknown functions (methods of interfaces, closures) pass the
     stack slots written before them and return the ones read after them (in the stack ABI), the registers read after
     them (in the register ABI). The assembly helpers of the runtime that take registers in the stack ABI
     (`runtime.cmpbody`) get them as parameters. The growth of the stack (`cmp rsp, [r14+0x10]; jbe` to
@@ -275,7 +292,12 @@ Analysis:
     runtime_writebarrierptr(&p->f0, v); }` is `p->f0 = v;`). The calls into `runtime.duffzero` and `runtime.duffcopy`
     are `memset` and `memcpy` of the bytes left before their return, `runtime.deferproc` of Go 1.9 returns in rax and
     takes the arguments of the deferred function after its own (`runtime_deferproc(8, &f, &err)`). Go strings are a
-    pointer and a length like the Rust ones.
+    pointer and a length like the Rust ones. The type descriptors are named after their type (the module data of the
+    runtime bounds them, each names its type: `&type_slice_uint8` for `[]uint8`, `&type_ptr_main_T` for `*main.T`),
+    the itabs after their interface and type in the stripped binaries too (`&go_itab__os_File_io_Writer`), and the
+    allocations of the runtime return a pointer to the type of their descriptor: `struct go_slice *v22 =
+    runtime_newobject(&type_slice_uint8); ... v3->len`. `main.main` and the `init` functions of the packages have no
+    parameters.
 
 Decompiler:
   - :heavy_check_mark: CFG recovery
@@ -374,7 +396,10 @@ Decompiler:
     types a callee guessed from its uses stay its own. A source tree has the structs in `include/structs.h`. The low
     bytes of an integer field read are a conversion (`(char)p->flags`), not an access through a cast pointer. A buffer of the stack frame accessed at constant offsets is a struct
     of its size (`v20.f8`), accessed whole only it is a variable of that type (`char *endptr`, not
-    `*(char **)&endptr[0]`)
+    `*(char **)&endptr[0]`). Passed as a struct of the type database and accessed inside it only, it is a variable
+    of that struct even when the frame gives it more bytes (`struct timespec v1; v1.tv_nsec = 5; nanosleep(&v1,
+    NULL);`), accessed in its elements an array of it (`struct go_eface a[2]; a[1].type = &type_int;`). A pointer to
+    a struct of the type database stored once in the frame is that pointer when it is loaded back
   - :heavy_check_mark: Variable recovery (names from their use). The phis are variables assigned on the edges that lead
     to them: a phi and the variables flowing into it that are never alive at the same time (liveness on the
     variables, an inlined expression is read where the statement it is part of is, a phi reads its values at the
@@ -396,8 +421,12 @@ Decompiler:
     escaping address starts a buffer that extends to the next one, to the registers the prologue saves or to the
     return address (what it points to stays reachable from it, so the code stays correct, the arguments are above
     the return address), the scalars below the buffers become values. A buffer given with its size to a known function (`fgets(buf, 9, f)`,
-    `read`, `memset`, `snprintf`...) ends there, the address of the arguments a realigned frame keeps is not part of
-    it. A buffer that only escaped through a store
+    `read`, `memset`, `snprintf`...) ends there, so does a buffer given to a function of a runtime known to access a
+    number of bytes from it (the 32-byte `tmpBuf` of `runtime.stringtoslicebyte` and the other conversions and
+    concatenations of strings of Go: the variables after it become values), the address of the arguments a realigned
+    frame keeps is not part of it. The address of a variable of the frame is a constant: it is not a variable of its
+    own, the accesses through it are accesses to the variable (`v6.f1 = v5;`, not `int64_t *v10 = &v6.f1; *v10 =
+    v5;`). A buffer that only escaped through a store
     the split made dead is split once optimized (gcc's realigned frame of `main` keeps the address of the arguments
     with the saved registers: they are `argc` and `argv` again). The addresses computed from a copy of the
     stack pointer (`mov rdi, rsp`) are addresses in the frame too. Strings written on the stack by stores of
@@ -447,7 +476,7 @@ Decompiler:
     are exact: the UTF-8 text is its characters (`"Vérification"`), the control characters and the bytes that are not
     UTF-8 are escapes (a literal is split after an escape followed by a digit, `"\xff" "1"`). In the TUI, `gs` on a
     literal (`:string`) shows it as text, as a C literal of ASCII characters (`"V\xc3\xa9rification"`, the offsets the
-    code uses), as bytes, as a shell argument (`$'...'`) and as Python bytes, `Enter` copies one (OSC 52). Printable
+    code uses), as bytes, as a shell argument (`$'...'`) and as Python bytes, `Enter` copies one (see below). Printable
     characters stored in chars are character literals
   - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
   - :heavy_check_mark: LLM rewrite (`W` or `:llm rewrite` in the TUI): the function rewritten as clear C (structured control flow, no needless temporaries, meaningful names) with the same behavior, as an edit to review; the proposal says when the rewrite lost the function name, a call or the balance of its braces
@@ -580,6 +609,9 @@ In the C code (a module, every function of it one after the other; functions not
 | `Space` / `D` | Control flow graph of the function, on the block of the line |
 | `i` `a` `A` `I` `o` `O` | Insert mode (arrows, `Enter`, `Backspace`, `Delete`, `Tab`), `Esc` goes back to the normal mode |
 | `dd` | Delete the line (a count deletes several: `3dd`) |
+| `v` / `V` | Visual mode, by characters / by lines: the moves extend the selection from where it started, `v` and `V` switch between the two (the same key leaves it), `Esc` leaves it |
+| `y` (visual), `yy` / `Y` | Copy the selection to the clipboard, the line without one (a count copies several: `3yy`) |
+| `d` / `x`, `c` / `s` (visual) | Delete the selection (change it: delete, then insert), by characters (the ends of the lines in it join the lines) or by lines, in one function; `e` goes to the end of the word in visual mode |
 | `d` / `c` + `w` `e` `b` `$` `0` `^` `j` `k` `l` `h`, `cc` | Delete (change: delete then insert) to the next word, the end of the word, the previous word, the end / start / first character of the line, with the line below / above, a character after / before (`cw` changes to the end of the word as in vim, counts work: `3dw`) |
 | `u` / `U` | Undo / redo |
 | `cn` | Rename the variable, function or global under the cursor (`:rename`) |
@@ -592,6 +624,13 @@ In the C code (a module, every function of it one after the other; functions not
 | `x` / `C` | Cross references / call graph of the function |
 | `L` | Ask the LLM to improve the function: its proposal shows in `:review` |
 | `W` | Ask the LLM to rewrite the function as clear C: an edit proposed in `:review` |
+
+What is copied (`y`, `:string`) goes to the clipboard of the system and to the one of the terminal. The clipboard of
+the system is the one of X11 (the Wayland sessions of GNOME and KDE share it through XWayland), of macOS or of
+Windows; on Wayland without XWayland `wl-copy` (wl-clipboard) does it, `xclip` or `xsel` when X11 cannot be reached
+directly. On Linux the copied text is served by execdump while it runs, then by the clipboard manager of the desktop
+when there is one. The one of the terminal is OSC 52, for the terminals that support it (kitty, WezTerm, iTerm2,
+foot, xterm, tmux with `set-clipboard on`), through ssh too; GNOME Terminal and the other VTE terminals ignore it.
 
 In the review of the LLM proposals: `j` / `k` move, `n` / `p` go to the next / previous proposal, `a` accepts it, `r` rejects it, `Enter` opens the code of its function. Accepted proposals are merged into `main` on the next `:w`.
 
@@ -691,7 +730,8 @@ The debug view shows:
 - the call stack, the functions of the program by their name (`depth+0x17`), the others by the name the debugger
   gives (the libraries); `Enter` on a frame selects it: the code, the variables and the registers are the ones of
   that frame (unwound by the debugger)
-- the registers, the breakpoints (`Enter` shows the code of one) and the last lines of the output of the program
+- the registers, the breakpoints (`Enter` shows the code of one) and the last lines of the output of the program, as
+  it writes them
 
 Breakpoints are toggled on the line (or the instruction, or the node) under the cursor with `F9` or `gb`, or with
 `:break <function or address>`; they are marked with `●` in the C code and the linear disassembly, kept while
@@ -707,6 +747,7 @@ execdump runs and given to the debugger at the load address of the program (PIE 
 | `F6` | `:interrupt` | Stop the running program |
 | `F9`, `gb` | `:break [function or address]` | Toggle a breakpoint |
 | | `:frame <n>` | Select a frame of the call stack |
+| `i` (debug view) | `:input [text]` | Send a line to the input of the program |
 | | `:kill` | Kill the program and the debugger |
 
 A line of C is its address (the first instruction of its statement), a step continues to the addresses of the lines
@@ -717,8 +758,10 @@ of the functions of the program the function calls (directly). A function not de
 a step from a library returns to the program, a step from a caller selected in the call stack continues until the
 program is back in it.
 
-The program reads nothing (its input is empty), its output and its errors go to a file shown in the debug view. The
-debugger is gdb on Linux and lldb on macOS, the other one when it is the only one installed, or the one of the
+The program runs on a terminal of its own (a pseudo-terminal): its output and its errors are in the debug view as it
+writes them (the C library flushes its output at each line on a terminal, it keeps it until its buffer is full in a
+file), the escape sequences of the colors left out, and it reads what `:input` sends (echoed as a terminal does).
+Without a pseudo-terminal (Windows) its output goes to a file and its input is empty. The debugger is gdb on Linux and lldb on macOS, the other one when it is the only one installed, or the one of the
 `[debugger]` section:
 
 ```toml

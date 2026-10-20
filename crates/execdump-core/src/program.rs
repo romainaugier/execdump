@@ -131,6 +131,8 @@ pub enum Format {
 pub enum Language {
     #[default]
     Unknown,
+    /// Functions with C++ mangled names (Itanium, MSVC)
+    Cxx,
     Rust,
     Go,
     /// A .NET assembly: its code is CIL bytecode in the CLR metadata, the machine code is the stub that starts the runtime
@@ -142,6 +144,14 @@ impl Language {
     pub fn has_sized_strings(self) -> bool {
         return matches!(self, Language::Rust | Language::Go);
     }
+}
+
+/// The metadata of the runtime of the language of a program, once its functions are symbols
+#[derive(Clone, Debug, Default)]
+pub enum LanguageData {
+    #[default]
+    None,
+    Go(Box<crate::golang::GoRuntime>),
 }
 
 /// Longest string a (pointer, length) pair is taken for
@@ -172,11 +182,8 @@ pub struct Program {
     /// Source files named by the symbol tables, in their order
     pub source_names: Vec<String>,
     pub language: Language,
-    /// Go programs: the arguments and the results are passed in registers (Go 1.17 and later), else on the stack
-    pub go_register_abi: bool,
-    /// Go programs: the size of the arguments and results of the functions (by entry), as the pclntab gives it (not for
-    /// the functions known to be written in assembly)
-    pub go_args: HashMap<u64, u32>,
+    /// What the language keeps of the metadata of its runtime (the languages of the decompiler read it)
+    pub language_data: LanguageData,
     /// Data the format puts in the sections of code (the import tables, the CLR header and metadata of PE), sorted
     pub data: Vec<(u64, u64)>,
     /// Strings the data points to with (pointer, length) pairs (tables of &str, panic locations), address ->
@@ -328,12 +335,17 @@ impl Program {
 
         if let Some(go) = crate::golang::read(self) {
             self.language = Language::Go;
-            self.go_register_abi = go.register_abi;
+            let runtime = crate::golang::GoRuntime::new(&go);
             self.add_go_functions(go.functions);
+            self.language_data = LanguageData::Go(Box::new(runtime));
         }
 
         if self.language == Language::Unknown && self.is_rust() {
             self.language = Language::Rust;
+        }
+
+        if self.language == Language::Unknown && self.symbols.values().any(|s| matches!(detect_mangling_scheme(&s.name), ManglingScheme::Itanium | ManglingScheme::Msvc)) {
+            self.language = Language::Cxx;
         }
 
         if self.language.has_sized_strings() {
@@ -403,10 +415,6 @@ impl Program {
     /// their size, and the source file of each
     fn add_go_functions(&mut self, functions: Vec<crate::golang::GoFunction>) {
         for function in functions {
-            if let Some(args) = function.args.filter(|_| !function.assembly) {
-                self.go_args.insert(function.entry, args);
-            }
-
             self.add_symbol(Symbol::new(function.entry, &function.name, SymbolKind::Function, function.end - function.entry));
             self.add_seed(function.entry, Some(function.end - function.entry), SeedSource::GoPclntab);
 

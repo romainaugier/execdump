@@ -14,3 +14,4 @@ crossterm.workspace = true
 ratatui.workspace = true
 serde.workspace = true
 toml.workspace = true
+arboard.workspace = true

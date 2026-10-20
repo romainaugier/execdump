@@ -89,18 +89,19 @@ impl App {
         self.popup = Some(Popup { title: "String (Enter copies)".to_string(), items, cursor: 0 });
     }
 
-    /// Copies text to the clipboard of the terminal (OSC 52, most terminals and tmux with set-clipboard)
-    pub(crate) fn copy(&mut self, text: &str) {
-        use std::io::{IsTerminal, Write};
+    /// Copies text to the clipboards of the system and of the terminal (see clipboard), false when the one of the
+    /// system was not reached
+    pub(crate) fn copy(&mut self, text: &str) -> bool {
+        let result = self.clipboard.copy(text);
 
-        let mut stdout = std::io::stdout();
+        let preview = crate::clipboard::preview(text);
 
-        if stdout.is_terminal() {
-            let _ = write!(stdout, "\x1b]52;c;{}\x07", crate::literal::base64(text.as_bytes()));
-            let _ = stdout.flush();
+        match result.as_ref() {
+            Ok(()) => self.info(format!("Copied {}", preview)),
+            Err(error) => self.error(format!("Copied {} to the clipboard of the terminal only (OSC 52), not to the one of the system: {}", preview, error)),
         }
 
-        self.info(format!("Copied {}", text));
+        return result.is_ok();
     }
 
     pub(crate) fn show_popup(&mut self, title: String, items: Vec<(String, Target)>) {

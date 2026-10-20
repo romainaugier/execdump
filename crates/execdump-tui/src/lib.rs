@@ -13,6 +13,7 @@
  */
 
 mod actions;
+mod clipboard;
 mod commands;
 mod debug;
 mod explorer;
@@ -192,6 +193,8 @@ pub(crate) struct App {
     debugger: Option<debug::Debugger>,
     breakpoints: std::collections::BTreeSet<(usize, u64)>,
     debugger_config: DebuggerConfig,
+
+    clipboard: clipboard::Clipboard,
 }
 
 impl App {
@@ -259,6 +262,7 @@ impl App {
             debugger: None,
             breakpoints: std::collections::BTreeSet::new(),
             debugger_config: DebuggerConfig::default(),
+            clipboard: clipboard::Clipboard::default(),
         };
     }
 

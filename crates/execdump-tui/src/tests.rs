@@ -389,6 +389,106 @@ fn string_literal_forms() {
     let _ = std::fs::remove_dir_all(&location);
 }
 
+#[test]
+fn visual_selection() {
+    let (mut app, location) = app("visual");
+    let mut terminal = Terminal::new(TestBackend::new(140, 45)).unwrap();
+    wait_decompiled(&mut app);
+
+    app.run_command("c main");
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+
+    let lines = |app: &mut App| -> (String, String) {
+        let App { workspace, projects, .. } = app;
+        let View::Source(view) = workspace.view_mut() else { panic!("Expected the C code") };
+        let project = projects[0].as_mut().unwrap();
+        let first = view.cursor_line(project);
+        view.move_lines(project, 1);
+        let second = view.cursor_line(project);
+        view.move_lines(project, -1);
+        (first, second)
+    };
+
+    let yanked = |app: &mut App| -> String {
+        let App { workspace, projects, .. } = app;
+        let View::Source(view) = workspace.view_mut() else { panic!("Expected the C code") };
+        view.yank(projects[0].as_mut().unwrap(), 1).0
+    };
+
+    let (first, second) = lines(&mut app);
+
+    // By characters: the whole first line, then from its start to the same column of the next one
+    keys(&mut app, "0v$");
+    assert!(matches!(app.view(), View::Source(v) if v.title().ends_with("-- VISUAL --")));
+    assert_eq!(yanked(&mut app), first);
+
+    keys(&mut app, "0vlj");
+    let expected: String = second.chars().take(2).collect();
+    assert_eq!(yanked(&mut app), format!("{}\n{}", first, expected));
+
+    // By lines, drawn selected, y copies and leaves the mode
+    keys(&mut app, "Vj");
+    terminal.draw(|f| ui(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(buffer.content().iter().filter(|c| c.bg == Theme::codedark().highlight_bg).count() >= 10, "the selection is not drawn: {}", screen(&terminal));
+
+    keys(&mut app, "y");
+    // Without a display (the tests out of a desktop) only the terminal gets it
+    assert!(app.message.as_ref().is_some_and(|(text, _)| text == "Yanked 2 lines" || text.contains("clipboard of the terminal only")), "{:?}", app.message);
+    assert!(matches!(app.view(), View::Source(v) if v.visual.is_none()));
+
+    keys(&mut app, "kkV");
+    assert_eq!(yanked(&mut app), format!("{}\n", first));
+
+    // v switches to characters, Esc leaves the mode
+    keys(&mut app, "Vv");
+    assert!(matches!(app.view(), View::Source(v) if v.visual.is_some_and(|s| !s.lines)));
+    esc(&mut app);
+    assert!(matches!(app.view(), View::Source(v) if v.visual.is_none()));
+
+    // Deletions: the lines of main as edited, undo restores them
+    let main = app.projects[0].as_ref().unwrap().resolve("main").unwrap();
+    let code = |app: &mut App| -> Vec<String> { app.projects[0].as_mut().unwrap().shown(main).unwrap().0.text.lines().map(|l| l.to_string()).collect() };
+    let original = code(&mut app);
+    assert_eq!((original[1].as_str(), original[2].as_str()), ("{", "    int v3;"));
+
+    // A word of a line
+    keys(&mut app, "jj^ved");
+    assert_eq!(code(&mut app)[2], "     v3;");
+    keys(&mut app, "u");
+    assert_eq!(code(&mut app), original);
+
+    // From the brace to the first character of the next line, the end of the line between them included
+    keys(&mut app, "k0vj0x");
+    assert_eq!(code(&mut app)[1], "   int v3;");
+    assert_eq!(code(&mut app).len(), original.len() - 1);
+    keys(&mut app, "u");
+
+    // Lines
+    keys(&mut app, "gg");
+    app.run_command("c main");
+    keys(&mut app, "jjVjd");
+    assert_eq!(code(&mut app).len(), original.len() - 2);
+    assert_eq!(code(&mut app)[2], original[4]);
+    keys(&mut app, "u");
+    assert_eq!(code(&mut app), original);
+
+    // A change deletes, then inserts
+    keys(&mut app, "vec");
+    assert!(matches!(app.view(), View::Source(v) if v.visual.is_none() && v.insert.is_some()));
+    esc(&mut app);
+    keys(&mut app, "u");
+    assert_eq!(code(&mut app), original);
+
+    // Not over two functions
+    keys(&mut app, "vk]f");
+    keys(&mut app, "d");
+    assert!(app.message.as_ref().is_some_and(|(text, error)| *error && text.contains("several functions")), "{:?}", app.message);
+    assert_eq!(code(&mut app), original);
+
+    let _ = std::fs::remove_dir_all(&location);
+}
+
 fn esc(app: &mut App) {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 }
@@ -603,6 +703,19 @@ fn debugging() {
     app.run_command("continue");
     wait_stopped(&mut app);
     assert_eq!(stopped_at(&app), Some(depth));
+
+    // The program runs on a terminal: what it printed is there while it is stopped
+    for _ in 0..100 {
+        app.poll_debugger();
+
+        if !app.debugger.as_ref().unwrap().output_tail.is_empty() {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert_eq!(app.debugger.as_ref().unwrap().output_tail, ["hello world"]);
 
     app.run_command("continue");
     wait_stopped(&mut app);

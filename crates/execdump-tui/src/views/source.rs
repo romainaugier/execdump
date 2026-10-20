@@ -249,6 +249,40 @@ pub struct Pos {
     pub line: usize,
 }
 
+/// Visual mode: the selection goes from where it started to the cursor, by characters (v) or by lines (V)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Visual {
+    pub anchor: Pos,
+    pub col: usize,
+    pub lines: bool,
+}
+
+/// What is selected: from a line and a column to a line and a column (included), in lines from the top of the module
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Selection {
+    start: (usize, usize),
+    end: (usize, usize),
+    lines: bool,
+}
+
+impl Selection {
+    /// Characters of a line of a length selected (start, end excluded), the end of the line included past its last
+    /// character
+    fn range(&self, line: usize, len: usize) -> Option<(usize, usize)> {
+        if line < self.start.0 || line > self.end.0 {
+            return None;
+        }
+
+        if self.lines {
+            return Some((0, len.max(1)));
+        }
+
+        let start = if line == self.start.0 { self.start.1 } else { 0 };
+        let end = if line == self.end.0 { self.end.1 + 1 } else { len + 1 };
+        return Some((start.min(len), end.min(len + 1).max(start.min(len) + 1)));
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceView {
     pub program: usize,
@@ -262,6 +296,7 @@ pub struct SourceView {
     top: Pos,
     pub height: usize,
     pub insert: Option<Insert>,
+    pub visual: Option<Visual>,
     undo: Vec<(u64, String)>,
     redo: Vec<(u64, String)>,
 }
@@ -281,6 +316,8 @@ pub enum Reach {
     Up,
     Char,
     CharBack,
+    /// The selection of the visual mode
+    Selection,
 }
 
 /// Kind of a character for the word moves: blank, identifier or punctuation
@@ -361,7 +398,7 @@ fn reach_range(chars: &[char], col: usize, reach: Reach, count: usize, change: b
         Reach::LineFirst => (indent.min(col), indent.max(col)),
         Reach::Char => (col, (col + count).min(chars.len())),
         Reach::CharBack => (col.saturating_sub(count), col),
-        Reach::Line | Reach::Down | Reach::Up => (0, chars.len()),
+        Reach::Line | Reach::Down | Reach::Up | Reach::Selection => (0, chars.len()),
     };
 }
 
@@ -388,6 +425,7 @@ impl SourceView {
             top: Pos::default(),
             height: 20,
             insert: None,
+            visual: None,
             undo: Vec::new(),
             redo: Vec::new(),
         };
@@ -397,7 +435,12 @@ impl SourceView {
     }
 
     pub fn title(&self) -> String {
-        let mode = if self.insert.is_some() { " -- INSERT --" } else { "" };
+        let mode = match (&self.insert, &self.visual) {
+            (Some(_), _) => " -- INSERT --",
+            (None, Some(visual)) if visual.lines => " -- VISUAL LINE --",
+            (None, Some(_)) => " -- VISUAL --",
+            (None, None) => "",
+        };
         return format!("{} ({} functions){}", self.module, self.functions.len(), mode);
     }
 
@@ -453,6 +496,11 @@ impl SourceView {
 
         self.cursor.line = self.cursor.line.min(self.heights.get(self.cursor.block).saturating_sub(1));
         self.top.line = self.top.line.min(self.heights.get(self.top.block).saturating_sub(1));
+
+        if let Some(visual) = self.visual.as_mut() {
+            visual.anchor.block = visual.anchor.block.min(self.functions.len() - 1);
+            visual.anchor.line = visual.anchor.line.min(self.heights.get(visual.anchor.block).saturating_sub(1));
+        }
     }
 
     fn abs(&self, pos: Pos) -> usize {
@@ -558,6 +606,36 @@ impl SourceView {
     }
 
     /// Next (or previous) word start on the line, then on the next lines
+    /// End of the word (e): the last character of the next word end, on the next lines past the end of the line
+    pub fn word_end_move(&mut self, project: &mut Project) {
+        for _ in 0..64 {
+            let chars: Vec<char> = self.cursor_line(project).chars().collect();
+            let end = word_end(&chars, self.col);
+
+            if end > self.col + 1 && chars.get(end - 1).is_some_and(|c| !c.is_whitespace()) {
+                self.col = end - 1;
+                return;
+            }
+
+            let before = self.cursor;
+            self.move_lines(project, 1);
+
+            if self.cursor == before {
+                return;
+            }
+
+            // From before the start of the line: its first word counts
+            self.col = 0;
+            let chars: Vec<char> = self.cursor_line(project).chars().collect();
+
+            if chars.first().is_some_and(|c| !c.is_whitespace()) {
+                let class = char_class(chars[0]);
+                self.col = chars.iter().take_while(|&&c| char_class(c) == class).count() - 1;
+                return;
+            }
+        }
+    }
+
     pub fn word_move(&mut self, project: &mut Project, forward: bool) {
         let is_word = |c: char| c.is_ascii_alphanumeric() || c == '_';
 
@@ -731,8 +809,64 @@ impl SourceView {
      * Editing
      */
 
+    /*
+     * Visual mode
+     */
+
+    /// v and V: starts the selection at the cursor, switches between characters and lines, or leaves it (None, or the
+    /// mode it is in)
+    pub fn visual(&mut self, lines: Option<bool>) {
+        self.visual = match (self.visual, lines) {
+            (_, None) => None,
+            (Some(visual), Some(lines)) if visual.lines == lines => None,
+            (Some(visual), Some(lines)) => Some(Visual { lines, ..visual }),
+            (None, Some(lines)) => Some(Visual { anchor: self.cursor, col: self.col, lines }),
+        };
+    }
+
+    fn selection(&self) -> Option<Selection> {
+        let visual = self.visual?;
+        let anchor = (self.abs(visual.anchor), visual.col);
+        let cursor = (self.abs(self.cursor), self.col);
+        let (start, end) = if anchor <= cursor { (anchor, cursor) } else { (cursor, anchor) };
+
+        return Some(Selection { start, end, lines: visual.lines });
+    }
+
+    /// Text of the selection, or of lines from the cursor without one (yy), and the number of lines
+    pub fn yank(&mut self, project: &mut Project, count: usize) -> (String, usize) {
+        let cursor = self.abs(self.cursor);
+        let selection = self.selection().unwrap_or(Selection { start: (cursor, 0), end: (cursor + count.max(1) - 1, 0), lines: true });
+        let mut text = String::new();
+        let mut cached: Option<(usize, Vec<String>)> = None;
+        let total = self.heights.total();
+
+        for abs in selection.start.0..=selection.end.0.min(total.saturating_sub(1)) {
+            let pos = self.pos(abs);
+
+            if cached.as_ref().is_none_or(|(block, _)| *block != pos.block) {
+                cached = Some((pos.block, self.block_lines(project, pos.block)));
+            }
+
+            let line = cached.as_ref().and_then(|(_, lines)| lines.get(pos.line)).cloned().unwrap_or_default();
+            let chars: Vec<char> = line.chars().collect();
+
+            if let Some((start, end)) = selection.range(abs, chars.len()) {
+                text.extend(chars[start.min(chars.len())..end.min(chars.len())].iter());
+
+                if selection.lines || end > chars.len() {
+                    text.push('\n');
+                }
+            }
+        }
+
+        self.visual = None;
+        return (text, selection.end.0 - selection.start.0 + 1);
+    }
+
     pub fn start_insert(&mut self, project: &mut Project, at: InsertWhere) -> Result<()> {
         let addr = self.function().context("no function here")?;
+        self.visual = None;
 
         if project.shown(addr).is_none() {
             bail!("this function is not decompiled yet");
@@ -914,6 +1048,10 @@ impl SourceView {
     /// Deletes what a motion goes over from the cursor (lines, or characters of the line), then starts the
     /// insert mode there when it changes it
     pub fn operate(&mut self, project: &mut Project, reach: Reach, count: usize, change: bool) -> Result<()> {
+        if reach == Reach::Selection {
+            return self.delete_selection(project, change);
+        }
+
         let addr = self.function().context("no function here")?;
 
         if project.shown(addr).is_none() {
@@ -966,6 +1104,75 @@ impl SourceView {
         }
 
         self.col = start;
+
+        if change {
+            return self.start_insert(project, InsertWhere::Cursor);
+        }
+
+        self.clamp_col(project);
+        return Ok(());
+    }
+
+    /// Deletes the selection of the visual mode (in one function), then starts the insert mode there when it changes it
+    fn delete_selection(&mut self, project: &mut Project, change: bool) -> Result<()> {
+        let selection = self.selection().context("nothing selected")?;
+        let (start, end) = (self.pos(selection.start.0), self.pos(selection.end.0));
+
+        if start.block != end.block {
+            bail!("the selection goes over several functions: their code is edited one function at a time");
+        }
+
+        self.cursor = start;
+        let addr = self.function().context("no function here")?;
+
+        if project.shown(addr).is_none() {
+            bail!("this function is not decompiled yet");
+        }
+
+        let mut lines = self.block_lines(project, start.block);
+        self.visual = None;
+
+        // The blank line after a function is not part of it
+        if start.line >= lines.len() {
+            return Ok(());
+        }
+
+        let last = end.line.min(lines.len() - 1);
+
+        if selection.lines {
+            let indent: String = lines[start.line].chars().take_while(|c| c.is_whitespace()).collect();
+            lines.drain(start.line..=last);
+
+            if change || lines.is_empty() {
+                lines.insert(start.line, if change { indent.clone() } else { String::new() });
+            }
+
+            self.cursor.line = start.line.min(lines.len() - 1);
+            self.replace(project, &format!("{}\n", lines.join("\n")))?;
+
+            if change {
+                self.col = indent.chars().count();
+                return self.start_insert(project, InsertWhere::Cursor);
+            }
+
+            self.line_start(project, true);
+            return Ok(());
+        }
+
+        // The characters from the start to the end (included), the end of a line selected joins it with the next one
+        let mut chars: Vec<char> = lines.join("\n").chars().collect();
+        let offset = |line: usize, col: usize| lines[..line].iter().map(|l| l.chars().count() + 1).sum::<usize>() + col.min(lines[line].chars().count());
+        let end_col = if last < end.line { usize::MAX } else { selection.end.1 };
+        let from = offset(start.line, selection.start.1);
+        let to = (offset(last, end_col) + 1).min(chars.len());
+
+        if from < to {
+            chars.drain(from..to);
+        }
+
+        let text: String = chars.into_iter().collect();
+        self.replace(project, &format!("{}\n", text))?;
+        self.col = selection.start.1.min(lines[start.line].chars().count());
 
         if change {
             return self.start_insert(project, InsertWhere::Cursor);
@@ -1086,6 +1293,8 @@ impl SourceView {
         let mut lines = Vec::with_capacity(height);
         let mut pos = self.top;
         let mut visible = Vec::new();
+        let selection = self.selection();
+        let selected = Style::default().bg(theme.highlight_bg);
         let pc_function = marks.pc.and_then(|pc| project.analysis.function_containing(pc)).map(|f| f.addr);
 
         while lines.len() < height && pos.block < self.functions.len() {
@@ -1154,13 +1363,22 @@ impl SourceView {
                 }
 
                 let is_cursor = pos.block == self.cursor.block && line == self.cursor.line;
+                let range = selection.and_then(|s| s.range(self.abs(Pos { block: pos.block, line }), content.map_or(0, |t| t.chars().count())));
 
-                match content {
-                    Some(text) if shown.is_none() && self.insert.is_none() => spans.push(Span::styled(text.clone(), Style::default().fg(theme.dim).add_modifier(Modifier::ITALIC))),
-                    Some(text) if is_cursor => spans.extend(with_cursor(highlight_with(theme, text, &mut comment), self.col, theme)),
-                    Some(text) => spans.extend(highlight_with(theme, text, &mut comment)),
-                    None if is_cursor => spans.push(Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED))),
-                    None => {}
+                let code = match content {
+                    Some(text) if shown.is_none() && self.insert.is_none() => vec![Span::styled(text.clone(), Style::default().fg(theme.dim).add_modifier(Modifier::ITALIC))],
+                    Some(text) => highlight_with(theme, text, &mut comment),
+                    None => Vec::new(),
+                };
+
+                let code = match range {
+                    Some((start, end)) => with_selection(code, start, end, selected),
+                    None => code,
+                };
+
+                match is_cursor {
+                    true => spans.extend(with_cursor(code, self.col, theme)),
+                    false => spans.extend(code),
                 }
 
                 let mut rendered = Line::from(truncate(spans, width));
@@ -1194,6 +1412,34 @@ pub fn line_of(lines: &[Option<u64>], addr: u64) -> Option<usize> {
 
 fn placeholder(project: &Project, addr: u64) -> String {
     return format!("// {} ({:#x}): decompiling...", project.function_name(addr), addr);
+}
+
+/// Spans with the characters from a column to another (excluded) in a style, the end of the line padded when the
+/// selection goes past it
+fn with_selection(spans: Vec<Span<'static>>, start: usize, end: usize, style: Style) -> Vec<Span<'static>> {
+    let mut out = Vec::with_capacity(spans.len() + 2);
+    let mut position = 0;
+
+    for span in spans {
+        let chars: Vec<char> = span.content.chars().collect();
+        let (from, to) = (start.clamp(position, position + chars.len()) - position, end.clamp(position, position + chars.len()) - position);
+
+        for (a, b, selected) in [(0, from, false), (from, to, true), (to, chars.len(), false)] {
+            if a < b {
+                let text: String = chars[a..b].iter().collect();
+                out.push(Span::styled(text, if selected { span.style.patch(style) } else { span.style }));
+            }
+        }
+
+        position += chars.len();
+    }
+
+    if end > position {
+        out.push(Span::styled(" ".repeat(start.saturating_sub(position)), Style::default()));
+        out.push(Span::styled(" ".repeat(end - start.max(position)), style));
+    }
+
+    return out;
 }
 
 /// Spans with the character at a column reversed (the cursor)
@@ -1395,6 +1641,24 @@ impl App {
                 self.with_source(|source, project| if source.jump_conflict(project, forward) { Ok(()) } else { Err(anyhow!("No conflict in this module")) });
                 return true;
             }
+            Command::Yank => {
+                let yanked = {
+                    let App { workspace, projects, .. } = self;
+
+                    match workspace.view_mut() {
+                        View::Source(view) => projects[view.program].as_mut().map(|project| view.yank(project, repeat as usize)),
+                        _ => None,
+                    }
+                };
+
+                if let Some((text, lines)) = yanked {
+                    if self.copy(&text) {
+                        self.info(if lines == 1 { format!("Yanked {} characters", text.chars().count()) } else { format!("Yanked {} lines", lines) });
+                    }
+                }
+
+                return true;
+            }
             _ => {}
         }
 
@@ -1410,7 +1674,20 @@ impl App {
 
         let page = (view.height / 2).max(1) as isize;
 
+        // The edits leave the visual mode, Esc leaves it before clearing the search
+        if matches!(command, Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine) || matches!(command, Command::Operator { reach, .. } if *reach != Reach::Selection) {
+            view.visual = None;
+        }
+
         let result = match command {
+            Command::Visual(lines) => {
+                view.visual(*lines);
+                Ok(())
+            }
+            Command::ClearSearch if view.visual.is_some() => {
+                view.visual = None;
+                Ok(())
+            }
             Command::Move(motion) => {
                 match motion {
                     Motion::PageDown => view.move_lines(project, page),
@@ -1433,6 +1710,7 @@ impl App {
                     Motion::Previous | Motion::PreviousFunction => view.jump_function(false),
                     Motion::WordNext => (0..repeat).for_each(|_| view.word_move(project, true)),
                     Motion::WordPrevious => (0..repeat).for_each(|_| view.word_move(project, false)),
+                    Motion::WordEnd => (0..repeat).for_each(|_| view.word_end_move(project)),
                     Motion::LineStart => view.line_start(project, false),
                     Motion::LineFirst => view.line_start(project, true),
                     Motion::LineEnd => view.line_end(project),

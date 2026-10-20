@@ -187,6 +187,13 @@ fn is_store(mnemonic: &str) -> bool {
     return mnemonic.starts_with("st");
 }
 
+/// The atomic operations that load what the memory held into their second operand (ldadd w1, w0, [x2]), the first
+/// one is their operand
+fn is_atomic_load(mnemonic: &str) -> bool {
+    const OPS: [&str; 9] = ["ldadd", "ldclr", "ldeor", "ldset", "ldsmax", "ldsmin", "ldumax", "ldumin", "swp"];
+    return OPS.iter().any(|op| mnemonic.starts_with(op));
+}
+
 fn is_pair(mnemonic: &str) -> bool {
     return mnemonic.starts_with("ldp") || mnemonic.starts_with("stp") || mnemonic.starts_with("ldnp") || mnemonic.starts_with("stnp");
 }
@@ -878,6 +885,22 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         return Some(true);
     }
 
+    // The exclusive stores write their status, cas compares and receives the first one
+    if is_atomic_load(mnemonic) || matches!(mnemonic, "stxr" | "stlxr" | "stxrb" | "stlxrb" | "stxrh" | "stlxrh" | "stxp" | "stlxp") {
+        let write = if is_atomic_load(mnemonic) { 1 } else { 0 };
+
+        if insn.ops.iter().enumerate().any(|(i, op)| i != write && uses(op)) {
+            return Some(true);
+        }
+
+        let writes = insn.ops.get(write).is_some_and(|op| matches!(op, Op::Reg { r, .. } if r.reg == reg && r.bits >= 32));
+        return if writes { Some(false) } else { None };
+    }
+
+    if mnemonic.starts_with("cas") {
+        return if insn.ops.iter().any(uses) { Some(true) } else { None };
+    }
+
     let reads_all = is_store(mnemonic) || matches!(mnemonic, "cmp" | "cmn" | "tst" | "cbz" | "cbnz" | "tbz" | "tbnz" | "br" | "ccmp" | "ccmn" | "fcmp" | "fcmpe") || mnemonic.starts_with("b.");
 
     if reads_all {
@@ -909,6 +932,7 @@ pub fn written(insn: &Insn) -> u128 {
 
     let written = match mnemonic {
         _ if stores => 0,
+        _ if is_atomic_load(mnemonic) => reg(insn.ops.get(1)),
         "cmp" | "cmn" | "tst" | "fcmp" | "fcmpe" | "ccmp" | "ccmn" | "fccmp" | "fccmpe" => 0,
         "b" | "bl" | "blr" | "br" | "ret" | "cbz" | "cbnz" | "tbz" | "tbnz" | "nop" | "prfm" | "dmb" | "dsb" | "isb" | "hint" | "bti" | "brk" | "svc" => 0,
         _ if mnemonic.starts_with("b.") => 0,

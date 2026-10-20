@@ -376,8 +376,20 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
             // Accessed whole only, it is a variable of the type of the accesses (char *endptr)
             let whole = layout(ctx, &found, types).fields.into_iter().next().filter(|field| ctx.size_of(&field.ty) == Some(size) && field.ty != CType::Char);
 
+            // Accessed inside a struct of the type database only, the buffer is a variable of that struct (the bytes
+            // after it are the frame's)
+            let declared = |h: &CType| matches!(h.unqualified(), CType::Struct(name) | CType::Union(name) if ctx.typedb.aggregates.contains_key(name));
+            let within = header(v).filter(|h| declared(h)).filter(|h| ctx.size_of(h).is_some_and(|bytes| found.iter().all(|a| a.offset >= 0 && a.offset as u64 + a.bytes <= bytes)));
+
+            // Accessed as the elements of an array of it (the []interface{} of Go), each access inside an element
+            let elements = header(v).filter(|h| declared(h)).filter(|h| {
+                ctx.size_of(h).is_some_and(|bytes| bytes > 1 && size % bytes == 0 && found.iter().all(|a| a.offset >= 0 && (a.offset as u64 % bytes) + a.bytes <= bytes && (a.known.is_none() || a.offset == 0)))
+            });
+
             if let (Some(field), true) = (whole, found.iter().all(|a| a.offset == 0)) {
                 types[v] = CType::ptr(field.ty);
+            } else if let Some(header) = within.or(elements) {
+                types[v] = CType::ptr(header);
             } else if inside && typed && (found.iter().any(|a| a.offset == 0) || !passed_as_text(f, ctx, v)) {
                 structs.push(Recovered { name: format!("st_{:x}_{}", addr, structs.len()), group: group.clone(), found, frame });
             }
@@ -555,7 +567,7 @@ mod tests {
         let program = execdump_core::program::Program { pointer_size: 8, ..Default::default() };
         let typedb = crate::typedb::TypeDb::bundled(crate::typedb::Platform::Unix, crate::types::DataModel::new(execdump_core::disasm::Architecture::X86_64, false));
         let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
-        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default() };
+        let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         let types = vec![CType::ptr(CType::Char), CType::int(32), CType::int(64), CType::int(16), CType::int(128)];
         let access = |offset, bytes, value| Access { offset, bytes, value, address: false, known: None };

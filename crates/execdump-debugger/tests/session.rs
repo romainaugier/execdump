@@ -88,7 +88,7 @@ fn session_on(kind: Kind, pie: bool) {
     let (registers, sp, first_arg) = registers();
     let output = dir.join("output.txt");
 
-    let config = Config { kind, debugger, program: binary.clone(), args: Vec::new(), output: output.clone(), link_entry: program.entry.unwrap(), registers, stack_pointer: sp.to_string() };
+    let config = Config { kind, debugger, program: binary.clone(), args: Vec::new(), output: output.clone(), input: None, link_entry: program.entry.unwrap(), registers, stack_pointer: sp.to_string() };
     let session = Session::start(config);
 
     let bias = match next(&session) {
@@ -151,7 +151,7 @@ fn session_on(kind: Kind, pie: bool) {
     assert_eq!(next(&session), Event::Ended);
 
     // A program that does not stop is interrupted
-    let config = Config { kind, debugger: find(Some(kind), None).unwrap().1, program: binary, args: vec!["spin".to_string()], output, link_entry: program.entry.unwrap(), registers: vec![sp.to_string()], stack_pointer: sp.to_string() };
+    let config = Config { kind, debugger: find(Some(kind), None).unwrap().1, program: binary, args: vec!["spin".to_string()], output, input: None, link_entry: program.entry.unwrap(), registers: vec![sp.to_string()], stack_pointer: sp.to_string() };
     let spinning = Session::start(config);
     assert!(matches!(next(&spinning), Event::Started { .. }));
 
@@ -176,6 +176,67 @@ fn session_on(kind: Kind, pie: bool) {
     spinning.stop();
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// On a terminal the output of the program is there at each line, while it is stopped after it
+#[cfg(unix)]
+fn terminal(kind: Kind) {
+    use execdump_debugger::terminal::Terminal;
+
+    let Some((kind, debugger)) = find(Some(kind), None) else {
+        eprintln!("{} is not installed, skipped", kind.name());
+        return;
+    };
+
+    let dir = std::env::temp_dir().join(format!("execdump-terminal-{}-{}", kind.name(), std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let Some(binary) = build(&dir, true) else {
+        eprintln!("no C compiler, skipped");
+        return;
+    };
+
+    let program = programs_from_exec(&Exec::ELF(parse_elf(&binary).unwrap())).remove(0);
+    let (registers, sp, _) = registers();
+    let terminal = Terminal::open().unwrap();
+
+    let config = Config { kind, debugger, program: binary, args: Vec::new(), output: terminal.path.clone(), input: Some(terminal.path.clone()), link_entry: program.entry.unwrap(), registers, stack_pointer: sp.to_string() };
+    let session = Session::start(config);
+
+    let bias = match next(&session) {
+        Event::Started { bias, .. } => bias,
+        other => panic!("not started: {:?}", other),
+    };
+
+    session.send(Request::Breakpoints(vec![symbol(&program, "depth") + bias]));
+    session.send(Request::Run(Run::Continue));
+    stopped(&session);
+
+    let mut text = String::new();
+    let start = Instant::now();
+
+    while !text.contains("hello world") && start.elapsed() < WAIT {
+        text.push_str(&String::from_utf8_lossy(&terminal.read()));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(text.contains("hello world\r\n") && !text.contains("30 3"), "{:?}", text);
+
+    session.send(Request::Kill);
+    assert_eq!(next(&session), Event::Ended);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn gdb_terminal() {
+    terminal(Kind::Gdb);
+}
+
+#[test]
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn lldb_terminal() {
+    terminal(Kind::Lldb);
 }
 
 #[test]

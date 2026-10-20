@@ -25,6 +25,7 @@ pub use refine::refine;
 use crate::analysis::function::{BasicBlock, CallTarget, EdgeKind, Function};
 use crate::analysis::insn::Flow;
 use crate::analysis::Analysis;
+use crate::lang::{Intrinsic, Language, Languages};
 use crate::storage;
 
 use regs::{Abi, Reg, RegRef, RegisterFile};
@@ -32,7 +33,7 @@ use regs::{Abi, Reg, RegRef, RegisterFile};
 use anyhow::{bail, Context as _, Result};
 
 use execdump_core::disasm::Architecture;
-use execdump_core::program::{Language, Program};
+use execdump_core::program::Program;
 
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
@@ -176,6 +177,9 @@ pub struct Env<'a> {
     /// Name of a global variable at an address
     pub global_name: &'a dyn Fn(u64) -> String,
     pub cs: &'a capstone::Capstone,
+    pub languages: &'a Languages,
+    /// The language of the function
+    pub language: &'a dyn Language,
 }
 
 /// Signature of a function before its parameters are known: every argument register and the
@@ -310,7 +314,7 @@ pub enum Access {
 }
 
 impl Insn {
-    fn decode(arch: Architecture, regs: &RegisterFile, cs: &capstone::Capstone, bytes: &[u8], addr: u64) -> Option<Insn> {
+    pub(crate) fn decode(arch: Architecture, regs: &RegisterFile, cs: &capstone::Capstone, bytes: &[u8], addr: u64) -> Option<Insn> {
         return match arch {
             Architecture::X86 | Architecture::X86_64 => x86::decode(regs, cs, bytes, addr).map(Insn::X86),
             Architecture::Aarch64 => aarch64::decode(regs, cs, bytes, addr).map(Insn::Aarch64),
@@ -331,6 +335,18 @@ impl Insn {
             Insn::X86(insn) => insn.addr,
             Insn::Aarch64(insn) => insn.addr,
         };
+    }
+
+    pub fn is_return(&self) -> bool {
+        return match self {
+            Insn::X86(insn) => insn.mnemonic.starts_with("ret"),
+            Insn::Aarch64(insn) => insn.mnemonic == "ret",
+        };
+    }
+
+    /// Bytes the instruction writes through a register (without reading them first)
+    pub fn bytes_written_through(&self, reg: Reg) -> u64 {
+        return self.memory().iter().filter(|a| a.kind == Access::Write && a.base == Some(reg)).map(|a| a.bytes as u64).sum();
     }
 
     /// Address of the next instruction
@@ -492,14 +508,18 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
         let mut calls: Vec<(u64, usize, i64)> = Vec::new();
 
         for (insn, info) in frame.blocks[&addr].iter().zip(function.blocks[&addr].insns.iter()) {
-            // The memory a duff device writes or reads in the frame belongs to it
+            // The memory an intrinsic writes or reads in the frame belongs to it
             if let Flow::Call(target) = info.flow {
-                if let Some((_, bytes)) = duff_device(env, target) {
-                    for reg in ["rdi", "rsi"] {
-                        if let Some(Known::Stack(offset)) = tracker.get(env.regs.reg(reg)) {
-                            frame.low = frame.low.min(offset);
-                            frame.high = frame.high.max(offset + bytes as i64);
-                        }
+                let (regs, bytes) = match env.language.intrinsic(env, target) {
+                    Some(Intrinsic::Zero { dst, bytes }) => (vec![dst], bytes),
+                    Some(Intrinsic::Copy { dst, src, bytes }) => (vec![dst, src], bytes),
+                    None => (Vec::new(), 0),
+                };
+
+                for reg in regs {
+                    if let Some(Known::Stack(offset)) = tracker.get(reg) {
+                        frame.low = frame.low.min(offset);
+                        frame.high = frame.high.max(offset + bytes as i64);
                     }
                 }
             }
@@ -589,51 +609,6 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
 
 fn align(offset: i64, to: i64) -> i64 {
     return (offset + to - 1) / to * to;
-}
-
-/// Bytes of the arguments of a deferred function passed with it
-const MAX_DEFERRED_ARGS: u64 = 256;
-
-/// Instructions followed from an entry of a duff device to its return
-const MAX_DUFF_INSNS: usize = 1024;
-
-/// A call into runtime.duffzero or runtime.duffcopy of Go (x86_64): the compiler zeroes and copies blocks of memory by
-/// calling their code at the offset that leaves the right number of 16-byte moves before the return. Whether it copies,
-/// and the bytes the moves from the entry write through rdi.
-pub fn duff_device(env: &Env, addr: u64) -> Option<(bool, u64)> {
-    let program = env.program;
-
-    if program.language != Language::Go || program.architecture() != Architecture::X86_64 {
-        return None;
-    }
-
-    let (symbol, _) = program.symbol_near(addr)?;
-
-    let copy = match symbol.name.as_str() {
-        "runtime.duffzero" => false,
-        "runtime.duffcopy" => true,
-        _ => return None,
-    };
-
-    let rdi = env.regs.reg("rdi");
-    let mut at = addr;
-    let mut bytes = 0u64;
-
-    for _ in 0..MAX_DUFF_INSNS {
-        let code = program.bytes_from(at)?;
-        let insn = Insn::decode(Architecture::X86_64, env.regs, env.cs, &code[..code.len().min(16)], at)?;
-
-        if let Insn::X86(x86) = &insn {
-            if x86.mnemonic.starts_with("ret") {
-                return (bytes > 0).then_some((copy, bytes));
-            }
-        }
-
-        bytes += insn.memory().iter().filter(|a| a.kind == Access::Write && a.base == Some(rdi)).map(|a| a.bytes as u64).sum::<u64>();
-        at = insn.end();
-    }
-
-    return None;
 }
 
 /// The argument registers read after each call before being written, in its block (the results of the calls
@@ -1507,8 +1482,8 @@ impl<'ctx> Lifter<'ctx, '_> {
             }
             // The growth of the stack of Go (cmp rsp, [r14+0x10]; jbe to a call to runtime.morestack) is not code of the
             // function: the branch always continues
-            Flow::CondJump(_) if block.succs.iter().any(|e| self.grows_stack(e.to)) => {
-                match block.succs.iter().find(|e| !self.grows_stack(e.to)).and_then(|e| blocks.get(&e.to)) {
+            Flow::CondJump(_) if block.succs.iter().any(|e| self.restarts(e.to)) => {
+                match block.succs.iter().find(|e| !self.restarts(e.to)).and_then(|e| blocks.get(&e.to)) {
                     Some(&next) => llvm!(self.builder.build_unconditional_branch(next)),
                     None => llvm!(self.builder.build_unreachable()),
                 };
@@ -1577,18 +1552,17 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
-    /// A block of a Go function that calls runtime.morestack to grow the stack, then runs the function again
-    fn grows_stack(&self, addr: u64) -> bool {
-        if self.env.program.language != Language::Go {
-            return false;
-        }
-
+    /// A block that calls a function that runs the function again from its start (runtime.morestack of Go grows the
+    /// stack)
+    fn restarts(&self, addr: u64) -> bool {
         let Some(block) = self.function.blocks.get(&addr) else {
             return false;
         };
 
+        let language = self.env.language;
+
         return self.function.calls.iter().filter(|c| c.addr >= block.start && c.addr < block.end).any(|c| match c.target {
-            CallTarget::Function(callee) => self.env.program.symbol_at(callee).is_some_and(|s| execdump_core::golang::grows_stack(&s.name)),
+            CallTarget::Function(callee) => self.env.program.symbol_at(callee).is_some_and(|s| language.restarts_function(&s.name)),
             _ => false,
         });
     }
@@ -1933,6 +1907,11 @@ impl<'ctx> Lifter<'ctx, '_> {
         return None;
     }
 
+    /// Integer constant last stored at [sp + delta] in the current block
+    pub(crate) fn stored_constant(&self, delta: i64) -> Option<u64> {
+        return self.stored_value(delta).and_then(|v| v.into_int_value().get_zero_extended_constant());
+    }
+
     /// Value last stored at [sp + delta] in the current block
     fn stored_value(&self, delta: i64) -> Option<BasicValueEnum<'ctx>> {
         let Some(Known::Stack(offset)) = self.tracker.offset(self.env.abi.stack_pointer, delta) else {
@@ -2142,53 +2121,30 @@ impl<'ctx> Lifter<'ctx, '_> {
      * Calls
      */
 
-    /// runtime.deferproc(siz, fn) and runtime.newproc(siz, fn) of the stack ABI of Go: the siz bytes of the arguments of
-    /// the deferred function (or of the new goroutine) follow their own arguments, they are arguments of the call too
-    /// (defer f(x, y) is runtime_deferproc(16, &f, x, y))
-    fn deferred_arguments(&self, target: &CallTarget, mut sig: Signature) -> Signature {
-        let CallTarget::Function(addr) = target else {
-            return sig;
+    /// memset(dst, 0, n) or memcpy(dst, src, n), the pointers move past the bytes
+    fn intrinsic(&mut self, intrinsic: Intrinsic) -> Result<()> {
+        let (dst, src, bytes) = match intrinsic {
+            Intrinsic::Zero { dst, bytes } => (dst, None, bytes),
+            Intrinsic::Copy { dst, src, bytes } => (dst, Some(src), bytes),
         };
 
-        let abi = self.env.abi;
-        let name = self.env.program.symbol_at(*addr).map_or("", |s| s.name.as_str());
-
-        if !abi.stack_results || !matches!(name, "runtime.deferproc" | "runtime.newproc") {
-            return sig;
-        }
-
-        let size = self.stored_value(abi.stack_args - abi.return_address).and_then(|v| v.into_int_value().get_zero_extended_constant()).filter(|&s| s <= MAX_DEFERRED_ARGS);
-
-        let Some(size) = size else {
-            return sig;
-        };
-
-        let first = abi.stack_args + 2 * abi.slot_size;
-
-        for word in 0..(size as i64 + abi.slot_size - 1) / abi.slot_size {
-            sig.params.push(Value { loc: Loc::Stack(first + word * abi.slot_size), ty: LType::Int(abi.slot_size as u32 * 8), name: None });
-        }
-
-        return sig;
-    }
-
-    /// A call into a duff device of Go: memset(rdi, 0, n) or memcpy(rdi, rsi, n), the pointers move past the bytes
-    fn duff(&mut self, copy: bool, bytes: u64) -> Result<()> {
-        let (rdi, rsi) = (self.env.regs.reg("rdi"), self.env.regs.reg("rsi"));
-        let destination = self.address(Some(rdi), None, 0)?;
+        let destination = self.address(Some(dst), None, 0)?;
         let size = self.constant(64, bytes);
 
-        if copy {
-            let source = self.address(Some(rsi), None, 0)?;
-            llvm!(self.builder.build_memcpy(destination, 1, source, 1, size));
-            let moved = llvm!(self.builder.build_int_add(self.read_reg(rsi)?, size, ""));
-            self.write_reg(rsi, moved)?;
-        } else {
-            llvm!(self.builder.build_memset(destination, 1, self.cx.i8_type().const_zero(), size));
+        match src {
+            Some(src) => {
+                let source = self.address(Some(src), None, 0)?;
+                llvm!(self.builder.build_memcpy(destination, 1, source, 1, size));
+                let moved = llvm!(self.builder.build_int_add(self.read_reg(src)?, size, ""));
+                self.write_reg(src, moved)?;
+            }
+            None => {
+                llvm!(self.builder.build_memset(destination, 1, self.cx.i8_type().const_zero(), size));
+            }
         }
 
-        let moved = llvm!(self.builder.build_int_add(self.read_reg(rdi)?, size, ""));
-        self.write_reg(rdi, moved)?;
+        let moved = llvm!(self.builder.build_int_add(self.read_reg(dst)?, size, ""));
+        self.write_reg(dst, moved)?;
         self.flags = None;
 
         return Ok(());
@@ -2291,15 +2247,15 @@ impl<'ctx> Lifter<'ctx, '_> {
     /// Calls a function: the arguments are read where its signature puts them, the result is written back.
     /// A tail call (a jump) passes the arguments above the return address of the function.
     pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<()> {
+        let language = self.env.language;
+
         if let (CallTarget::Function(addr), false) = (target, tail) {
-            if let Some((copy, bytes)) = duff_device(self.env, *addr) {
-                return self.duff(copy, bytes);
+            if let Some(intrinsic) = language.intrinsic(self.env, *addr) {
+                return self.intrinsic(intrinsic);
             }
         }
 
-        let sig = (self.env.signature)(target);
-
-        let sig = self.deferred_arguments(target, sig);
+        let sig = language.call_signature(self, target, (self.env.signature)(target));
 
         let sig = match self.call_slots.get(&self.addr) {
             Some(slots) if sig.guessed && !tail && self.env.abi.stack_results => self.slots_signature(sig, slots),
@@ -2839,6 +2795,33 @@ mod tests {
 
         assert_eq!(frame.stack_results, BTreeMap::from([(0x38, 8), (0x40, 8), (0x48, 8)]));
         assert!(frame.high >= 0x50);
+    }
+
+    #[test]
+    fn register_reads() {
+        let access = |arch: Architecture, bytes: &[u8], reg: &str| {
+            let regs = RegisterFile::new(arch);
+            let cs = capstone(arch).unwrap();
+            let insn = Insn::decode(arch, &regs, &cs, bytes, 0x1000).unwrap();
+            return insn.register_access(regs.reg(reg));
+        };
+
+        // nop dword ptr [rax + rax]: the memory of a long nop is not read
+        assert_eq!(access(Architecture::X86_64, &[0x0f, 0x1f, 0x44, 0x00, 0x00], "rax"), None);
+        // imul rcx, rdx, 0x498
+        assert_eq!(access(Architecture::X86_64, &[0x48, 0x69, 0xca, 0x98, 0x04, 0x00, 0x00], "rcx"), Some(false));
+        assert_eq!(access(Architecture::X86_64, &[0x48, 0x69, 0xca, 0x98, 0x04, 0x00, 0x00], "rdx"), Some(true));
+
+        // ldaddal w10, w11, [x4]: adds w10, loads into w11
+        let ldaddal = 0xb8ea008bu32.to_le_bytes();
+        assert_eq!(access(Architecture::Aarch64, &ldaddal, "x11"), Some(false));
+        assert_eq!(access(Architecture::Aarch64, &ldaddal, "x10"), Some(true));
+        assert_eq!(access(Architecture::Aarch64, &ldaddal, "x4"), Some(true));
+
+        // stlxr w27, w11, [x4]: the status goes to w27
+        let stlxr = 0x881bfc8bu32.to_le_bytes();
+        assert_eq!(access(Architecture::Aarch64, &stlxr, "x27"), Some(false));
+        assert_eq!(access(Architecture::Aarch64, &stlxr, "x11"), Some(true));
     }
 
     #[test]

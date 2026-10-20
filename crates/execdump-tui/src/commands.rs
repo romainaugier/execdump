@@ -166,6 +166,7 @@ pub(crate) enum Motion {
     Previous,
     WordNext,
     WordPrevious,
+    WordEnd,
     LineStart,
     LineFirst,
     LineEnd,
@@ -239,6 +240,10 @@ pub(crate) enum Command {
     Comment(String),
     /// The string literal under the cursor in its forms (text, C, bytes, shell, Python)
     StringForms,
+    /// Visual mode by characters or by lines, None leaves it
+    Visual(Option<bool>),
+    /// Copies the selection (the lines from the cursor without one) to the clipboard
+    Yank,
     Revert,
     Resolve { edited: bool, decompiled: bool },
     MoveFunction(String, Option<String>),
@@ -259,6 +264,8 @@ pub(crate) enum Command {
     Break(Option<String>),
     /// Frame of the call stack the variables and the code are shown for
     SelectFrame(usize),
+    /// A line of input of the program
+    Input(String),
 
     // Splits and tabs
     Split { dir: Dir, target: Option<String> },
@@ -318,7 +325,7 @@ const DEBUG: &str = "Debugger";
 use Complete as C;
 
 const DIRECTIONS: &[&str] = &["left", "down", "up", "right"];
-const REACHES: &[&str] = &["word", "word-end", "word-back", "line-end", "line-start", "line-first", "line", "down", "up", "char", "char-back"];
+const REACHES: &[&str] = &["word", "word-end", "word-back", "line-end", "line-start", "line-first", "line", "down", "up", "char", "char-back", "selection"];
 
 /// Every command, in the order of the help
 pub(crate) const SPECS: &[Spec] = &[
@@ -355,6 +362,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("previous", &[], "", "previous node, label, function or proposal", MOVES, C::Nothing),
     spec("word-next", &[], "", "next word", MOVES, C::Nothing),
     spec("word-previous", &[], "", "previous word", MOVES, C::Nothing),
+    spec("word-end", &[], "", "end of the word", MOVES, C::Nothing),
     spec("line-start", &[], "", "start of the line", MOVES, C::Nothing),
     spec("line-first", &[], "", "first character of the line", MOVES, C::Nothing),
     spec("line-end", &[], "", "end of the line", MOVES, C::Nothing),
@@ -390,7 +398,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("undo", &[], "", "undo the last change", CODE, C::Nothing),
     spec("redo", &[], "", "redo the last undone change", CODE, C::Nothing),
     spec("delete-line", &[], "", "delete the line", CODE, C::Nothing),
-    spec("delete", &[], "<motion>", "delete over a motion: word, word-end, word-back, line-end, line-start, line-first, line, down, up, char, char-back", CODE, C::Words(REACHES)),
+    spec("delete", &[], "<motion>", "delete over a motion: word, word-end, word-back, line-end, line-start, line-first, line, down, up, char, char-back, selection (of the visual mode)", CODE, C::Words(REACHES)),
     spec("change", &[], "<motion>", "delete over a motion, then insert", CODE, C::Words(REACHES)),
     spec("next-conflict", &[], "", "next conflict", CODE, C::Nothing),
     spec("previous-conflict", &[], "", "previous conflict", CODE, C::Nothing),
@@ -399,6 +407,8 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("sig", &["signature", "prototype"], "<prototype>", "prototype of the current function (its callers follow)", CODE, C::Nothing),
     spec("summary", &[], "[text]", "summary of the function, a comment at the top of its code", CODE, C::Nothing),
     spec("comment", &[], "<text>", "comment above the line", CODE, C::Nothing),
+    spec("visual", &[], "[line|off]", "visual mode: selects from the cursor by characters (by lines), the moves extend it", CODE, C::Words(&["line", "off"])),
+    spec("yank", &[], "", "copy the selection (the line, the count of lines without one) to the clipboard", CODE, C::Nothing),
     spec("string", &["str"], "", "the string literal under the cursor as text, C, bytes, shell and Python (Enter copies one)", CODE, C::Nothing),
     spec("revert", &[], "", "drop the edits of the current function", CODE, C::Nothing),
     spec("ours", &["edited"], "", "resolve the conflict: keep the edited code", CODE, C::Nothing),
@@ -423,6 +433,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("kill", &["stop-debug"], "", "kill the program and the debugger", DEBUG, C::Nothing),
     spec("break", &["b", "br"], "[function or address]", "toggle a breakpoint (at the line or the instruction under the cursor without an argument)", DEBUG, C::Function),
     spec("frame", &[], "<n>", "frame of the call stack the code and the variables are shown for", DEBUG, C::Nothing),
+    spec("input", &["stdin"], "[text]", "send a line to the input of the program (its terminal)", DEBUG, C::Nothing),
     spec("split", &["sp", "new"], "[function]", "split below (on a function)", SPLITS, C::Function),
     spec("vsplit", &["vs", "vnew"], "[function]", "split on the right (on a function)", SPLITS, C::Function),
     spec("tabnew", &["tabe", "tabedit"], "[function]", "new tab (on a function)", SPLITS, C::Function),
@@ -518,6 +529,7 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
         "previous" => Command::Move(Motion::Previous),
         "word-next" => Command::Move(Motion::WordNext),
         "word-previous" => Command::Move(Motion::WordPrevious),
+        "word-end" => Command::Move(Motion::WordEnd),
         "line-start" => Command::Move(Motion::LineStart),
         "line-first" => Command::Move(Motion::LineFirst),
         "line-end" => Command::Move(Motion::LineEnd),
@@ -591,6 +603,7 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
                 Some("up") => Reach::Up,
                 Some("char") => Reach::Char,
                 Some("char-back") => Reach::CharBack,
+                Some("selection") => Reach::Selection,
                 _ => return Err(usage(spec)),
             };
 
@@ -610,6 +623,13 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
         "summary" => Command::Summary(rest.to_string()),
         "comment" => Command::Comment(rest.to_string()),
         "string" => Command::StringForms,
+        "visual" => Command::Visual(match first {
+            None => Some(false),
+            Some("line") => Some(true),
+            Some("off") => None,
+            Some(_) => return Err(usage(spec)),
+        }),
+        "yank" => Command::Yank,
         "revert" => Command::Revert,
         "ours" => Command::Resolve { edited: true, decompiled: false },
         "theirs" => Command::Resolve { edited: false, decompiled: true },
@@ -639,6 +659,7 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
         "interrupt" => Command::Debugger(DebugAction::Interrupt),
         "kill" => Command::Debugger(DebugAction::Kill),
         "break" => Command::Break(first_owned),
+        "input" => Command::Input(rest.to_string()),
         "frame" => Command::SelectFrame(first.and_then(|n| n.parse().ok()).ok_or_else(|| usage(spec))?),
         "split" => Command::Split { dir: Dir::Down, target: first_owned },
         "vsplit" => Command::Split { dir: Dir::Right, target: first_owned },
@@ -668,6 +689,8 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
 /// Where a binding applies, the most specific first
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Context {
+    /// Visual mode of the C code: y yanks the selection, Esc leaves it
+    Visual,
     /// A search is active: n / p go to its matches
     Search,
     Graph,
@@ -685,6 +708,7 @@ pub(crate) enum Context {
 impl Context {
     pub fn title(&self) -> &'static str {
         return match self {
+            Context::Visual => "Visual mode of the C code",
             Context::Search => "While a search is active",
             Context::Graph => "Graphs",
             Context::Source => "C code",
@@ -839,6 +863,9 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Review, &[s("a")], "accept");
     bind(Review, &[s("r")], "reject");
 
+    // Debugger
+    bind(Debug, &[s("i")], "prompt input ");
+
     // C code
     bind(Source, &[ctrl(k.page_down)], "page-down");
     bind(Source, &[ctrl(k.page_up)], "page-up");
@@ -857,6 +884,17 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Source, &[s("u")], "undo");
     bind(Source, &[s("U")], "redo");
     bind(Source, &[s("dd")], "delete-line");
+    bind(Source, &[s("v")], "visual");
+    bind(Source, &[s("V")], "visual line");
+    bind(Source, &[s("yy"), s("Y")], "yank");
+
+    // Visual mode
+    // e toggles the explorer out of it
+    bind(Visual, &[s("e")], "word-end");
+    bind(Visual, &[s("y")], "yank");
+    bind(Visual, &[s("d"), s("x")], "delete selection");
+    bind(Visual, &[s("c"), s("s")], "change selection");
+    bind(Visual, &[s("<Esc>")], "visual off");
 
     for (motion, reach) in [("w", "word"), ("e", "word-end"), ("b", "word-back"), ("$", "line-end"), ("0", "line-start"), ("^", "line-first"), ("j", "down"), ("k", "up"), ("l", "char"), ("h", "char-back")] {
         bind(Source, &[format!("d{}", motion)], &format!("delete {}", reach));
@@ -918,7 +956,7 @@ pub(crate) fn resolve(bindings: &[Binding], contexts: &[Context], keys: &[Key]) 
 pub(crate) fn help_lines(bindings: &[Binding]) -> Vec<(String, String)> {
     let mut lines = Vec::new();
 
-    for context in [Context::Global, Context::Explorer, Context::Content, Context::Search, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source, Context::Debug] {
+    for context in [Context::Global, Context::Explorer, Context::Content, Context::Search, Context::Graph, Context::Disasm, Context::Table, Context::Review, Context::Source, Context::Visual, Context::Debug] {
         lines.push((context.title().to_string(), String::new()));
         let mut seen: Vec<&str> = Vec::new();
 
@@ -993,8 +1031,9 @@ impl App {
 
         // n / p go to the matches of an active search (the tables filter instead)
         let search = (self.searching && !matches!(self.view(), View::Table(_))).then_some(Context::Search);
+        let visual = matches!(self.view(), View::Source(source) if source.visual.is_some()).then_some(Context::Visual);
 
-        return search.into_iter().chain(view).chain([Context::Content, Context::Global]).collect();
+        return visual.into_iter().chain(search).chain(view).chain([Context::Content, Context::Global]).collect();
     }
 
     /// A key in normal mode: a count, the next key of a sequence, or a binding
@@ -1163,7 +1202,7 @@ impl App {
                 project.revert(addr);
                 Ok(())
             }),
-            Command::Comment(_) | Command::StringForms | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } => {
+            Command::Comment(_) | Command::StringForms | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } | Command::Visual(_) | Command::Yank => {
                 self.error("Only in the C code (:source)".to_string());
             }
             Command::MoveFunction(module, function) => self.move_function(Some(module), function),
@@ -1195,6 +1234,13 @@ impl App {
             Command::Debugger(action) => self.debug_action(action),
             Command::Break(target) => self.toggle_breakpoint(target.as_deref()),
             Command::SelectFrame(index) => self.select_frame(index),
+            Command::Input(text) => match self.debugger.as_mut() {
+                Some(debugger) => {
+                    let result = debugger.input(&text);
+                    self.report(result);
+                }
+                None => self.error("No program under the debugger".to_string()),
+            },
         }
 
         let _ = count;

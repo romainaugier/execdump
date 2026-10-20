@@ -8,7 +8,8 @@
 
 use crate::analysis::function::CallTarget;
 use crate::analysis::Analysis;
-use crate::cxx;
+use crate::lang::cxx::names::identifier;
+use crate::lang::{Language, Languages, Mapping};
 use crate::lift::regs::{Abi, Reg, RegisterFile};
 use crate::lift::{self, analyze_frame, discovery_signature, guessed_signature, refine, text_at, Env, Frame, LType, Loc, Signature, Value};
 use crate::typedb::{Aggregate, Platform, TypeDb};
@@ -22,7 +23,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 
 use execdump_core::demangle::demangle_symbol;
 use execdump_core::disasm::Architecture;
-use execdump_core::program::{Format, Language, Program};
+use execdump_core::program::{Format, Program};
 
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -152,10 +153,11 @@ pub struct Decompiler<'a> {
     pub program: &'a Program,
     pub analysis: &'a Analysis,
     pub regs: RegisterFile,
-    pub abi: Abi,
+    /// The calling convention of each language (the one of the platform for the languages without one of their own)
+    abis: Vec<Abi>,
     pub model: DataModel,
     pub typedb: TypeDb,
-    classes: HashSet<String>,
+    pub languages: Languages,
     /// C names of the functions with a mangled symbol
     demangled: HashMap<u64, String>,
     signatures: RefCell<HashMap<u64, Signature>>,
@@ -208,26 +210,26 @@ impl<'a> Decompiler<'a> {
 
         let windows = program.format == Format::Pe;
         let regs = RegisterFile::new(arch);
-        let abi = match program.language {
-            Language::Go if program.go_register_abi => Abi::go(&regs).unwrap_or_else(|| Abi::go_stack(&regs)),
-            Language::Go => Abi::go_stack(&regs),
-            _ => Abi::new(&regs, windows),
-        };
+        let languages = Languages::new(program);
+        let abis = languages.iter().map(|l| l.abi(program, &regs).unwrap_or_else(|| Abi::new(&regs, windows))).collect();
         let model = DataModel::new(arch, windows);
-        let typedb = TypeDb::bundled(if windows { Platform::Windows } else { Platform::Unix }, model);
+        let mut typedb = TypeDb::bundled(if windows { Platform::Windows } else { Platform::Unix }, model);
 
-        let symbols: Vec<_> = program.symbols.values().filter_map(|s| demangle_symbol(&s.name)).collect();
-        let classes = cxx::known_classes(symbols.iter());
-        let demangled = demangled_names(program, analysis, &model, &classes);
+        // The runtimes of the languages of the program
+        for source in languages.iter().filter_map(|l| l.type_database(program)) {
+            typedb.extend(source).context("bundled type database of a language")?;
+        }
+
+        let demangled = demangled_names(program, analysis, &languages);
 
         return Ok(Decompiler {
             program,
             analysis,
             regs,
-            abi,
+            abis,
             model,
             typedb,
-            classes,
+            languages,
             demangled,
             signatures: RefCell::new(HashMap::new()),
             in_progress: RefCell::new(HashSet::new()),
@@ -385,6 +387,7 @@ impl<'a> Decompiler<'a> {
                 callees,
                 imported: imported.clone(),
                 sized: Default::default(),
+                language: self.languages.owner(self.program, addr),
             };
 
             c::decompile(&module, function, &ctx, prototype.as_ref(), addr)
@@ -699,13 +702,13 @@ impl<'a> Decompiler<'a> {
         let module = self.module(cx, &function.name)?;
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
-        let env = self.env(&signature, &global_name);
+        let env = self.env(addr, &signature, &global_name);
 
         let frame = self.frame(&env, function)?;
         let (_, slot_writes) = lift::lift(cx, &module, &env, function, &frame, sig, false, storage)?;
 
-        let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
-        let canaries = self.optimize(&module, storage, &saved)?.into_iter().map(|index| index as i64 + frame.low).collect();
+        let saved = frame.saved_slots(function.addr, env.abi.slot_size as i64);
+        let canaries = self.optimize(&module, storage, &saved, env.language)?.into_iter().map(|index| index as i64 + frame.low).collect();
 
         return Ok((module, Lifted { frame, slot_writes, canaries }));
     }
@@ -717,8 +720,9 @@ impl<'a> Decompiler<'a> {
             return;
         };
 
-        let callee_saved = self.abi.callee_saved.iter().fold(0u128, |mask, &r| mask | 1 << r);
-        let results = 1u128 << self.abi.int_ret | 1u128 << self.abi.float_ret;
+        let abi = self.abi(addr);
+        let callee_saved = abi.callee_saved.iter().fold(0u128, |mask, &r| mask | 1 << r);
+        let results = 1u128 << abi.int_ret | 1u128 << abi.float_ret;
         let index: HashMap<u64, usize> = analysis.blocks.keys().enumerate().map(|(i, &a)| (a, i)).collect();
 
         let blocks: Vec<storage::Block> = analysis
@@ -764,15 +768,43 @@ impl<'a> Decompiler<'a> {
         let offset = |a: u64| a.wrapping_sub(addr) as u32;
         function.storage.frame = lifted
             .frame
-            .stack_offsets(&self.regs, self.abi.stack_pointer)
+            .stack_offsets(&self.regs, abi.stack_pointer)
             .into_iter()
             .filter_map(|(start, end, sp)| Some(storage::Range { start: offset(start), end: offset(end), loc: storage::Loc::stack(sp)? }))
             .collect();
         function.storage.frame.sort_by_key(|r| r.start);
     }
 
-    fn env<'e>(&'e self, signature: &'e dyn Fn(&CallTarget) -> Signature, global_name: &'e dyn Fn(u64) -> String) -> Env<'e> {
-        return Env { program: self.program, analysis: self.analysis, regs: &self.regs, abi: &self.abi, signature, global_name, cs: &self.cs };
+    /// What the lifting of the function at an address needs: its calling convention and its language
+    fn env<'e>(&'e self, addr: u64, signature: &'e dyn Fn(&CallTarget) -> Signature, global_name: &'e dyn Fn(u64) -> String) -> Env<'e> {
+        let language = self.languages.owner_index(self.program, addr);
+
+        return Env {
+            program: self.program,
+            analysis: self.analysis,
+            regs: &self.regs,
+            abi: &self.abis[language],
+            signature,
+            global_name,
+            cs: &self.cs,
+            languages: &self.languages,
+            language: self.languages.get(language),
+        };
+    }
+
+    /// The calling convention of a function: the one of its language
+    pub fn abi(&self, addr: u64) -> &Abi {
+        return &self.abis[self.languages.owner_index(self.program, addr)];
+    }
+
+    /// The calling convention of the program (its language)
+    fn main_abi(&self) -> &Abi {
+        return &self.abis[self.languages.main_index()];
+    }
+
+    /// The calling convention of C on the platform (the imports, the libraries)
+    fn platform_abi(&self) -> &Abi {
+        return &self.abis[self.abis.len() - 1];
     }
 
     fn module<'ctx>(&self, cx: &'ctx Context, name: &str) -> Result<Module<'ctx>> {
@@ -785,7 +817,7 @@ impl<'a> Decompiler<'a> {
 
     /// Optimizes a lifted module, returns the frame offsets the stack canary was stored at. The saved slots are
     /// the offsets from the stack pointer at the entry the prologue saves registers to.
-    fn optimize(&self, module: &Module, storage: bool, saved: &[i64]) -> Result<Vec<u64>> {
+    fn optimize(&self, module: &Module, storage: bool, saved: &[i64], language: &dyn Language) -> Result<Vec<u64>> {
         module.verify().map_err(|e| anyhow!("invalid IR: {}", e.to_string()))?;
 
         module.run_passes(PASSES, &self.machine, PassBuilderOptions::create())?;
@@ -794,12 +826,13 @@ impl<'a> Decompiler<'a> {
         // then optimized again
         let mut again = false;
         let mut canaries = Vec::new();
+        let extent = |callee: &str, index: u32| language.argument_extent(self.program, callee, index);
 
         for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
             lift::fold_frame_addresses(function);
             let protector = lift::remove_stack_protector(function);
             again |= protector.changed;
-            let split = lift::split_frame(module, function, &protector.slots, saved);
+            let split = lift::split_frame(module, function, &protector.slots, saved, &extent);
             again |= split;
             canaries.extend(protector.slots.iter().map(|(_, offset)| *offset));
 
@@ -821,7 +854,7 @@ impl<'a> Decompiler<'a> {
             again = false;
 
             for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0 && round + 1 < MAX_SPLIT_ROUNDS) {
-                let split = lift::split_frame(module, function, &[], saved);
+                let split = lift::split_frame(module, function, &[], saved, &extent);
                 again |= split;
 
                 if split && storage {
@@ -966,10 +999,14 @@ impl<'a> Decompiler<'a> {
 
         if let Some(symbol) = self.program.symbol_at(addr) {
             if let Some(demangled) = demangle_symbol(&symbol.name) {
-                return cxx::identifier(&demangled.name);
+                return identifier(&demangled.name);
             }
 
             return sanitize(&symbol.name);
+        }
+
+        if let Some(name) = self.languages.global_name(self.program, addr) {
+            return name;
         }
 
         if text_at(self.program, addr).is_some() && !self.program.region_at(addr).is_some_and(|r| r.perms.write) {
@@ -987,7 +1024,7 @@ impl<'a> Decompiler<'a> {
         return match target {
             CallTarget::Function(addr) => self.signature(*addr),
             CallTarget::Import(name) => self.import_signature(name),
-            CallTarget::Indirect => guessed_signature("indirect", &self.abi),
+            CallTarget::Indirect => guessed_signature("indirect", self.main_abi()),
         };
     }
 
@@ -998,12 +1035,12 @@ impl<'a> Decompiler<'a> {
             return self.signature_from_prototype(&prototype, &clean);
         }
 
-        if let Some(prototype) = demangle_symbol(name).and_then(|s| cxx::prototype(&s, &self.model, &self.classes)) {
+        if let Some(prototype) = demangle_symbol(name).and_then(|s| self.languages.demangled_prototype(&s)) {
             return self.signature_from_prototype(&prototype, &prototype.name);
         }
 
         let noreturn = crate::analysis::function::is_noreturn_name(name);
-        return Signature { noreturn, ..guessed_signature(&clean, &self.abi) };
+        return Signature { noreturn, ..guessed_signature(&clean, self.platform_abi()) };
     }
 
     /// Signature of a function of the program (cached)
@@ -1051,7 +1088,7 @@ impl<'a> Decompiler<'a> {
     fn compute_signature(&self, addr: u64) -> Signature {
         let symbol = self.program.symbol_at(addr).map_or("", |s| s.name.as_str());
 
-        if let Some(sig) = self.go_runtime_signature(symbol, &self.function_name(addr)) {
+        if let Some(sig) = self.languages.owner(self.program, addr).runtime_signature(self.program, self.abi(addr), &self.regs, symbol, &self.function_name(addr)) {
             return sig;
         }
 
@@ -1094,39 +1131,6 @@ impl<'a> Decompiler<'a> {
         return mask;
     }
 
-    /// The functions of the Go runtime with their own conventions: the write barriers return the buffer the
-    /// caller writes the pointers to in r11 (x25 on aarch64), the registers of the arguments untouched, deferproc of the
-    /// stack ABI returns in rax
-    fn go_runtime_signature(&self, symbol: &str, name: &str) -> Option<Signature> {
-        if self.program.language != Language::Go {
-            return None;
-        }
-
-        // The stack ABI: runtime.deferproc returns in rax whether a deferred function recovered from a panic (the code
-        // after the call tests it), its arguments are on the stack
-        if self.abi.stack_results && matches!(symbol, "runtime.deferproc" | "runtime.deferprocStack") {
-            let slot = LType::Int(self.abi.slot_size as u32 * 8);
-            let mut params = vec![Value { loc: Loc::Stack(self.abi.stack_args), ty: slot, name: None }];
-
-            if symbol == "runtime.deferproc" {
-                params[0].ty = LType::Int(32);
-                params.push(Value { loc: Loc::Stack(self.abi.stack_args + self.abi.slot_size), ty: LType::Ptr, name: None });
-            }
-
-            let ret = Value { loc: Loc::Reg(self.abi.int_ret), ty: LType::Int(32), name: None };
-            return Some(Signature { name: name.to_string(), params, ret: Some(ret), outs: Vec::new(), variadic: false, noreturn: false, guessed: false, clobbers: lift::CLOBBERS_ALL });
-        }
-
-        if !symbol.starts_with("runtime.gcWriteBarrier") {
-            return None;
-        }
-
-        let buffer = self.regs.reg(if self.program.architecture() == Architecture::Aarch64 { "x25" } else { "r11" });
-        let ret = Value { loc: Loc::Reg(buffer), ty: LType::Ptr, name: None };
-
-        return Some(Signature { name: name.to_string(), params: Vec::new(), ret: Some(ret), outs: Vec::new(), variadic: false, noreturn: false, guessed: false, clobbers: 1 << buffer });
-    }
-
     fn compute_signature_without_clobbers(&self, addr: u64) -> Signature {
         let name = self.function_name(addr);
         let function = self.analysis.functions.get(&addr);
@@ -1137,51 +1141,52 @@ impl<'a> Decompiler<'a> {
         }
 
         if let Some(prototype) = self.user_prototypes.borrow().get(&addr).cloned() {
-            if self.abi.stack_results || self.abi.register_results {
+            if self.abi(addr).stack_results || self.abi(addr).register_results {
                 return Signature { noreturn, ..self.stack_signature_from_prototype(&prototype, addr, &name) };
             }
 
-            return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+            return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) };
         }
 
         let symbol = self.program.symbol_at(addr).map(|s| s.name.clone()).unwrap_or_default();
         let known = self.typedb.function(&symbol).filter(|_| !symbol.is_empty());
-        let demangled = demangle_symbol(&symbol).and_then(|s| cxx::prototype(&s, &self.model, &self.classes));
+
+        // The prototypes the database of the language gives to the C names of its functions (runtime_newobject of
+        // runtime.newobject, core_panicking_panic of the mangled core::panicking::panic)
+        if let Some(prototype) = self.typedb.function(&name).filter(|_| known.is_none() && !symbol.is_empty() && symbol != name) {
+            let ltype = |ty: &CType| self.ltype(ty);
+
+            match self.languages.owner(self.program, addr).prototype_signature(self.program, self.abi(addr), &prototype, addr, &ltype) {
+                Mapping::Platform => return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) },
+                Mapping::Signature(sig) => {
+                    self.add_prototype(prototype);
+                    return Signature { noreturn, ..sig };
+                }
+                Mapping::Mismatch => {}
+            }
+        }
+        let demangled = demangle_symbol(&symbol).and_then(|s| self.languages.demangled_prototype(&s));
 
         // Fully known prototypes are used as they are
         if let Some(prototype) = known.or(demangled.clone().filter(|p| !p.ty.ret.is_unknown())) {
-            return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+            return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) };
         }
 
         // The functions the C runtime links in return nothing (what is left in the return register is not a
         // result, they have no caller in the program)
         if let Some((_, text)) = CRT_PROTOTYPES.iter().find(|(n, _)| *n == name) {
             if let Ok(prototype) = crate::notes::parse_prototype(text, &self.typedb) {
-                return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+                return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) };
             }
         }
 
         if let Some(ty) = self.callbacks().get(&addr) {
-            return Signature { noreturn, ..self.signature_from_prototype(&Prototype { name: name.clone(), ty: ty.clone() }, &name) };
+            return Signature { noreturn, ..self.signature_with_abi(&Prototype { name: name.clone(), ty: ty.clone() }, &name, self.abi(addr)) };
         }
 
         let mut discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
 
-        // The pclntab of Go gives the size of the arguments and results: none means none (main.main), else as many
-        // words at most of each
-        if let Some(&size) = self.program.go_args.get(&addr) {
-            let words = (size as i64 / self.abi.slot_size) as usize;
-
-            if self.abi.register_results {
-                discovered.params.truncate(words);
-            }
-
-            if words == 0 {
-                discovered.ret = None;
-            }
-
-            discovered.outs.truncate(words.saturating_sub(1));
-        }
+        self.languages.owner(self.program, addr).bound_signature(self.program, self.abi(addr), addr, &mut discovered);
 
         // A result nobody reads is a leftover in the return register
         if discovered.ret.as_ref().is_some_and(|r| matches!(r.loc, Loc::Reg(_))) && discovered.outs.is_empty() && !self.result_read_by_callers(addr) {
@@ -1190,7 +1195,7 @@ impl<'a> Decompiler<'a> {
 
         // Several results in registers: up to the last one a caller reads (the functions called from elsewhere only
         // return the first one)
-        if self.abi.register_results && discovered.ret.is_some() {
+        if self.abi(addr).register_results && discovered.ret.is_some() {
             let first = self.result_read_by_callers(addr);
             let last = discovered.outs.iter().rposition(|out| match out.loc {
                 Loc::Reg(reg) => self.result_read(addr, reg, false, &mut HashSet::new(), MAX_RESULT_DEPTH),
@@ -1210,12 +1215,12 @@ impl<'a> Decompiler<'a> {
             let types = [CType::int(32), CType::ptr(CType::ptr(CType::Char)), CType::ptr(CType::ptr(CType::Char))];
             let params = names.iter().zip(types).take(discovered.params.len()).map(|(n, ty)| Param { name: Some(n.to_string()), ty }).collect();
             let prototype = Prototype { name: name.clone(), ty: FuncType { ret: CType::int(32), params, variadic: false } };
-            return Signature { noreturn, ..self.signature_from_prototype(&prototype, &name) };
+            return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) };
         }
 
         // Itanium encodes the parameters but not the return type
         if let Some(prototype) = demangled {
-            let sig = self.signature_from_prototype(&prototype, &name);
+            let sig = self.signature_with_abi(&prototype, &name, self.abi(addr));
             return Signature { ret: discovered.ret, noreturn, ..sig };
         }
 
@@ -1228,10 +1233,11 @@ impl<'a> Decompiler<'a> {
         return self.callbacks.get_or_init(|| {
             let signature = |target: &CallTarget| self.call_signature(target);
             let global_name = |addr: u64| self.global_name(addr);
-            let env = self.env(&signature, &global_name);
             let mut found: HashMap<u64, Option<FuncType>> = HashMap::new();
 
             for caller in self.analysis.functions.values() {
+                let env = self.env(caller.addr, &signature, &global_name);
+
                 for call in caller.calls.iter() {
                     let import = match &call.target {
                         CallTarget::Import(name) => Some(name.as_str()),
@@ -1289,7 +1295,7 @@ impl<'a> Decompiler<'a> {
     /// (a function without callers in the program is called from elsewhere)
     fn result_read_by_callers(&self, addr: u64) -> bool {
         let mut visited = HashSet::new();
-        return self.result_read(addr, self.abi.int_ret, true, &mut visited, MAX_RESULT_DEPTH);
+        return self.result_read(addr, self.abi(addr).int_ret, true, &mut visited, MAX_RESULT_DEPTH);
     }
 
     /// Whether a caller reads a return register of a function, unknown is the answer for the functions whose callers
@@ -1299,16 +1305,24 @@ impl<'a> Decompiler<'a> {
             return false;
         }
 
-        let Some(callers) = self.analysis.callers.get(&addr).filter(|_| depth > 0) else {
-            return unknown;
+        // Called from elsewhere only
+        let elsewhere = unknown && self.languages.owner(self.program, addr).result_read_elsewhere(self.program, addr);
+
+        let Some(callers) = self.analysis.callers.get(&addr) else {
+            return elsewhere;
         };
+
+        if depth == 0 {
+            return unknown;
+        }
 
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
-        let env = self.env(&signature, &global_name);
         let mut sites = 0;
 
         for caller in callers.iter().filter_map(|c| self.analysis.functions.get(c)) {
+            let env = self.env(caller.addr, &signature, &global_name);
+
             for call in caller.calls.iter().filter(|c| c.target == CallTarget::Function(addr)) {
                 sites += 1;
 
@@ -1328,7 +1342,7 @@ impl<'a> Decompiler<'a> {
             }
         }
 
-        return sites == 0 && unknown;
+        return sites == 0 && elsewhere;
     }
 
     /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used
@@ -1339,17 +1353,17 @@ impl<'a> Decompiler<'a> {
         let module = self.module(&cx, name)?;
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
-        let env = self.env(&signature, &global_name);
+        let env = self.env(addr, &signature, &global_name);
 
         let frame = self.frame(&env, function)?;
-        let discovery = discovery_signature(name, &self.abi, &self.regs, &frame.stack_params, &frame.stack_results);
+        let discovery = discovery_signature(name, env.abi, &self.regs, &frame.stack_params, &frame.stack_results);
         let (llvm, _) = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true, false)?;
 
-        let saved = frame.saved_slots(function.addr, self.abi.slot_size as i64);
-        self.optimize(&module, false, &saved)?;
+        let saved = frame.saved_slots(function.addr, env.abi.slot_size as i64);
+        self.optimize(&module, false, &saved, env.language)?;
 
-        let high_read = || self.abi.int_ret_high.is_some_and(|high| self.result_read(addr, high, false, &mut HashSet::new(), MAX_RESULT_DEPTH));
-        return Ok(refine(&module, llvm, &discovery, &self.abi, &high_read));
+        let high_read = || env.abi.int_ret_high.is_some_and(|high| self.result_read(addr, high, false, &mut HashSet::new(), MAX_RESULT_DEPTH));
+        return Ok(refine(&module, llvm, &discovery, env.abi, &high_read));
     }
 
     /// Stack frame of a function, decoded once for its discovery and its final lift
@@ -1398,9 +1412,14 @@ impl<'a> Decompiler<'a> {
         return Prototype { name: sig.name.clone(), ty: FuncType { ret, params, variadic: sig.variadic } };
     }
 
-    /// Machine level signature of a C prototype: parameters in the ABI registers, then on the stack
+    /// Machine level signature of a C prototype with the calling convention of the platform: parameters in the ABI
+    /// registers, then on the stack
     pub fn signature_from_prototype(&self, prototype: &Prototype, name: &str) -> Signature {
-        let abi = &self.abi;
+        return self.signature_with_abi(prototype, name, self.platform_abi());
+    }
+
+    /// Machine level signature of a C prototype with a calling convention
+    fn signature_with_abi(&self, prototype: &Prototype, name: &str, abi: &Abi) -> Signature {
         let (mut next_int, mut next_float, mut next_stack) = (0usize, 0usize, 0i64);
         let mut params = Vec::new();
 
@@ -1453,7 +1472,7 @@ impl<'a> Decompiler<'a> {
         let (params, outs) = prototype.ty.params.split_at(prototype.ty.params.len() - count);
 
         let inputs = Prototype { name: prototype.name.clone(), ty: FuncType { params: params.to_vec(), ..prototype.ty.clone() } };
-        let sig = self.signature_from_prototype(&inputs, name);
+        let sig = self.signature_with_abi(&inputs, name, self.abi(addr));
         let pointee = |ty: &CType| match self.typedb.resolve(ty) {
             CType::Pointer(to) => self.ltype(to),
             _ => None,
@@ -1595,7 +1614,7 @@ fn target_machine(program: &Program) -> Result<TargetMachine> {
 /// C names of the functions with a mangled symbol: the name of their C++ prototype, or the C identifier of
 /// their demangled name (core::fmt::Arguments::new_v1 is core_fmt_Arguments_new_v1). The names given to
 /// several functions (the instances of a Rust generic function, C++ overloads) end with their address.
-fn demangled_names(program: &Program, analysis: &Analysis, model: &DataModel, classes: &HashSet<String>) -> HashMap<u64, String> {
+fn demangled_names(program: &Program, analysis: &Analysis, languages: &Languages) -> HashMap<u64, String> {
     let mut names: HashMap<u64, String> = HashMap::new();
     let mut plain: HashSet<String> = HashSet::new();
 
@@ -1609,9 +1628,9 @@ fn demangled_names(program: &Program, analysis: &Analysis, model: &DataModel, cl
             continue;
         };
 
-        let name = match cxx::prototype(&demangled, model, classes) {
+        let name = match languages.demangled_prototype(&demangled) {
             Some(prototype) => prototype.name,
-            None => cxx::identifier(&demangled.name),
+            None => identifier(&demangled.name),
         };
 
         if !name.is_empty() {
@@ -1638,11 +1657,7 @@ fn demangled_names(program: &Program, analysis: &Analysis, model: &DataModel, cl
 
 /// C names of the functions with a mangled symbol, for the tools that find a function by its C name
 pub fn function_names(program: &Program, analysis: &Analysis) -> HashMap<u64, String> {
-    let windows = program.format == Format::Pe;
-    let model = DataModel::new(program.architecture(), windows);
-    let symbols: Vec<_> = program.symbols.values().filter_map(|s| demangle_symbol(&s.name)).collect();
-
-    return demangled_names(program, analysis, &model, &cxx::known_classes(symbols.iter()));
+    return demangled_names(program, analysis, &Languages::new(program));
 }
 
 fn import_name(name: &str) -> String {
@@ -1650,7 +1665,7 @@ fn import_name(name: &str) -> String {
     let name = name.split('@').next().unwrap_or(name);
 
     if let Some(demangled) = demangle_symbol(name) {
-        return cxx::identifier(&demangled.name);
+        return identifier(&demangled.name);
     }
 
     return sanitize(name);

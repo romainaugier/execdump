@@ -13,10 +13,17 @@
  * (ABIInternal), 1.18 on aarch64. Before, and always on x86, both are on the stack above the return address (ABI0).
  * 1.16 and 1.17 share a layout: the functions of 1.17 compare the stack pointer to the stack guard of the goroutine
  * in r14 (cmp rsp, [r14+0x10]), the ones of 1.16 load the goroutine from the thread local storage first.
+ *
+ * The module data of the runtime (runtime.firstmoduledata) starts with the address of the pclntab, it has the bounds of
+ * the type descriptors (types, etypes) at a place of the version. A descriptor (abi.Type, the rtype of reflect) names
+ * its type with an offset from the start of the types: a byte of flags then the length of the name, 16 bits big endian
+ * before Go 1.17, a varint after.
  */
 
 use crate::disasm::Architecture;
-use crate::program::{Program, Region};
+use crate::program::{LanguageData, Program, Region};
+
+use std::collections::HashMap;
 
 /// A function of the pclntab
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,12 +40,118 @@ pub struct GoFunction {
     pub assembly: bool,
 }
 
+/// The type descriptors of a Go binary
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GoTypes {
+    pub start: u64,
+    pub end: u64,
+    /// The length of the names is a varint (Go 1.17 and later), else 16 bits, None when the version does not tell
+    pub varint_names: Option<bool>,
+}
+
 /// The functions of a Go binary and its calling convention
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GoBinary {
     pub functions: Vec<GoFunction>,
     /// Arguments and results in registers (ABIInternal), else on the stack (ABI0)
     pub register_abi: bool,
+    pub types: Option<GoTypes>,
+}
+
+/// What the decompiler keeps of the pclntab once its functions are symbols (Program::language_data)
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GoRuntime {
+    /// Arguments and results in registers (ABIInternal), else on the stack (ABI0)
+    pub register_abi: bool,
+    /// The functions of the pclntab by entry, with the size of their arguments and results (None when the assembly
+    /// does not tell it, or for the functions known to be written in assembly)
+    pub functions: HashMap<u64, Option<u32>>,
+    pub types: Option<GoTypes>,
+}
+
+impl GoRuntime {
+    pub fn new(go: &GoBinary) -> Self {
+        let functions = go.functions.iter().map(|f| (f.entry, f.args.filter(|_| !f.assembly))).collect();
+        return GoRuntime { register_abi: go.register_abi, functions, types: go.types };
+    }
+
+    /// The runtime of a Go program
+    pub fn of(program: &Program) -> Option<&GoRuntime> {
+        return match &program.language_data {
+            LanguageData::Go(runtime) => Some(runtime),
+            _ => None,
+        };
+    }
+
+    /// Size of the arguments and results of a function
+    pub fn args(&self, entry: u64) -> Option<u32> {
+        return self.functions.get(&entry).copied().flatten();
+    }
+
+    /// The interface and the type of the itab at an address (io.Writer, *os.File): its first two words are the
+    /// descriptors of both
+    pub fn itab(&self, program: &Program, addr: u64) -> Option<(String, String)> {
+        let pointer = program.pointer_size as u64;
+        let inter = program.read_pointer(addr)?;
+        let concrete = program.read_pointer(addr + pointer)?;
+
+        if self.kind(program, inter)? != KIND_INTERFACE {
+            return None;
+        }
+
+        return Some((self.type_name(program, inter)?, self.type_name(program, concrete)?));
+    }
+
+    /// Kind of the type of a descriptor (reflect.Kind)
+    pub fn kind(&self, program: &Program, addr: u64) -> Option<u8> {
+        let types = self.types?;
+        let pointer = program.pointer_size as u64;
+        return (types.start..types.end).contains(&addr).then(|| program.read(addr + 2 * pointer + 7, 1)).flatten().map(|k| k[0] & KIND_MASK);
+    }
+
+    /// Name of the type of the descriptor at an address (string, []uint8, *main.T)
+    pub fn type_name(&self, program: &Program, addr: u64) -> Option<String> {
+        let types = self.types?;
+        let pointer = program.pointer_size as u64;
+        // size, ptrdata, hash, tflag, align, fieldAlign, kind, equal (alg), gcdata, str, ptrToThis
+        let str = 4 * pointer + 8;
+        let header = str + 8;
+
+        if addr < types.start || addr + header > types.end {
+            return None;
+        }
+
+        let tflag = program.read(addr + 2 * pointer + 4, 1)?[0];
+        let kind = program.read(addr + 2 * pointer + 7, 1)?[0] & KIND_MASK;
+        let offset = program.read_u32(addr + str)? as u64;
+
+        if kind == 0 || kind > MAX_KIND || offset == 0 || types.start + offset >= types.end {
+            return None;
+        }
+
+        let name = types.start + offset;
+        let bytes = program.read(name, 3)?;
+
+        // A name is never empty: a first byte of length 0 is the high byte of the 16 bits of the old encoding
+        let varint_names = types.varint_names.unwrap_or(bytes[1] != 0);
+        let (length, at) = match varint_names {
+            true => varint(program.read(name + 1, 10).unwrap_or(&bytes[1..]))?,
+            false => (u16::from_be_bytes([bytes[1], bytes[2]]) as u64, 2),
+        };
+
+        if length == 0 || length as usize > MAX_NAME {
+            return None;
+        }
+
+        let text = std::str::from_utf8(program.read(name + 1 + at as u64, length as usize)?).ok()?;
+
+        if text.chars().any(|c| c.is_control()) {
+            return None;
+        }
+
+        let text = if tflag & TFLAG_EXTRA_STAR != 0 { text.strip_prefix('*').unwrap_or(text) } else { text };
+        return Some(text.to_string());
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +165,13 @@ enum Layout {
 }
 
 const MAX_NAME: usize = 4096;
+
+/// The kind of a type descriptor is in its low 5 bits (bool to unsafe.Pointer)
+const KIND_MASK: u8 = 0x1f;
+const MAX_KIND: u8 = 26;
+const KIND_INTERFACE: u8 = 20;
+/// The name of the type starts with a * to strip (the descriptors of T and *T share it)
+const TFLAG_EXTRA_STAR: u8 = 1 << 1;
 
 /// funcFlag_ASM of the flags of a _func
 const FUNC_FLAG_ASM: u8 = 1 << 2;
@@ -241,12 +361,6 @@ fn varint(bytes: &[u8]) -> Option<(u64, usize)> {
     return None;
 }
 
-/// The function of the runtime a Go function calls from its prologue when its stack is too small: it grows the stack
-/// and runs the function again, it is not code of the function
-pub fn grows_stack(name: &str) -> bool {
-    return name.starts_with("runtime.morestack");
-}
-
 /// The functions of the pclntab of a Go program in address order, and its calling convention. None for the
 /// programs without a pclntab.
 pub fn read(program: &Program) -> Option<GoBinary> {
@@ -261,7 +375,48 @@ pub fn read(program: &Program) -> Option<GoBinary> {
         _ => false,
     };
 
-    return (!functions.is_empty()).then_some(GoBinary { functions, register_abi });
+    let types = types(program, base, layout, register_abi);
+    return (!functions.is_empty()).then_some(GoBinary { functions, register_abi, types });
+}
+
+/// The type descriptors the module data bounds: the module data is the data that starts with the address of the
+/// pclntab and has types < etypes in the image at the place of the version
+fn types(program: &Program, pclntab: u64, layout: Layout, register_abi: bool) -> Option<GoTypes> {
+    let pointer = program.pointer_size as u64;
+    let flags = program.read_u32(pclntab) == Some(0xfffffff1);
+
+    let (field, varint_names) = match layout {
+        Layout::Go12 => (25, Some(false)),
+        Layout::Go116 => (35, register_abi.then_some(true)),
+        Layout::Go118 if flags => (37, Some(true)),
+        Layout::Go118 => (35, Some(true)),
+    };
+
+    let regions = program.regions.iter().filter(|r| r.perms.write && !r.data.is_empty());
+
+    for region in regions {
+        let words = region.data.len() as u64 / pointer;
+
+        for index in 0..words {
+            let at = region.vaddr + index * pointer;
+
+            if program.read_pointer(at) != Some(pclntab) {
+                continue;
+            }
+
+            let (Some(start), Some(end)) = (program.read_pointer(at + field * pointer), program.read_pointer(at + (field + 1) * pointer)) else {
+                continue;
+            };
+
+            let inside = program.region_at(start).is_some_and(|r| end <= r.vaddr + r.data.len() as u64);
+
+            if start < end && inside {
+                return Some(GoTypes { start, end, varint_names });
+            }
+        }
+    }
+
+    return None;
 }
 
 /// cmp rsp, [r14+0x10] or cmp r12, [r14+0x10] at the start of a function
@@ -341,6 +496,36 @@ mod tests {
         assert_eq!(functions.len(), 2);
         assert_eq!(functions[0], GoFunction { entry: 0x1000, end: 0x1020, name: "main.main".to_string(), file: Some("/src/app/main.go".to_string()), args: Some(0), assembly: false });
         assert_eq!((functions[1].entry, functions[1].end, functions[1].name.as_str()), (0x1020, 0x1040, "main.helper"));
+    }
+
+    #[test]
+    fn type_names() {
+        // The descriptor of *[]uint8 at 0x40 (tflagExtraStar, kind Ptr), its name at 0x10, then the itab of
+        // *os.File for io.Writer at 0x100 of the data
+        let mut types = vec![0u8; 0xa0];
+        types[0x10..0x1b].copy_from_slice(b"\0\0\x08*[]uint8");
+        types[0x20..0x2d].copy_from_slice(b"\0\0\x09io.Writer\0");
+        types[0x40 + 20] = TFLAG_EXTRA_STAR;
+        types[0x40 + 23] = 22;
+        types[0x40 + 40..0x40 + 44].copy_from_slice(&0x10u32.to_le_bytes());
+        types[0x60 + 23] = KIND_INTERFACE;
+        types[0x60 + 40..0x60 + 44].copy_from_slice(&0x20u32.to_le_bytes());
+
+        let mut program = Program { pointer_size: 8, ..Default::default() };
+        program.regions.push(Region { name: ".rodata".to_string(), vaddr: 0x1000, size: 0xa0, data: types, perms: Perms { read: true, write: false, exec: false } });
+        let mut itab = 0x1060u64.to_le_bytes().to_vec();
+        itab.extend(0x1040u64.to_le_bytes());
+        program.regions.push(Region { name: ".data".to_string(), vaddr: 0x2000, size: 16, data: itab, perms: Perms { read: true, write: true, exec: false } });
+
+        let runtime = GoRuntime { types: Some(GoTypes { start: 0x1000, end: 0x10a0, varint_names: Some(false) }), ..Default::default() };
+        assert_eq!(runtime.type_name(&program, 0x1040).as_deref(), Some("[]uint8"));
+        assert_eq!(runtime.kind(&program, 0x1040), Some(22));
+        assert_eq!(runtime.itab(&program, 0x2000), Some(("io.Writer".to_string(), "[]uint8".to_string())));
+        assert_eq!(runtime.type_name(&program, 0x2000), None);
+
+        // Go 1.17 and later: the length is a varint
+        let varint = GoRuntime { types: Some(GoTypes { start: 0x1000, end: 0x10a0, varint_names: Some(true) }), ..Default::default() };
+        assert_eq!(varint.type_name(&program, 0x1040), None);
     }
 
     #[test]

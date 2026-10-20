@@ -15,6 +15,8 @@ mod lldb;
 pub mod mi;
 mod pipe;
 pub mod session;
+#[cfg(unix)]
+pub mod terminal;
 
 pub use session::{Event, Request, Run, Session, Snapshot, Until};
 
@@ -140,9 +142,9 @@ pub enum Resume {
 
 /// A debugger process, one command at a time
 pub trait Backend: Send {
-    /// Starts the program stopped at its first instruction, its output (and its errors) written to a file, its
-    /// input empty
-    fn launch(&mut self, program: &Path, args: &[String], output: &Path) -> Result<Stop>;
+    /// Starts the program stopped at its first instruction, its output (and its errors) written to a file or a
+    /// terminal, its input read from one (empty without it)
+    fn launch(&mut self, program: &Path, args: &[String], output: &Path, input: Option<&Path>) -> Result<Stop>;
 
     /// Where the binary was loaded: the address of its entry point in the process minus the one of the binary
     fn load_bias(&mut self, link_entry: u64) -> Result<u64>;

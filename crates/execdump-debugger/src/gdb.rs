@@ -152,14 +152,15 @@ fn register_value(text: &str) -> Option<u128> {
 }
 
 impl Backend for Gdb {
-    fn launch(&mut self, program: &Path, args: &[String], output: &Path) -> Result<Stop> {
+    fn launch(&mut self, program: &Path, args: &[String], output: &Path, input: Option<&Path>) -> Result<Stop> {
         self.command(&format!("-file-exec-and-symbols {}", quote(&program.to_string_lossy())))?;
 
         let mut words: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
 
         if cfg!(unix) {
             let output = shell_quote(&output.to_string_lossy());
-            words.extend([format!(">{}", output), "2>&1".to_string(), "</dev/null".to_string()]);
+            let input = input.map_or("/dev/null".to_string(), |i| shell_quote(&i.to_string_lossy()));
+            words.extend([format!(">{}", output), "2>&1".to_string(), format!("<{}", input)]);
         }
 
         self.console(&format!("set args {}", words.join(" ")))?;

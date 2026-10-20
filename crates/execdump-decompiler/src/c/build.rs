@@ -75,6 +75,8 @@ struct Builder<'a> {
     vars: Vec<Var>,
     /// Inlined expressions that read memory (loads and calls, directly or through their operands)
     reads_memory: Vec<bool>,
+    /// Inlined expressions with a call, directly or through their operands
+    calls: Vec<bool>,
     /// Constant expressions computed once at the start of the function, operands first
     constants: Vec<ValueId>,
     /// Type each global is accessed with, None when the accesses disagree
@@ -106,7 +108,8 @@ impl<'a> Builder<'a> {
         return Some((block, index));
     }
 
-    /// No store or call between two instructions of the same block (exclusive), nor a load after a call
+    /// No store or call between two instructions of the same block (exclusive), nor a load after a call (of the
+    /// expression moved)
     fn nothing_between(&self, from: ValueId, to: ValueId) -> bool {
         let (Some((block, start)), Some((other, end))) = (self.position(from), self.position(to)) else {
             return false;
@@ -117,7 +120,7 @@ impl<'a> Builder<'a> {
         }
 
         // A call moved to its use stays before the loads that follow it (they may read what it writes)
-        let call = self.f.op(from) == Some(Op::Call);
+        let call = self.calls[from];
         return self.f.blocks[block].insts[start + 1..end].iter().all(|&i| !has_side_effects(self.f, i) && !(call && self.f.op(i) == Some(Op::Load)));
     }
 
@@ -147,6 +150,7 @@ impl<'a> Builder<'a> {
 
             let memory = matches!(op, Op::Load | Op::Call) || operands.iter().any(|&o| self.var_of[o].is_none() && self.reads_memory[o]);
             self.reads_memory[id] = memory;
+            self.calls[id] = op == Op::Call || operands.iter().any(|&o| self.var_of[o].is_none() && self.calls[o]);
 
             let single = value.uses.len() == 1;
             let user = value.uses[0];
@@ -159,6 +163,9 @@ impl<'a> Builder<'a> {
                 _ if single => true,
                 // Casts can be repeated in every use
                 Op::ZExt | Op::SExt | Op::Trunc | Op::IntToPtr | Op::PtrToInt | Op::BitCast | Op::Freeze => !memory,
+                // The address of a variable of the frame (&v18.f28) is a constant: the accesses through it are
+                // accesses to the variable
+                Op::Gep | Op::Add | Op::Sub => super::typing::frame_place(f, id).is_some(),
                 _ => false,
             };
 
@@ -288,11 +295,27 @@ impl<'a> Builder<'a> {
             }
             // A struct of the buffer's size (recovered from its accesses, or one of the headers) or the type of
             // the whole buffer
+            // A struct of the headers smaller than the buffer: an array of it, else the rest of the buffer is unused
             Some(Allocated::Bytes(size)) => match pointee(&self.types[id]) {
                 Some(ty) if !matches!(ty, CType::Char) && !ty.is_unknown() && self.ctx.size_of(ty) == Some(*size) => ty.clone(),
+                Some(ty) if self.header_struct(ty) && self.ctx.size_of(ty).is_some_and(|bytes| bytes < *size) => {
+                    let bytes = self.ctx.size_of(ty).unwrap_or(1).max(1);
+
+                    match *size % bytes == 0 {
+                        true => CType::Array(Box::new(ty.unqualified().clone()), Some(*size / bytes)),
+                        false => ty.unqualified().clone(),
+                    }
+                }
                 _ => CType::Array(Box::new(CType::Char), Some(*size)),
             },
             None => CType::Unknown(0),
+        };
+    }
+
+    fn header_struct(&self, ty: &CType) -> bool {
+        return match ty.unqualified() {
+            CType::Struct(name) | CType::Union(name) => self.ctx.typedb.aggregates.contains_key(name),
+            _ => false,
         };
     }
 
@@ -335,6 +358,17 @@ impl<'a> Builder<'a> {
                 },
                 _ => None,
             };
+        }
+
+        // The fields of the elements of an array of structs: v7[1].data
+        if let (CType::Array(element, _), true) = (&self.vars[var].ty, terms.is_empty()) {
+            let element_size = self.ctx.size_of(element).unwrap_or(0) as i128;
+
+            if element_size > 1 && matches!(self.ctx.resolve(element).unqualified(), CType::Struct(_) | CType::Union(_)) {
+                let item = Expr::Index(Box::new(Expr::Var(var)), Box::new(Expr::Int(offset / element_size)));
+                let member = self.member(item, element, offset % element_size, size, false)?;
+                return Some(self.reinterpreted(member, ty));
+            }
         }
 
         let index = match terms {
@@ -2046,6 +2080,7 @@ pub fn build(f: &Func, ctx: &Context, types: Vec<CType>, param_names: &[String])
         storage: vec![None; f.values.len()],
         vars: Vec::new(),
         reads_memory: vec![false; f.values.len()],
+        calls: vec![false; f.values.len()],
         types,
         constants: Vec::new(),
         globals: RefCell::new(BTreeMap::new()),

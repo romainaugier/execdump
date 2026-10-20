@@ -12,7 +12,7 @@ use crate::types::{CType, DataModel, FuncType, Prototype};
 
 use anyhow::Result;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Mutex;
 
@@ -138,6 +138,20 @@ impl TypeDb {
     /// Adds the declarations of preprocessed C source
     pub fn parse(&mut self, source: &str) -> Result<()> {
         return parse::parse(self, source);
+    }
+
+    /// Adds the declarations of C source that uses the typedefs of the database (size_t), declared before it with
+    /// the type they have for the data model
+    pub fn extend(&mut self, source: &str) -> Result<()> {
+        let words: BTreeSet<&str> = source.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).collect();
+        let mut prelude = String::new();
+
+        for name in words.iter().filter(|w| self.typedefs.contains_key(**w)) {
+            let ty = self.resolve(&CType::Typedef(name.to_string())).clone();
+            let _ = writeln!(prelude, "typedef {};", ty.declare(name));
+        }
+
+        return self.parse(&format!("{}{}", prelude, source));
     }
 
     /*
@@ -340,6 +354,18 @@ mod tests {
 
     fn windows() -> TypeDb {
         return TypeDb::bundled(Platform::Windows, DataModel::new(Architecture::X86_64, true));
+    }
+
+    #[test]
+    fn databases_of_the_languages() {
+        let mut db = linux();
+        db.extend(include_str!("../../data/typedb/go.h")).unwrap();
+        db.extend(include_str!("../../data/typedb/rust.h")).unwrap();
+
+        assert_eq!(db.function("__rust_alloc").unwrap().to_string(), "void *__rust_alloc(size_t size, size_t align)");
+        assert_eq!(db.function("runtime_newobject").unwrap().ty.params.len(), 1);
+        assert!(db.function("runtime_stringtoslicebyte").unwrap().ty.params.iter().any(|p| p.name.as_deref() == Some("ret_cap")));
+        assert!(db.function("fputs").is_some());
     }
 
     #[test]
