@@ -478,8 +478,17 @@ Decompiler:
     literal (`:string`) shows it as text, as a C literal of ASCII characters (`"V\xc3\xa9rification"`, the offsets the
     code uses), as bytes, as a shell argument (`$'...'`) and as Python bytes, `Enter` copies one (see below). Printable
     characters stored in chars are character literals
-  - :heavy_check_mark: LLM improvement pass (`--llm`, `L` in the TUI as a proposal to review): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
-  - :heavy_check_mark: LLM rewrite (`W` or `:llm rewrite` in the TUI): the function rewritten as clear C (structured control flow, no needless temporaries, meaningful names) with the same behavior, as an edit to review; the proposal says when the rewrite lost the function name, a call or the balance of its braces
+  - :heavy_check_mark: LLM improvement pass (`--llm`): names of the unnamed functions and of the variables, types and a summary, validated before being applied (callees first, their new names show in their callers)
+  - :heavy_check_mark: LLM improvement in the TUI (`L` or `:llm`, a proposal to review): the names, types and summary, and the
+    function rewritten as clear and documented C (structured control flow, no needless temporaries, the new names,
+    comments where the code is not obvious) with the same behavior. The code the model gets has the address of each
+    line in a marker at its end (`/*@4011a0*/`), its lines keep the markers of the lines they do the work of: the
+    rewritten code keeps the addresses of its lines (the gutter, the breakpoints, the line the debugger is at, the
+    steps by lines), markers the model made up are dropped. The proposal says how many lines have an address, and when
+    the code lost the function name, a call or the balance of its braces. Accepted, the code is the function under its
+    new name and replaces the decompiled one rendered with the new names and types (it is not merged into it); the
+    addresses of the lines are kept with the edit (`fn/<address>.lines` next to `fn/<address>.c`) and follow its later
+    edits
   - :heavy_check_mark: User annotations followed by the decompiler: names of the functions and globals, prototypes, variables
 
 ### Projects
@@ -501,7 +510,7 @@ The C code of the whole program is a project: every function is decompiled in th
 - :heavy_check_mark: Edited code: the edits are kept with the decompiled text they were made on, and rebased when the
   decompiler renders the function differently: renames are applied to the edited text, other changes are merged by
   libgit2 (conflicts are marked as in git and resolved in the code)
-- :heavy_check_mark: LLM proposals (names, types and summary of a function, rewrites of its code, organization of the functions in modules),
+- :heavy_check_mark: LLM proposals (names, types and summary of a function with its code rewritten, organization of the functions in modules),
   reviewed as diffs before being accepted
 - :heavy_check_mark: Export of the modules as a source tree: `src/<module>` and `include/<module>.h` (prototypes of the
   functions), `include/execdump.h` (`undefined` types), `include/execdump_imports.h` and `include/execdump_globals.h`.
@@ -536,7 +545,11 @@ Viewers:
   - :heavy_check_mark: Shared libraries: listed in the explorer, loaded on demand (analysis, decompilation and project of their own, in
     `libs/<library>` of the project), an imported function opens in the library that exports it (loaded first when
     needed, from the graphs, the call graphs and the C code with `gd`), the libraries loaded are restored with the session
-  - :heavy_check_mark: C syntax highlighting, comments included (`//` and `/* */` over several lines)
+  - :heavy_check_mark: Syntax highlighting in the colors of VS Code (Dark+ with the semantic colors of C/C++): the control
+    flow purple, the other keywords blue, the names of the types teal (after `struct`, `union` and `enum`, the `_t`
+    typedefs, the typedefs of the type database: `FILE`, `pthread_attr_t`), the functions yellow, the variables light
+    blue, comments over several lines included. A language is a table of its keywords, types, comments and strings
+    (`src/syntax.rs`): C, C++, Go and Rust, `:syntax <c|c++|go|rust>` highlights the code of a view as one of them
   - :heavy_check_mark: Debugger (gdb or lldb): the program runs under the debugger and the decompiled code is its source
     (see below)
 
@@ -556,6 +569,7 @@ Key bindings (vim-like, the main ones can be changed in the `[keys]` section of 
 | `e` | Show/hide the explorer |
 | `Enter` / `t` / `s` / `v` | Explorer: open in the current tab / a new tab / a split below / a split on the right (`Enter` on a node folds or unfolds it) |
 | `h` | Explorer: fold the node, or go to the node of the item |
+| `/` | Explorer: filter the items while typing (case insensitive, the folded nodes too: `/socket` keeps the modules with socket in their path), the selection on the first one; `n` / `p` go to the next / previous item found, `Enter` opens it, `Esc` shows every item again with the nodes above the selected one open |
 | `<` / `>` / `=` | Explorer: narrower / wider / back to the width of its content. Content: narrower / wider split / equal sizes (without splits side by side, the explorer gives or takes the width) |
 | `:` | Command line (see the commands below): suggestions while typing, `Tab` / `Shift-Tab` go through them, `Up` / `Down` through the history |
 | `/` | Search: filters the tables, finds the next matching node or line. While the search is active, `n` / `p` (or `N`) go to the next / previous match, `Esc` ends it (`n` / `p` move between the nodes, labels or functions again) |
@@ -622,8 +636,7 @@ In the C code (a module, every function of it one after the other; functions not
 | `M` | Move the function to a module (`:mv`) |
 | `]c` / `[c` | Next / previous conflict between the edits and the decompiled code |
 | `x` / `C` | Cross references / call graph of the function |
-| `L` | Ask the LLM to improve the function: its proposal shows in `:review` |
-| `W` | Ask the LLM to rewrite the function as clear C: an edit proposed in `:review` |
+| `L` | Ask the LLM to improve and document the function (names, types, summary, clear C keeping the addresses of its lines): its proposal shows in `:review` |
 
 What is copied (`y`, `:string`) goes to the clipboard of the system and to the one of the terminal. The clipboard of
 the system is the one of X11 (the Wayland sessions of GNOME and KDE share it through XWayland), of macOS or of
@@ -655,7 +668,7 @@ Commands:
 | `:mv <module> [function]`, `:mkmod <module>`, `:rmmod <module>`, `:renmod <old> <new>` | Organize the modules (paths such as `net/socket.c`) |
 | `:revert` | Drop the edits of the current function |
 | `:ours`, `:theirs`, `:both` | Resolve the conflict under the cursor: keep the edited code, the decompiled code, or both |
-| `:llm`, `:llm rewrite`, `:llm modules [module\|all]` | Ask the LLM to improve the current function / to rewrite it as clear C / to organize the functions of a module (or of the program) |
+| `:llm`, `:llm modules [module\|all]` | Ask the LLM to improve and document the current function / to organize the functions of a module (or of the program) |
 | `:review`, `:accept <n>`, `:reject <n>` | Review the LLM proposals |
 | `:toggle-explorer` (`:explorer`) | Show or hide the explorer |
 | `:search-next`, `:search-previous`, `:clear-search` | Matches of the last search |
@@ -702,7 +715,7 @@ execdump calls the APIs itself, in three formats: OpenAI chat completions (`open
 `openai-compatible` need no key. Every backend works the same way:
 
 - the answer is streamed, so a long rewrite is never cut by the timeout: it is the longest silence allowed
-- `max_tokens` is always sent (rewrites get at least 8192), an answer cut by it is an error saying to raise it
+- `max_tokens` is always sent (the improvements of the TUI, the whole function, get at least 8192), an answer cut by it is an error saying to raise it
 - the answer is a JSON object following a schema: the structured output of the API when it has one (JSON schema for
   OpenAI, Mistral, xAI, OpenRouter and Ollama, a forced tool for Anthropic, JSON mode for the others), and the schema
   is in the system prompt

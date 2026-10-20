@@ -13,7 +13,7 @@ use crate::cache::{Cache, Rendered};
 use crate::hash::{build_id, Fnv};
 use crate::modules::{auto_modules, Modules};
 use crate::service::{Control, Event, Priority, Service};
-use crate::store::{diff_text, has_conflicts, map_lines, rebase_text, Store, GENERATED, MAIN, PROPOSALS};
+use crate::store::{diff_text, has_conflicts, map_lines, rebase_text, rename_identifiers, Store, GENERATED, MAIN, PROPOSALS};
 
 use anyhow::{bail, Context, Result};
 
@@ -21,7 +21,7 @@ use execdump_core::crash;
 use execdump_core::program::{Format, Program};
 use execdump_decompiler::analysis::function::CallTarget;
 use execdump_decompiler::analysis::Analysis;
-use execdump_decompiler::llm::{check_rewrite, parse_type, valid_identifier, Assistant, LlmConfig};
+use execdump_decompiler::llm::{check_rewrite, mark_lines, parse_type, valid_identifier, Assistant, LlmConfig};
 use execdump_decompiler::notes::parse_prototype;
 use execdump_decompiler::typedb::{Platform, TypeDb};
 use execdump_decompiler::types::DataModel;
@@ -46,19 +46,56 @@ pub struct Edit {
     pub text: String,
     /// Edited text with the addresses of its lines
     rendered: Arc<Rendered>,
+    /// The text replaces the next rendering of its function instead of being merged into it (an accepted improvement
+    /// of the LLM: the names and types it gives change the decompiled text its code was written from)
+    adopt: bool,
 }
 
 impl Edit {
+    /// The lines unchanged from the base have their addresses
     fn new(base: String, base_lines: Vec<Option<u64>>, text: String, meta: &crate::cache::Meta) -> Self {
         let lines = map_lines(&base, &base_lines, &text);
-        let rendered = Arc::new(Rendered { ok: true, text: text.clone(), lines, meta: meta.clone() });
+        return Edit::with_lines(base, base_lines, text, lines, meta);
+    }
 
-        return Edit { base, base_lines, text, rendered };
+    fn with_lines(base: String, base_lines: Vec<Option<u64>>, text: String, lines: Vec<Option<u64>>, meta: &crate::cache::Meta) -> Self {
+        let rendered = Arc::new(Rendered { ok: true, text: text.clone(), lines, meta: meta.clone() });
+        return Edit { base, base_lines, text, rendered, adopt: false };
+    }
+
+    /// A new text of the edit: its lines keep the addresses they had in the edit, the others get the ones of the base
+    fn changed(&self, base: String, base_lines: Vec<Option<u64>>, text: String, meta: &crate::cache::Meta) -> Self {
+        let lines = carry_lines(&self.text, &self.rendered.lines, &base, &base_lines, &text);
+        return Edit::with_lines(base, base_lines, text, lines, meta);
     }
 
     pub fn conflict(&self) -> bool {
         return has_conflicts(&self.text);
     }
+
+    /// Address of each line of the edited text
+    pub fn lines(&self) -> &[Option<u64>] {
+        return &self.rendered.lines;
+    }
+}
+
+/// The addresses of the lines of a text: the ones of the same lines in a previous version of it, else the ones of the
+/// same lines in its base
+fn carry_lines(previous: &str, previous_lines: &[Option<u64>], base: &str, base_lines: &[Option<u64>], text: &str) -> Vec<Option<u64>> {
+    let kept = map_lines(previous, previous_lines, text);
+    let based = map_lines(base, base_lines, text);
+    return kept.into_iter().zip(based).map(|(k, b)| k.or(b)).collect();
+}
+
+/// The addresses of the lines of an edit as a file: one per line, in hexadecimal, - for none
+fn lines_file(lines: &[Option<u64>]) -> String {
+    return lines.iter().map(|l| l.map_or("-".to_string(), |a| format!("{:x}", a))).collect::<Vec<_>>().join("\n") + "\n";
+}
+
+/// The addresses of the lines of a text from its file, None when the file is not the one of the text
+fn read_lines_file(file: &str, text: &str) -> Option<Vec<Option<u64>>> {
+    let lines: Vec<Option<u64>> = file.lines().map(|l| u64::from_str_radix(l.trim(), 16).ok()).collect();
+    return (lines.len() == text.lines().count()).then_some(lines);
 }
 
 impl PartialEq for Edit {
@@ -92,8 +129,8 @@ pub struct Proposal {
     pub label: String,
     /// Notes to add to each function
     pub functions: BTreeMap<u64, FunctionNotes>,
-    /// Code of functions rewritten by the LLM
-    pub edits: BTreeMap<u64, String>,
+    /// Code of functions rewritten by the LLM, with the addresses of its lines
+    pub edits: BTreeMap<u64, (String, Vec<Option<u64>>)>,
     pub before: String,
     pub after: String,
     /// Waiting for the decompiler to render the proposed code
@@ -121,9 +158,9 @@ struct ProposalFile {
 
 /// Result of a background LLM request
 enum Assisted {
-    Function { addr: u64, before: String, notes: Result<FunctionNotes> },
+    /// Notes for a function, and its code rewritten with the addresses of its lines
+    Function { addr: u64, before: String, calls: Vec<String>, improved: Result<(FunctionNotes, Option<(String, Vec<Option<u64>>)>)> },
     Modules { label: String, moves: Result<Vec<(u64, String)>> },
-    Rewrite { addr: u64, before: String, calls: Vec<String>, code: Result<String> },
 }
 
 pub struct Project {
@@ -460,10 +497,18 @@ impl Project {
         if edit.base == rendered.text {
             // Same text: only the line addresses may be missing (loaded projects)
             if edit.base_lines.len() != rendered.lines.len() {
-                let edit = Edit::new(rendered.text.clone(), rendered.lines.clone(), edit.text.clone(), &rendered.meta);
+                let edit = edit.changed(rendered.text.clone(), rendered.lines.clone(), edit.text.clone(), &rendered.meta);
                 self.work.edits.insert(addr, edit);
             }
 
+            return;
+        }
+
+        // The text of an accepted improvement is the function: the new rendering is only its base
+        if edit.adopt {
+            let edit = edit.changed(rendered.text.clone(), rendered.lines.clone(), edit.text.clone(), &rendered.meta);
+            self.work.edits.insert(addr, edit);
+            self.version += 1;
             return;
         }
 
@@ -476,7 +521,8 @@ impl Project {
         if merged == rendered.text {
             self.work.edits.remove(&addr);
         } else {
-            self.work.edits.insert(addr, Edit::new(rendered.text.clone(), rendered.lines.clone(), merged, &rendered.meta));
+            let edit = edit.changed(rendered.text.clone(), rendered.lines.clone(), merged, &rendered.meta);
+            self.work.edits.insert(addr, edit);
         }
 
         self.version += 1;
@@ -664,15 +710,27 @@ impl Project {
         self.invalidate(&[addr], false);
     }
 
-    /// Replaces the text of a function, the edit is dropped when it is the decompiled text again
+    /// Replaces the text of a function, the edit is dropped when it is the decompiled text again. Its lines keep the
+    /// addresses they had.
     pub fn set_edit(&mut self, addr: u64, text: &str) -> Result<()> {
-        let text = if text.ends_with('\n') || text.is_empty() { text.to_string() } else { format!("{}\n", text) };
+        return self.set_edit_lines(addr, text, None);
+    }
 
-        let edit = match self.work.edits.get(&addr) {
-            Some(edit) => Edit::new(edit.base.clone(), edit.base_lines.clone(), text, &edit.rendered.meta),
-            None => {
+    /// Replaces the text of a function, with the addresses of its lines when they are known (the code of the LLM)
+    pub fn set_edit_lines(&mut self, addr: u64, text: &str, lines: Option<Vec<Option<u64>>>) -> Result<()> {
+        let text = if text.ends_with('\n') || text.is_empty() { text.to_string() } else { format!("{}\n", text) };
+        let lines = lines.filter(|l| l.len() == text.lines().count());
+
+        let edit = match (self.work.edits.get(&addr), lines) {
+            (Some(edit), Some(lines)) => Edit::with_lines(edit.base.clone(), edit.base_lines.clone(), text, lines, &edit.rendered.meta),
+            (Some(edit), None) => edit.changed(edit.base.clone(), edit.base_lines.clone(), text, &edit.rendered.meta),
+            (None, lines) => {
                 let rendered = self.decompiled(addr).context("the function is not decompiled yet")?;
-                Edit::new(rendered.text.clone(), rendered.lines.clone(), text, &rendered.meta)
+
+                match lines {
+                    Some(lines) => Edit::with_lines(rendered.text.clone(), rendered.lines.clone(), text, lines, &rendered.meta),
+                    None => Edit::new(rendered.text.clone(), rendered.lines.clone(), text, &rendered.meta),
+                }
             }
         };
 
@@ -810,7 +868,15 @@ impl Project {
                     work.functions.insert(addr, FunctionNotes::from_toml(&text).with_context(|| path.to_string())?);
                 } else if let Some(addr) = addr_of(name, ".c") {
                     let base = bases.get(name).map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_else(|| text.to_string());
-                    work.edits.insert(addr, Edit::new(base, Vec::new(), text.to_string(), &Default::default()));
+                    let lines_path = format!("fn/{:x}.lines", addr);
+                    let lines = files.get(&lines_path).and_then(|f| read_lines_file(&String::from_utf8_lossy(f), &text));
+
+                    let edit = match lines {
+                        Some(lines) => Edit::with_lines(base, Vec::new(), text.to_string(), lines, &Default::default()),
+                        None => Edit::new(base, Vec::new(), text.to_string(), &Default::default()),
+                    };
+
+                    work.edits.insert(addr, edit);
                 }
             } else if let Some(name) = path.strip_prefix("data/") {
                 if let Some(addr) = addr_of(name, ".toml") {
@@ -853,15 +919,22 @@ impl Project {
             let meta: ProposalFile = toml::from_str(&String::from_utf8_lossy(&meta)).unwrap_or_default();
             let (mut functions, mut edits) = (BTreeMap::new(), BTreeMap::new());
 
-            for (path, content) in store.files(&branch, &self.path("fn")) {
-                // Rewritten code
+            let files = store.files(&branch, &self.path("fn"));
+
+            for (path, content) in files.iter() {
+                // Rewritten code, with the addresses of its lines
                 if let Some(addr) = path.strip_suffix(".c").and_then(|a| u64::from_str_radix(a, 16).ok()) {
-                    let code = String::from_utf8_lossy(&content).into_owned();
+                    let code = String::from_utf8_lossy(content).into_owned();
+                    let lines = files.get(&format!("{:x}.lines", addr)).and_then(|f| read_lines_file(&String::from_utf8_lossy(f), &code)).unwrap_or_default();
 
                     if work.edits.get(&addr).is_none_or(|e| e.text != code) {
-                        edits.insert(addr, code);
+                        edits.insert(addr, (code, lines));
                     }
 
+                    continue;
+                }
+
+                if path.ends_with(".lines") {
                     continue;
                 }
 
@@ -869,7 +942,7 @@ impl Project {
                     continue;
                 };
 
-                let mut proposed = FunctionNotes::from_toml(&String::from_utf8_lossy(&content)).unwrap_or_default();
+                let mut proposed = FunctionNotes::from_toml(&String::from_utf8_lossy(content)).unwrap_or_default();
                 proposed.module = proposed.module.filter(|m| valid_module(m));
 
                 if work.functions.get(&addr) != Some(&proposed) {
@@ -914,12 +987,18 @@ impl Project {
             if previous.map(|p| &p.text) != Some(&edit.text) {
                 main.push((path, Some(edit.text.clone().into_bytes())));
             }
+
+            // The addresses of the lines, the ones of the code of the LLM are not in the diff with the base
+            if previous.map(|p| p.lines()) != Some(edit.lines()) {
+                main.push((self.path(&format!("fn/{:x}.lines", addr)), Some(lines_file(edit.lines()).into_bytes())));
+            }
         }
 
         for &addr in saved.edits.keys().filter(|a| !work.edits.contains_key(a)) {
             let path = self.path(&format!("fn/{:x}.c", addr));
             generated.push((path.clone(), None));
             main.push((path, None));
+            main.push((self.path(&format!("fn/{:x}.lines", addr)), None));
         }
 
         for (&addr, notes) in work.functions.iter() {
@@ -992,22 +1071,26 @@ impl Project {
      * LLM proposals
      */
 
-    /// Asks the LLM to improve a function (names, types, summary), the answer becomes a proposal
+    /// Asks the LLM to improve a function: names, types and a summary, and its code rewritten as clear and documented C
+    /// with the addresses of its lines (it stays debuggable); the answer becomes a proposal
     pub fn llm_function(&mut self, addr: u64, config: &LlmConfig) -> Result<()> {
         let (rendered, _) = self.shown(addr).context("the function is not decompiled yet")?;
-        let assistant = Assistant::new(config)?;
+        let assistant = Assistant::improve(config)?;
         let sender = self.assisted_sender.clone();
         let typedb_platform = if self.program.format == Format::Pe { Platform::Windows } else { Platform::Unix };
         let model = DataModel::new(self.program.architecture(), self.program.format == Format::Pe);
         let named = !self.function_name(addr).starts_with("sub_");
         let taken: BTreeSet<String> = self.names.keys().cloned().collect();
+        let calls = rendered.meta.calls.clone();
 
         self.llm_running += 1;
 
         std::thread::spawn(move || {
             let typedb = TypeDb::bundled(typedb_platform, model);
+            let marked = mark_lines(&rendered.text, &rendered.lines);
 
-            let notes = crash::catch(|| assistant.suggest(&rendered.text)).and_then(|r| r).map(|suggestions| {
+            let improved = crash::catch(|| assistant.improve_code(&marked, &rendered.meta.decls)).and_then(|r| r).map(|improvement| {
+                let suggestions = improvement.suggestions;
                 let mut notes = FunctionNotes::default();
 
                 if !named {
@@ -1029,27 +1112,13 @@ impl Project {
                     }
                 }
 
-                notes
+                // The code is the one of the function under its new name
+                let code = improvement.code.filter(|(code, _)| code.trim() != rendered.text.trim());
+
+                (notes, code)
             });
 
-            let _ = sender.send(Assisted::Function { addr, before: rendered.text.clone(), notes });
-        });
-
-        return Ok(());
-    }
-
-    /// Asks the LLM to rewrite a function as clear C (the code shown, edited or not), the answer becomes a proposal
-    pub fn llm_rewrite(&mut self, addr: u64, config: &LlmConfig) -> Result<()> {
-        let (rendered, _) = self.shown(addr).context("the function is not decompiled yet")?;
-        let assistant = Assistant::rewrite(config)?;
-        let sender = self.assisted_sender.clone();
-        let calls = rendered.meta.calls.clone();
-
-        self.llm_running += 1;
-
-        std::thread::spawn(move || {
-            let code = crash::catch(|| assistant.rewrite_code(&rendered.text, &rendered.meta.decls)).and_then(|r| r);
-            let _ = sender.send(Assisted::Rewrite { addr, before: rendered.text.clone(), calls, code });
+            let _ = sender.send(Assisted::Function { addr, before: rendered.text.clone(), calls, improved });
         });
 
         return Ok(());
@@ -1114,21 +1183,40 @@ impl Project {
         let id = self.next_proposal;
 
         match assisted {
-            Assisted::Function { addr, before, notes } => {
-                let notes = match notes {
-                    Ok(notes) if !notes.is_empty() => notes,
+            Assisted::Function { addr, before, calls, improved } => {
+                let (notes, code) = match improved {
+                    Ok((notes, code)) if !notes.is_empty() || code.is_some() => (notes, code),
                     Ok(_) => return self.messages.push((format!("LLM: nothing to improve in {}", self.function_name(addr)), false)),
                     Err(error) => return self.messages.push((format!("LLM: {:#}", error), true)),
                 };
 
-                let mut merged = self.notes(addr);
-                merged.overlay(&notes);
+                let name = self.function_name(addr);
+                let functions: BTreeMap<u64, FunctionNotes> = (!notes.is_empty()).then(|| (addr, notes.clone())).into_iter().collect();
 
-                self.service.preview(id, addr, merged.clone(), notes.name.clone());
-                let label = format!("{} ({:#x})", self.function_name(addr), addr);
+                // The rewritten code, with what it may have lost in the label of the proposal
+                if let Some((code, lines)) = code {
+                    // The code keeps the name of the function (the one it is given is applied when it is accepted)
+                    let new_name = notes.name.clone().unwrap_or_else(|| name.clone());
+                    let mut warnings = check_rewrite(&name, &calls, &code);
+                    warnings.retain(|w| !(w.starts_with("the function is not named") && code.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|w| w == new_name)));
+                    let warning = if warnings.is_empty() { String::new() } else { format!(" [check: {}]", warnings.join("; ")) };
+                    let debuggable = lines.iter().flatten().count();
+                    let label = format!("improvement of {} ({:#x}, {} lines with their address){}", name, addr, debuggable, warning);
 
-                self.proposals.push(Proposal { id, label, functions: [(addr, notes)].into_iter().collect(), edits: BTreeMap::new(), before, after: String::new(), preview_pending: true });
-                self.messages.push((format!("LLM: proposal {} for {}, review it with :review", id, self.function_name(addr)), false));
+                    let proposal = Proposal { id, label, functions, edits: [(addr, (code.clone(), lines))].into_iter().collect(), before, after: code, preview_pending: false };
+                    self.persist_proposal(&proposal);
+                    self.messages.push((format!("LLM: proposal {} improves {}, review it with :review", id, name), !warnings.is_empty()));
+                    self.proposals.push(proposal);
+                } else {
+                    let mut merged = self.notes(addr);
+                    merged.overlay(&notes);
+
+                    self.service.preview(id, addr, merged.clone(), notes.name.clone());
+                    let label = format!("{} ({:#x})", name, addr);
+
+                    self.proposals.push(Proposal { id, label, functions, edits: BTreeMap::new(), before, after: String::new(), preview_pending: true });
+                    self.messages.push((format!("LLM: proposal {} for {}, review it with :review", id, name), false));
+                }
             }
             Assisted::Modules { label, moves } => {
                 let moves = match moves {
@@ -1158,24 +1246,6 @@ impl Project {
                 self.messages.push((format!("LLM: proposal {} moves {} functions, review it with :review", id, proposal.functions.len()), false));
                 self.proposals.push(proposal);
             }
-            Assisted::Rewrite { addr, before, calls, code } => {
-                let code = match code {
-                    Ok(code) if code.trim() != before.trim() => code,
-                    Ok(_) => return self.messages.push((format!("LLM: nothing to rewrite in {}", self.function_name(addr)), false)),
-                    Err(error) => return self.messages.push((format!("LLM: {:#}", error), true)),
-                };
-
-                // What the rewrite may have lost is in the label of the proposal
-                let name = self.function_name(addr);
-                let warnings = check_rewrite(&name, &calls, &code);
-                let warning = if warnings.is_empty() { String::new() } else { format!(" [check: {}]", warnings.join("; ")) };
-                let label = format!("rewrite of {} ({:#x}){}", name, addr, warning);
-
-                let proposal = Proposal { id, label, functions: BTreeMap::new(), edits: [(addr, code.clone())].into_iter().collect(), before, after: code, preview_pending: false };
-                self.persist_proposal(&proposal);
-                self.messages.push((format!("LLM: proposal {} rewrites {}, review it with :review", id, name), !warnings.is_empty()));
-                self.proposals.push(proposal);
-            }
         }
 
         self.next_proposal += 1;
@@ -1192,8 +1262,9 @@ impl Project {
             changes.push((self.path(&format!("fn/{:x}.toml", addr)), Some(merged.to_toml().into_bytes())));
         }
 
-        for (&addr, code) in proposal.edits.iter() {
+        for (&addr, (code, lines)) in proposal.edits.iter() {
             changes.push((self.path(&format!("fn/{:x}.c", addr)), Some(code.clone().into_bytes())));
+            changes.push((self.path(&format!("fn/{:x}.lines", addr)), Some(lines_file(lines).into_bytes())));
         }
 
         let meta = ProposalFile { label: proposal.label.clone(), before: proposal.before.clone(), after: proposal.after.clone() };
@@ -1216,8 +1287,17 @@ impl Project {
         let functions = std::mem::take(&mut self.proposals[index].functions);
         let edits = std::mem::take(&mut self.proposals[index].edits);
 
-        for (addr, code) in edits {
-            self.set_edit(addr, &code)?;
+        // The code of an improvement is the function under the name the proposal gives it, it replaces the next rendering
+        // (the names and types of the proposal change the decompiled text the code was written from)
+        for (addr, (code, lines)) in edits {
+            let renamed = functions.get(&addr).and_then(|n| n.name.clone()).map(|new| [(self.function_name(addr), new)].into_iter().collect::<HashMap<String, String>>());
+            let code = renamed.map_or(code.clone(), |r| rename_identifiers(&code, &r));
+
+            self.set_edit_lines(addr, &code, Some(lines).filter(|l| !l.is_empty()))?;
+
+            if let Some(edit) = self.work.edits.get_mut(&addr) {
+                edit.adopt = functions.contains_key(&addr);
+            }
         }
 
         for (addr, notes) in functions {
@@ -1332,35 +1412,64 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn rewrite_proposals() {
-        let location = temporary("project-rewrite");
+    fn improvement_proposals() {
+        let location = temporary("project-improvement");
         let mut project = open(&location);
         project.wait_idle();
 
         let classify = project.resolve("classify").unwrap();
         let before = text(&mut project, classify);
-        let calls = project.shown(classify).unwrap().0.meta.calls.clone();
-        let code = "int classify(int value)\n{\n    return value < 0 ? -1 : lib_add(value, 1);\n}\n".to_string();
+        let (rendered, _) = project.shown(classify).unwrap();
+        let calls = rendered.meta.calls.clone();
+        let addrs: Vec<u64> = rendered.lines.iter().flatten().copied().collect();
+        let (first, last) = (addrs[0], *addrs.last().unwrap());
 
-        // The rewrite is an edit to review, with what it may have lost in its label
+        // The code under the name of the function, documented, the lines doing the work of the decompiled ones with their
+        // address; a new name and a summary
+        let code = "// Classifies a value: -1 when negative\nint classify(int value)\n{\n    return value < 0 ? -1 : lib_add(value, 1);\n}\n".to_string();
+        let lines = vec![None, Some(first), None, Some(last), None];
+        let notes = FunctionNotes { name: Some("classify_value".to_string()), summary: Some("Classifies a value.".to_string()), ..Default::default() };
+
         project.llm_running += 1;
-        project.assisted_sender.send(Assisted::Rewrite { addr: classify, before, calls, code: Ok(code.clone()) }).unwrap();
+        project.assisted_sender.send(Assisted::Function { addr: classify, before, calls, improved: Ok((notes, Some((code.clone(), lines.clone())))) }).unwrap();
         project.wait_idle();
 
         let proposal = project.proposals[0].clone();
-        assert!(proposal.is_pending());
+        assert!(proposal.is_pending() && proposal.functions.contains_key(&classify));
         assert!(proposal.diff().contains("+    return value < 0 ? -1 : lib_add(value, 1);"), "{}", proposal.diff());
-        assert!(proposal.label.starts_with("rewrite of classify"), "{}", proposal.label);
+        assert!(proposal.label.starts_with("improvement of classify") && proposal.label.contains("2 lines with their address") && !proposal.label.contains("check"), "{}", proposal.label);
 
-        // Kept until accepted, then the code of the function
+        // Kept with the addresses until accepted
         drop(project);
         let mut project = open(&location);
-        assert_eq!(project.proposals[0].edits.get(&classify), Some(&code));
+        assert_eq!(project.proposals[0].edits.get(&classify), Some(&(code.clone(), lines.clone())));
 
+        // Accepted: the code under its new name, its lines keep their addresses after the decompilation with the new
+        // notes (the code replaces it, it is not merged into it)
         project.wait_idle();
         project.accept(proposal.id).unwrap();
-        assert_eq!(text(&mut project, classify), code);
-        assert!(project.shown(classify).unwrap().1.edited);
+        project.wait_idle();
+
+        let renamed = code.replace("int classify(", "int classify_value(");
+        let (shown, state) = project.shown(classify).unwrap();
+        assert!(state.edited && !state.conflict);
+        assert_eq!(shown.text, renamed);
+        assert_eq!(shown.lines, lines);
+        assert_eq!(project.function_name(classify), "classify_value");
+
+        // Saved and reopened: the same addresses
+        project.save(None).unwrap();
+        drop(project);
+        let mut project = open(&location);
+        project.wait_idle();
+        let (shown, _) = project.shown(classify).unwrap();
+        assert_eq!(shown.text, renamed);
+        assert_eq!(shown.lines, lines);
+
+        // An edit of the code keeps the addresses of the lines it does not change
+        let edited = renamed.replace("// Classifies a value: -1 when negative\n", "// Classifies a value\n// -1 when negative\n");
+        project.set_edit(classify, &edited).unwrap();
+        assert_eq!(project.shown(classify).unwrap().0.lines, [None, None, Some(first), None, Some(last), None]);
 
         let _ = std::fs::remove_dir_all(&location);
     }
@@ -1466,7 +1575,7 @@ pub(crate) mod tests {
 
         project.llm_running += 2;
         let before = text(&mut project, classify);
-        project.assisted_sender.send(Assisted::Function { addr: classify, before, notes: Ok(notes) }).unwrap();
+        project.assisted_sender.send(Assisted::Function { addr: classify, before, calls: Vec::new(), improved: Ok((notes, None)) }).unwrap();
         project.assisted_sender.send(Assisted::Modules { label: "modules of the program".to_string(), moves: Ok(vec![(classify, "lib/classes.c".to_string())]) }).unwrap();
         project.wait_idle();
 

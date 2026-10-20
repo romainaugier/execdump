@@ -173,30 +173,7 @@ impl App {
         }
     }
 
-    /// Asks the LLM to rewrite the function as clear C, a proposal to review
-    pub(crate) fn rewrite_code(&mut self) {
-        let Some((program, function)) = self.current_function() else {
-            return self.error("No function under the cursor".to_string());
-        };
-
-        if !self.llm.is_enabled() {
-            return self.error("No [llm] section in ~/.execdumprc (backend, model, api_key_env...)".to_string());
-        }
-
-        let llm = self.llm.clone();
-
-        let result = match self.project(program) {
-            Some(project) => project.llm_rewrite(function, &llm),
-            None => return,
-        };
-
-        match result {
-            Ok(()) => self.info("Asking the LLM to rewrite the code, its proposal will show in :review".to_string()),
-            Err(error) => self.error(format!("LLM: {:#}", error)),
-        }
-    }
-
-    /// Asks the LLM to improve the function under the cursor: the answer is a proposal to review
+    /// Asks the LLM to improve and document the function under the cursor: the answer is a proposal to review
     pub(crate) fn improve_code(&mut self) {
         let Some((program, function)) = self.current_function() else {
             return self.error("No function under the cursor".to_string());
@@ -215,7 +192,7 @@ impl App {
         };
 
         match result {
-            Ok(()) => self.info("Asking the LLM to improve the code, its proposal will show in :review".to_string()),
+            Ok(()) => self.info("Asking the LLM to improve and document the code, its proposal will show in :review".to_string()),
             Err(error) => self.error(format!("LLM: {:#}", error)),
         }
     }

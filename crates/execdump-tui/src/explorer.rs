@@ -140,8 +140,55 @@ fn program_tree(tree: &mut Tree, app: &App, p: usize, depth: u8, key: &str) {
 }
 
 pub(crate) fn explorer_items(app: &App) -> (Vec<ExplorerItem>, Vec<u8>) {
+    // A filter looks in the closed nodes too
+    let open = std::collections::HashSet::new();
+    let collapsed = if app.explorer_filter.is_empty() { &app.explorer_collapsed } else { &open };
+    let (items, depths) = tree_items(app, collapsed);
+
+    return match app.explorer_filter.is_empty() {
+        true => (items, depths),
+        false => filtered(app, items, depths),
+    };
+}
+
+/// The items whose name has the text of the filter (case insensitive), with the nodes above them
+fn filtered(app: &App, items: Vec<ExplorerItem>, depths: Vec<u8>) -> (Vec<ExplorerItem>, Vec<u8>) {
+    let filter = app.explorer_filter.to_lowercase();
+    let mut keep = vec![false; items.len()];
+
+    for (index, item) in items.iter().enumerate() {
+        let name = match item {
+            ExplorerItem::Group(..) => continue,
+            ExplorerItem::Module(_, path) => path.to_lowercase(),
+            other => other.display_name(app).trim().to_lowercase(),
+        };
+
+        if !name.contains(&filter) {
+            continue;
+        }
+
+        keep[index] = true;
+        let mut depth = depths[index];
+
+        // The nodes above it
+        for parent in (0..index).rev() {
+            if depth == 0 {
+                break;
+            }
+
+            if depths[parent] < depth {
+                keep[parent] = true;
+                depth = depths[parent];
+            }
+        }
+    }
+
+    return items.into_iter().zip(depths).zip(keep).filter(|(_, keep)| *keep).map(|(pair, _)| pair).unzip();
+}
+
+fn tree_items(app: &App, collapsed: &std::collections::HashSet<String>) -> (Vec<ExplorerItem>, Vec<u8>) {
     let exec = &app.exec;
-    let mut tree = Tree { items: Vec::new(), depths: Vec::new(), collapsed: &app.explorer_collapsed };
+    let mut tree = Tree { items: Vec::new(), depths: Vec::new(), collapsed };
     let file = app.exec_path.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
 
     // One node per program of the binary, its headers, sections and tables in the first one (Mach-O: each)
@@ -240,6 +287,42 @@ impl App {
 
         if let Some(index) = selected.and_then(|s| self.explorer_items.iter().position(|i| *i == s)) {
             self.explorer_state.select(Some(index));
+        }
+    }
+
+    /// Filters the items of the explorer, the selection on the first item found (on the item it was on without a
+    /// filter)
+    pub(crate) fn filter_explorer(&mut self, text: &str) {
+        if self.explorer_filter == text {
+            return;
+        }
+
+        // Without the filter, the nodes above the item found open
+        if text.is_empty() {
+            let selected = self.explorer_state.selected().unwrap_or(0).min(self.explorer_items.len().saturating_sub(1));
+            let mut depth = self.explorer_depths.get(selected).copied().unwrap_or(0);
+
+            for parent in (0..selected).rev() {
+                if depth == 0 {
+                    break;
+                }
+
+                if self.explorer_depths[parent] < depth {
+                    depth = self.explorer_depths[parent];
+
+                    if let ExplorerItem::Group(key, _) = &self.explorer_items[parent] {
+                        self.explorer_collapsed.remove(key);
+                    }
+                }
+            }
+        }
+
+        self.explorer_filter = text.to_string();
+        self.rebuild_explorer();
+
+        if !text.is_empty() {
+            let first = self.explorer_items.iter().position(|i| !matches!(i, ExplorerItem::Group(..)));
+            self.explorer_state.select(Some(first.unwrap_or(0)));
         }
     }
 
@@ -375,6 +458,19 @@ impl App {
         let select = |state: &mut ListState, index: usize| state.select(Some(index.min(count.saturating_sub(1))));
 
         match command {
+            Command::ClearSearch if !self.explorer_filter.is_empty() => self.filter_explorer(""),
+            // n / p: the next (previous) item found
+            Command::Move(Motion::Next | Motion::Previous) if !self.explorer_filter.is_empty() => {
+                let leaf = |i: usize| !matches!(self.explorer_items[i], ExplorerItem::Group(..));
+                let found = match command {
+                    Command::Move(Motion::Next) => (selected + 1..count).find(|&i| leaf(i)),
+                    _ => (0..selected).rev().find(|&i| leaf(i)),
+                };
+
+                if let Some(index) = found {
+                    select(&mut self.explorer_state, index);
+                }
+            }
             Command::Move(Motion::Down) => select(&mut self.explorer_state, selected + 1),
             Command::Move(Motion::Up) => select(&mut self.explorer_state, selected.saturating_sub(1)),
             Command::Move(Motion::PageDown) => select(&mut self.explorer_state, selected + 10),
@@ -443,7 +539,7 @@ impl App {
         let explorer = List::new(items)
             .block(
                 Block::default()
-                    .title(" Explorer ")
+                    .title(if self.explorer_filter.is_empty() { " Explorer ".to_string() } else { format!(" Explorer [/{}] ", self.explorer_filter) })
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(if active { theme.highlight_bg } else { theme.border }))
                     .style(theme.base()),

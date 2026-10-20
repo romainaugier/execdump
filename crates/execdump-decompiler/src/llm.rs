@@ -4,7 +4,12 @@
  * The model gets the C code of a function and answers with structured suggestions (names of
  * the function and of its variables, types of the variables, a summary). Suggestions are edits
  * of the C syntax tree: names must be valid and unique C identifiers, types must be known C
- * types, anything else is dropped. The code itself is only replaced by a rewrite the user accepts.
+ * types, anything else is dropped.
+ *
+ * The improvement of the interface asks for the same suggestions and for the function rewritten as clear, documented C.
+ * Each line of the code it gets ends with the address of its machine code (a marker, /*@4011a0*/), the rewritten
+ * lines keep the markers of the lines they do the work of: the code keeps the addresses of its lines, so it can be
+ * debugged. The code itself is only replaced by a rewrite the user accepts.
  *
  * The APIs are called by the clients of the chat module.
  */
@@ -117,27 +122,28 @@ impl Assistant {
         return Assistant::for_task(config, SYSTEM, "suggestions", schema());
     }
 
-    /// Assistant rewriting the code of a function as clear C
-    pub fn rewrite(config: &LlmConfig) -> Result<Self> {
-        return Assistant::for_task(config, REWRITE_SYSTEM, "rewrite", rewrite_schema());
+    /// Assistant improving and documenting a function: the suggestions and the rewritten code
+    pub fn improve(config: &LlmConfig) -> Result<Self> {
+        return Assistant::for_task(config, IMPROVE_SYSTEM, "improve", improve_schema());
     }
 
-    /// Asks the model to rewrite a function, with the prototypes of what it uses
-    pub fn rewrite_code(&self, code: &str, declarations: &[String]) -> Result<String> {
+    /// Asks the model to improve a function: its code with the markers of the addresses of its lines (see mark_lines),
+    /// with the prototypes of what it uses. The code of the answer has the addresses of the markers it kept (the ones of
+    /// the code given only).
+    pub fn improve_code(&self, marked: &str, declarations: &[String]) -> Result<Improvement> {
         let prototypes = if declarations.is_empty() { String::new() } else { format!("Prototypes:\n\n```c\n{}\n```\n\n", declarations.join("\n")) };
-        let text = self.ask(format!("{}Decompiled function:\n\n```c\n{}```", prototypes, code))?;
+        let text = self.ask(format!("{}Decompiled function:\n\n```c\n{}```", prototypes, marked))?;
         let start = text.find('{').context("no JSON object in the answer")?;
         let end = text.rfind('}').context("no JSON object in the answer")?;
-        let rewrite: Rewrite = serde_json::from_str(&text[start..=end])?;
+        let answer: ImproveAnswer = serde_json::from_str(&text[start..=end])?;
 
         // Models wrap code in fences out of habit
-        let code = rewrite.code.trim().trim_start_matches("```c").trim_start_matches("```").trim_end_matches("```").trim();
+        let code = answer.code.trim().trim_start_matches("```c").trim_start_matches("```").trim_end_matches("```").trim();
+        let known = markers(marked).into_iter().flatten().collect();
+        let code = (!code.is_empty()).then(|| unmark(&format!("{}\n", code), &known));
+        let suggestions = Suggestions { function_name: answer.function_name, summary: answer.summary, variables: answer.variables };
 
-        if code.is_empty() {
-            bail!("empty code in the answer");
-        }
-
-        return Ok(format!("{}\n", code));
+        return Ok(Improvement { suggestions, code });
     }
 
     /// Assistant organizing functions into source files
@@ -150,8 +156,8 @@ impl Assistant {
             bail!("the [llm] section of the configuration needs a backend and a model");
         }
 
-        // A rewrite is the whole function: more tokens than the suggestions
-        let max_tokens = if name == "rewrite" { config.max_tokens.max(8192) } else { config.max_tokens };
+        // An improvement is the whole function: more tokens than the suggestions
+        let max_tokens = if name == "improve" { config.max_tokens.max(8192) } else { config.max_tokens };
         let chat = Chat::new(config, system, name, schema, max_tokens)?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 
@@ -178,29 +184,91 @@ impl Assistant {
     }
 }
 
-const REWRITE_SYSTEM: &str = "You are a reverse engineer cleaning up the output of a decompiler. You are given the C code of \
-one function, decompiled from a binary, and the prototypes of what it uses. Rewrite it as clear and understandable C code, \
-the way a careful programmer would have written it: structured control flow instead of gotos where possible, for loops, \
-early returns, no needless temporaries or casts, array indexing and field access instead of pointer arithmetic when the \
-code makes the layout clear, meaningful names for the parameters and local variables, and a short comment only where the \
-code is not obvious. The behavior must stay exactly the same: keep the function name, its parameters in the same order, \
-every call (same functions, same arguments, same order of the side effects), every memory access and every constant. Do \
-not invent functions or types that are not given. Answer with a JSON object only, the code being the whole function.";
+const IMPROVE_SYSTEM: &str = "You are a reverse engineer improving the output of a decompiler. You are given the C code of \
+one function, decompiled from a binary, and the prototypes of what it uses. Each line of the code ends with a marker such as \
+/*@4011a0*/, the address of its machine code. Suggest a descriptive name for the function (snake_case, only when you understand \
+it), names and C types for its parameters and local variables (char * for strings, size_t for sizes...) and a one sentence \
+summary. Then rewrite the function as clear and documented C, the way a careful programmer would have written it: structured \
+control flow instead of gotos where possible, for loops, early returns, no needless temporaries or casts, array indexing and \
+field access instead of pointer arithmetic when the layout is clear, the names you suggested, and comments explaining what \
+the code does and why where it is not obvious. The behavior must stay exactly the same: keep the function name of the \
+signature, its parameters in the same order, every call (same functions, same arguments, same order of the side effects), \
+every memory access and every constant. Do not invent functions or types that are not given. Keep the markers: end each line \
+of your code that does the work of lines of the given code with the marker of the first of them, exactly as it was written, \
+and put no marker on the lines you add (comments, braces, declarations). Answer with a JSON object only, the code being the \
+whole function.";
 
-fn rewrite_schema() -> serde_json::Value {
-    return serde_json::json!({
-        "type": "object",
-        "properties": {
-            "code": { "type": "string", "description": "The whole rewritten function, its signature included" }
-        },
-        "required": ["code"],
-        "additionalProperties": false
-    });
+fn improve_schema() -> serde_json::Value {
+    let mut schema = schema();
+    schema["properties"]["code"] = serde_json::json!({ "type": "string", "description": "The whole rewritten and documented function, its signature included, with the markers of the addresses" });
+    schema["required"] = serde_json::json!(["function_name", "summary", "variables", "code"]);
+    return schema;
 }
 
-#[derive(Deserialize)]
-struct Rewrite {
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct ImproveAnswer {
+    function_name: Option<String>,
+    summary: Option<String>,
+    variables: Vec<VariableSuggestion>,
     code: String,
+}
+
+/// What the model proposes for a function: its suggestions, and its code rewritten with the addresses of its lines
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Improvement {
+    pub suggestions: Suggestions,
+    pub code: Option<(String, Vec<Option<u64>>)>,
+}
+
+/// The code of a function with the address of each line at its end (/*@4011a0*/), for the model
+pub fn mark_lines(text: &str, lines: &[Option<u64>]) -> String {
+    let mut marked = String::with_capacity(text.len() + lines.len() * 12);
+
+    for (index, line) in text.lines().enumerate() {
+        marked.push_str(line);
+
+        if let Some(addr) = lines.get(index).copied().flatten().filter(|_| !line.trim().is_empty()) {
+            marked.push_str(&format!(" /*@{:x}*/", addr));
+        }
+
+        marked.push('\n');
+    }
+
+    return marked;
+}
+
+/// The address of the first marker of each line
+fn markers(text: &str) -> Vec<Option<u64>> {
+    return text.lines().map(|line| line.split("/*@").skip(1).find_map(|rest| rest.split_once("*/").and_then(|(hex, _)| u64::from_str_radix(hex.trim(), 16).ok()))).collect();
+}
+
+/// The code without its markers, and the address of each of its lines: the first marker of the line among the known
+/// addresses (a marker the model made up is no address)
+pub fn unmark(code: &str, known: &HashSet<u64>) -> (String, Vec<Option<u64>>) {
+    let addrs = markers(code).into_iter().map(|a| a.filter(|a| known.contains(a))).collect();
+    let mut text = String::with_capacity(code.len());
+
+    for line in code.lines() {
+        let mut rest = line;
+        let mut clean = String::new();
+
+        while let Some(start) = rest.find("/*@") {
+            match rest[start..].find("*/") {
+                Some(end) if rest[start + 3..start + end].chars().all(|c| c.is_ascii_hexdigit() || c == ' ') => {
+                    clean.push_str(&rest[..start]);
+                    rest = &rest[start + end + 2..];
+                }
+                _ => break,
+            }
+        }
+
+        clean.push_str(rest);
+        text.push_str(clean.trim_end());
+        text.push('\n');
+    }
+
+    return (text, addrs);
 }
 
 /// What a rewritten function may have lost: its name, the balance of its braces, the functions it called
@@ -448,17 +516,26 @@ pub fn apply(function: &mut CFunction, suggestions: &Suggestions, typedb: &TypeD
 #[cfg(test)]
 mod tests {
     #[test]
-    fn rewrite() {
+    fn improvement() {
         use super::Assistant;
 
-        // Fenced code in the JSON answer
-        let answer = serde_json::json!({ "code": "```c\nint f(void)\n{\n    return 1;\n}\n```" }).to_string();
+        // The markers the model kept are the addresses of the lines, a made up one is none; fenced code
+        let code = "```c\n// Sign of a value\nint sign(int value)\n{\n    if (value < 0) { /*@1004*/\n        return -1; /*@1008*/\n    }\n    return 1; /*@99*/\n}\n```";
+        let answer = serde_json::json!({ "function_name": "sign", "summary": "Sign of a value.", "variables": [], "code": code }).to_string();
         let body = format!("data: {}\n\ndata: [DONE]\n\n", serde_json::json!({ "choices": [{ "delta": { "content": answer }, "finish_reason": "stop" }] }));
         let (url, request) = crate::chat::tests::serve("200 OK", body);
 
         let config = super::LlmConfig { backend: "openai-compatible".to_string(), model: "test".to_string(), base_url: Some(url), timeout: 10, ..Default::default() };
-        let assistant = Assistant::rewrite(&config).unwrap();
-        assert_eq!(assistant.rewrite_code("int f(void) { return 1; }", &[]).unwrap(), "int f(void)\n{\n    return 1;\n}\n");
+        let assistant = Assistant::improve(&config).unwrap();
+        let marked = super::mark_lines("int f(int a1)\n{\n    if (a1 < 0) {\n        return -1;\n    }\n    return 1;\n}\n", &[Some(0x1000), None, Some(0x1004), Some(0x1008), None, Some(0x100c), None]);
+        assert_eq!(marked.lines().nth(2), Some("    if (a1 < 0) { /*@1004*/"));
+
+        let improvement = assistant.improve_code(&marked, &[]).unwrap();
+        assert_eq!(improvement.suggestions.summary.as_deref(), Some("Sign of a value."));
+
+        let (text, lines) = improvement.code.unwrap();
+        assert_eq!(text, "// Sign of a value\nint sign(int value)\n{\n    if (value < 0) {\n        return -1;\n    }\n    return 1;\n}\n");
+        assert_eq!(lines, [None, None, None, Some(0x1004), Some(0x1008), None, None, None]);
         assert!(request.recv().unwrap().contains("\"max_tokens\":8192"));
     }
 

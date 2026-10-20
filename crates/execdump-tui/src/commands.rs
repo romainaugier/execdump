@@ -242,6 +242,8 @@ pub(crate) enum Command {
     StringForms,
     /// Visual mode by characters or by lines, None leaves it
     Visual(Option<bool>),
+    /// Language the code is highlighted as
+    Syntax(String),
     /// Copies the selection (the lines from the cursor without one) to the clipboard
     Yank,
     Revert,
@@ -250,8 +252,9 @@ pub(crate) enum Command {
     MakeModule(String),
     RemoveModule(String),
     RenameModule(String, String),
+    /// The LLM improves and documents the function: names, types, a summary and its code rewritten with the addresses
+    /// of its lines
     Improve,
-    Rewrite,
     LlmModules(Option<String>),
     Export(String),
     Library(String),
@@ -408,6 +411,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("summary", &[], "[text]", "summary of the function, a comment at the top of its code", CODE, C::Nothing),
     spec("comment", &[], "<text>", "comment above the line", CODE, C::Nothing),
     spec("visual", &[], "[line|off]", "visual mode: selects from the cursor by characters (by lines), the moves extend it", CODE, C::Words(&["line", "off"])),
+    spec("syntax", &["set-syntax"], "<c|c++|go|rust>", "language the code of the view is highlighted as", CODE, C::Words(&["c", "c++", "go", "rust"])),
     spec("yank", &[], "", "copy the selection (the line, the count of lines without one) to the clipboard", CODE, C::Nothing),
     spec("string", &["str"], "", "the string literal under the cursor as text, C, bytes, shell and Python (Enter copies one)", CODE, C::Nothing),
     spec("revert", &[], "", "drop the edits of the current function", CODE, C::Nothing),
@@ -418,8 +422,7 @@ pub(crate) const SPECS: &[Spec] = &[
     spec("mkmod", &["newmod"], "<module>", "create a module (a path such as net/socket.c)", PROJECT, C::Module),
     spec("rmmod", &[], "<module>", "remove a module", PROJECT, C::Module),
     spec("renmod", &[], "<old> <new>", "rename a module", PROJECT, C::Module),
-    spec("llm", &[], "[rewrite|modules [module|all]]", "ask the LLM to improve the function, rewrite it, organize the modules", PROJECT, C::Llm),
-    spec("rewrite", &[], "", "ask the LLM to rewrite the function as clear C", PROJECT, C::Nothing),
+    spec("llm", &["improve"], "[modules [module|all]]", "ask the LLM to improve and document the function (names, types, summary, clear C keeping the addresses of its lines), or to organize the modules", PROJECT, C::Llm),
     spec("export", &[], "<directory>", "export the C code as a source tree", PROJECT, C::Path),
     spec("lib", &["library"], "<name or path>", "load a shared library", PROJECT, C::Library),
     spec("debug", &[], "[arguments]", "run the program under the debugger (gdb or lldb): to its first breakpoint, to main without one", DEBUG, C::Nothing),
@@ -630,6 +633,7 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
             Some(_) => return Err(usage(spec)),
         }),
         "yank" => Command::Yank,
+        "syntax" => Command::Syntax(first.map(|l| l.to_string()).context("Usage: syntax <c|c++|go|rust>")?),
         "revert" => Command::Revert,
         "ours" => Command::Resolve { edited: true, decompiled: false },
         "theirs" => Command::Resolve { edited: false, decompiled: true },
@@ -643,10 +647,8 @@ pub(crate) fn parse(text: &str) -> Result<Command> {
         },
         "llm" => match first {
             Some("modules" | "mods") => Command::LlmModules(second.map(|s| s.to_string())),
-            Some("rewrite") => Command::Rewrite,
             _ => Command::Improve,
         },
-        "rewrite" => Command::Rewrite,
         "export" => Command::Export(first.map(|d| d.to_string()).context("Usage: export <directory>")?),
         "lib" => Command::Library(first.map(|l| l.to_string()).context("Usage: lib <name or path>")?),
         "debug" => Command::Debug(rest.split_whitespace().map(|w| w.to_string()).collect()),
@@ -806,6 +808,9 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Explorer, &[s("t")], "open tab");
     bind(Explorer, &[s("s")], "open split");
     bind(Explorer, &[s("v")], "open vsplit");
+    bind(Explorer, &[s("<Esc>")], "clear-search");
+    bind(Explorer, &[c(k.next_node)], "next");
+    bind(Explorer, &[c(k.prev_node)], "previous");
 
     // Any view
     bind(Content, &[c(k.down), s("<Down>")], "move-down");
@@ -913,7 +918,6 @@ pub(crate) fn default_bindings(k: &KeyBindings) -> Vec<Binding> {
     bind(Source, &[s("[c")], "previous-conflict");
     bind(Source, &[c(k.toggle_view)], "toggle-code");
     bind(Source, &[c(k.improve)], "llm");
-    bind(Source, &[s("W")], "rewrite");
 
     return list
         .into_iter()
@@ -1202,7 +1206,7 @@ impl App {
                 project.revert(addr);
                 Ok(())
             }),
-            Command::Comment(_) | Command::StringForms | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } | Command::Visual(_) | Command::Yank => {
+            Command::Comment(_) | Command::StringForms | Command::Resolve { .. } | Command::Insert(_) | Command::Undo | Command::Redo | Command::DeleteLine | Command::Operator { .. } | Command::Conflict { .. } | Command::Visual(_) | Command::Yank | Command::Syntax(_) => {
                 self.error("Only in the C code (:source)".to_string());
             }
             Command::MoveFunction(module, function) => self.move_function(Some(module), function),
@@ -1220,7 +1224,6 @@ impl App {
             }
             Command::RenameModule(old, new) => self.rename_module(program, &old, &new),
             Command::Improve => self.improve_code(),
-            Command::Rewrite => self.rewrite_code(),
             Command::LlmModules(scope) => self.llm_modules(program, scope),
             Command::Export(dir) => self.export(program, PathBuf::from(dir)),
             Command::Library(name) => self.library_command(&name),

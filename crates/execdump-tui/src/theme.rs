@@ -22,6 +22,8 @@ pub struct Theme {
     pub hex_data: Color,
     pub hex_ascii: Color,
     pub comment: Color,
+    /// Names of the types in the code (structs, typedefs, classes)
+    pub code_type: Color,
     pub dim: Color,
     pub warning: Color,
 
@@ -74,6 +76,7 @@ impl Theme {
             hex_data: Color::Rgb(181, 206, 168),
             hex_ascii: Color::Rgb(206, 145, 120),
             comment: Color::Rgb(106, 153, 85),
+            code_type: Color::Rgb(78, 201, 176),
             dim: Color::Rgb(110, 110, 110),
             warning: Color::Rgb(220, 180, 90),
             stopped_bg: Color::Rgb(75, 70, 25),

@@ -489,6 +489,52 @@ fn visual_selection() {
     let _ = std::fs::remove_dir_all(&location);
 }
 
+#[test]
+fn explorer_filter() {
+    let (mut app, location) = app("filter");
+    wait_decompiled(&mut app);
+
+    app.run_command("mkmod net/socket.c");
+    app.run_command("mkmod net/http.c");
+    app.focus = Focus::Explorer;
+    app.rebuild_explorer();
+
+    let modules = |app: &App| -> Vec<String> { app.explorer_items.iter().filter_map(|i| if let ExplorerItem::Module(_, m) = i { Some(m.clone()) } else { None }).collect() };
+    let selected = |app: &App| app.explorer_state.selected().and_then(|i| app.explorer_items.get(i)).cloned();
+    assert_eq!(modules(&app).len(), 3);
+
+    // Filtered while typing, the selection on the first module found, the nodes above it kept
+    keys(&mut app, "/SOCK");
+    assert_eq!(modules(&app), ["net/socket.c"]);
+    assert_eq!(selected(&app), Some(ExplorerItem::Module(0, "net/socket.c".to_string())));
+    assert!(app.explorer_items.iter().any(|i| matches!(i, ExplorerItem::Group(_, title) if title.starts_with("Modules"))));
+
+    // Enter keeps the filter, the next Enter opens the module
+    enter(&mut app);
+    assert_eq!(modules(&app), ["net/socket.c"]);
+    enter(&mut app);
+    assert!(matches!(app.view(), View::Source(v) if v.module == "net/socket.c"));
+
+    // Esc in the explorer: every item again, still on the module found
+    app.focus = Focus::Explorer;
+    keys(&mut app, "/net");
+    enter(&mut app);
+    keys(&mut app, "n");
+    assert_eq!(selected(&app), Some(ExplorerItem::Module(0, "net/socket.c".to_string())));
+    esc(&mut app);
+    assert_eq!(modules(&app).len(), 3);
+    assert_eq!(selected(&app), Some(ExplorerItem::Module(0, "net/socket.c".to_string())));
+
+    // Nothing found
+    keys(&mut app, "/zzz");
+    enter(&mut app);
+    assert!(app.explorer_items.is_empty() && app.message.as_ref().is_some_and(|(_, error)| *error));
+    esc(&mut app);
+    assert_eq!(modules(&app).len(), 3);
+
+    let _ = std::fs::remove_dir_all(&location);
+}
+
 fn esc(app: &mut App) {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 }

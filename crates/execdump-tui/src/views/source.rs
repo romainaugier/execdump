@@ -12,11 +12,15 @@
 
 use crate::commands::{Command, Motion};
 use crate::debug::Marks;
+use crate::syntax::{self, Syntax};
 use crate::theme::Theme;
 use crate::views::View;
 use crate::{App, OpenMode, VERTICAL_STEP};
 
 use anyhow::{anyhow, bail, Context, Result};
+
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use execdump_project::{Priority, Project};
 
@@ -26,10 +30,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-
-const KEYWORDS: &[&str] = &["if", "else", "while", "do", "for", "switch", "case", "default", "break", "continue", "return", "goto", "sizeof"];
-
-const TYPES: &[&str] = &["void", "char", "short", "int", "long", "unsigned", "signed", "float", "double", "bool", "struct", "union", "enum", "const", "undefined"];
 
 /// Blocks after the visible ones that are decompiled before the others
 const LOOKAHEAD: usize = 16;
@@ -114,101 +114,12 @@ impl Fenwick {
 }
 
 /*
- * Syntax highlighting
+ * Syntax highlighting (see syntax)
  */
 
-fn is_type(word: &str) -> bool {
-    return TYPES.contains(&word) || (word.ends_with("_t") && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
-}
-
-/// Whether a block comment is still open after some lines
-pub fn comment_after<'a>(lines: impl Iterator<Item = &'a str>) -> bool {
-    let theme = Theme::codedark();
-    let mut comment = false;
-
-    for line in lines {
-        highlight_with(&theme, line, &mut comment);
-    }
-
-    return comment;
-}
-
-/// Highlights a line, comment tells whether it starts in a block comment and whether one is still open at its end
+/// Highlights a line of C, comment tells whether it starts in a block comment and whether one is still open at its end
 pub fn highlight_with(theme: &Theme, line: &str, comment: &mut bool) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    let style = |color| Style::default().fg(color);
-
-    if line.starts_with("<<<<<<<") || line.starts_with("=======") || line.starts_with(">>>>>>>") {
-        return vec![Span::styled(line.to_string(), Style::default().fg(theme.warning).add_modifier(Modifier::BOLD))];
-    }
-
-    // End of a block comment, from the start of the line or of the comment
-    let block_end = |from: usize| (from..chars.len().saturating_sub(1)).find(|&j| chars[j] == '*' && chars[j + 1] == '/').map(|j| j + 2);
-
-    while i < chars.len() {
-        let c = chars[i];
-        let start = i;
-
-        let color = if *comment || (c == '/' && chars.get(i + 1) == Some(&'*')) {
-            let from = if *comment { i } else { i + 2 };
-
-            match block_end(from) {
-                Some(end) => {
-                    i = end;
-                    *comment = false;
-                }
-                None => {
-                    i = chars.len();
-                    *comment = true;
-                }
-            }
-
-            theme.comment
-        } else if c == '/' && chars.get(i + 1) == Some(&'/') {
-            i = chars.len();
-            theme.comment
-        } else if c == '"' || c == '\'' {
-            i += 1;
-
-            while i < chars.len() && chars[i] != c {
-                i += if chars[i] == '\\' { 2 } else { 1 };
-            }
-
-            i = (i + 1).min(chars.len());
-            theme.hex_ascii
-        } else if c.is_ascii_digit() {
-            while i < chars.len() && chars[i].is_ascii_alphanumeric() {
-                i += 1;
-            }
-
-            theme.asm_immediate
-        } else if c.is_ascii_alphabetic() || c == '_' {
-            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-
-            let word: String = chars[start..i].iter().collect();
-
-            if KEYWORDS.contains(&word.as_str()) {
-                theme.asm_call
-            } else if is_type(&word) {
-                theme.asm_instruction
-            } else if chars.get(i) == Some(&'(') {
-                theme.asm_label
-            } else {
-                theme.asm_register
-            }
-        } else {
-            i += 1;
-            theme.fg
-        };
-
-        spans.push(Span::styled(chars[start..i.min(chars.len())].iter().collect::<String>(), style(color)));
-    }
-
-    return spans;
+    return syntax::C.highlight(theme, line, comment, &|_| false);
 }
 
 /// Identifier at a column of a line (or the closest one after it)
@@ -297,6 +208,10 @@ pub struct SourceView {
     pub height: usize,
     pub insert: Option<Insert>,
     pub visual: Option<Visual>,
+    /// Language of the code shown
+    pub syntax: &'static Syntax,
+    /// Names of the types the code may use (the typedefs and the structs of the type database)
+    types: Arc<HashSet<String>>,
     undo: Vec<(u64, String)>,
     redo: Vec<(u64, String)>,
 }
@@ -426,6 +341,8 @@ impl SourceView {
             height: 20,
             insert: None,
             visual: None,
+            syntax: &syntax::C,
+            types: Arc::new(project.typedb.typedefs.keys().chain(project.typedb.aggregates.keys()).cloned().collect()),
             undo: Vec::new(),
             redo: Vec::new(),
         };
@@ -441,6 +358,8 @@ impl SourceView {
             (None, Some(_)) => " -- VISUAL --",
             (None, None) => "",
         };
+
+        let mode = if std::ptr::eq(self.syntax, &syntax::C) { mode.to_string() } else { format!(" [{}]{}", self.syntax.name, mode) };
         return format!("{} ({} functions){}", self.module, self.functions.len(), mode);
     }
 
@@ -1295,6 +1214,7 @@ impl SourceView {
         let mut visible = Vec::new();
         let selection = self.selection();
         let selected = Style::default().bg(theme.highlight_bg);
+        let types = self.types.clone();
         let pc_function = marks.pc.and_then(|pc| project.analysis.function_containing(pc)).map(|f| f.addr);
 
         while lines.len() < height && pos.block < self.functions.len() {
@@ -1316,8 +1236,8 @@ impl SourceView {
             // A block comment opened above the first line shown
             let mut comment = match (self.insert.as_ref().filter(|i| i.addr == addr), shown.as_ref()) {
                 _ if pos.line == 0 => false,
-                (Some(insert), _) => comment_after(insert.lines.iter().take(pos.line).map(|l| l.as_str())),
-                (None, Some((rendered, _))) => comment_after(rendered.text.lines().take(pos.line)),
+                (Some(insert), _) => self.syntax.comment_after(insert.lines.iter().take(pos.line).map(|l| l.as_str())),
+                (None, Some((rendered, _))) => self.syntax.comment_after(rendered.text.lines().take(pos.line)),
                 (None, None) => false,
             };
 
@@ -1367,7 +1287,7 @@ impl SourceView {
 
                 let code = match content {
                     Some(text) if shown.is_none() && self.insert.is_none() => vec![Span::styled(text.clone(), Style::default().fg(theme.dim).add_modifier(Modifier::ITALIC))],
-                    Some(text) => highlight_with(theme, text, &mut comment),
+                    Some(text) => self.syntax.highlight(theme, text, &mut comment, &|word| types.contains(word)),
                     None => Vec::new(),
                 };
 
@@ -1684,6 +1604,13 @@ impl App {
                 view.visual(*lines);
                 Ok(())
             }
+            Command::Syntax(name) => match syntax::find(name) {
+                Some(syntax) => {
+                    view.syntax = syntax;
+                    Ok(())
+                }
+                None => Err(anyhow!("No highlighting for {}: c, c++, go or rust", name)),
+            },
             Command::ClearSearch if view.visual.is_some() => {
                 view.visual = None;
                 Ok(())
@@ -1799,7 +1726,7 @@ mod tests {
         let spans = highlight_with(&theme, "   of it */ y = 1;", &mut comment);
         assert!(!comment);
         assert_eq!(spans[0].content, "   of it */");
-        assert!(comment_after(["/* a", "b */", "/* c"].into_iter()));
+        assert!(syntax::C.comment_after(["/* a", "b */", "/* c"].into_iter()));
 
         let text: String = highlight_with(&theme, "    if (x == \"a\") { return 0x10; } // done", &mut false).iter().map(|s| s.content.to_string()).collect();
         assert_eq!(text, "    if (x == \"a\") { return 0x10; } // done");

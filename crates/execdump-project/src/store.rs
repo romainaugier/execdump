@@ -352,7 +352,7 @@ fn renames(old: &str, new: &str) -> Option<HashMap<String, String>> {
     return Some(renames);
 }
 
-fn rename_identifiers(text: &str, renames: &HashMap<String, String>) -> String {
+pub(crate) fn rename_identifiers(text: &str, renames: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
 

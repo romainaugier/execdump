@@ -94,7 +94,9 @@ impl App {
                 self.completion = None;
                 self.history_index = None;
 
-                if kind == InputKind::Search {
+                if kind == InputKind::Search && self.focus == Focus::Explorer {
+                    self.filter_explorer("");
+                } else if kind == InputKind::Search {
                     if let View::Table(view) = self.view_mut() {
                         view.set_filter("");
                     }
@@ -148,8 +150,10 @@ impl App {
             }
         }
 
-        // Tables are filtered while typing
-        if kind == InputKind::Search {
+        // The explorer and the tables are filtered while typing
+        if kind == InputKind::Search && self.focus == Focus::Explorer {
+            self.filter_explorer(&text);
+        } else if kind == InputKind::Search {
             if let View::Table(view) = self.view_mut() {
                 view.set_filter(&text);
             }
@@ -230,7 +234,7 @@ impl App {
                 let names = self.names_in_function();
                 names.into_iter().chain(self.functions_named()).collect()
             }
-            (Complete::Llm, []) => vec![("rewrite".to_string(), "rewrite the function as clear C".to_string()), ("modules".to_string(), "organize the modules".to_string())],
+            (Complete::Llm, []) => vec![("modules".to_string(), "organize the modules".to_string())],
             (Complete::Llm, ["modules" | "mods"]) => std::iter::once(("all".to_string(), "every module".to_string())).chain(self.module_names()).collect(),
             (Complete::Path, []) => paths(word),
             (Complete::Proposal, []) => self.pending_proposals(),
@@ -296,6 +300,16 @@ impl App {
         self.last_search = pattern.clone();
 
         if pattern.is_empty() {
+            return;
+        }
+
+        if self.focus == Focus::Explorer {
+            self.filter_explorer(&pattern);
+
+            if self.explorer_items.is_empty() {
+                self.error(format!("Pattern not found: {}", pattern));
+            }
+
             return;
         }
 

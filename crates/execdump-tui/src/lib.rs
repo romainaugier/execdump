@@ -26,6 +26,7 @@ mod prompt;
 mod render;
 mod session;
 mod splits;
+mod syntax;
 mod theme;
 mod views;
 mod workspace;
@@ -161,6 +162,8 @@ pub(crate) struct App {
     explorer_version: u64,
     /// First explorer item shown
     explorer_offset: usize,
+    /// Text the items of the explorer are filtered by (/ in the explorer), empty for all of them
+    explorer_filter: String,
     focus: Focus,
 
     workspace: Workspace<View>,
@@ -235,6 +238,7 @@ impl App {
             explorer_depths: Vec::new(),
             explorer_collapsed: (0..count).flat_map(|p| ["headers", "sections", "tables"].map(|g| format!("p{}/{}", p, g))).collect(),
             explorer_fit: 24,
+            explorer_filter: String::new(),
             explorer_width: None,
             explorer_state,
             explorer_visible: true,
