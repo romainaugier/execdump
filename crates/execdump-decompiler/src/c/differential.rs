@@ -20,7 +20,7 @@ use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, Targe
 use inkwell::values::IntValue;
 use inkwell::{IntPredicate, OptimizationLevel};
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 const VARS: usize = 4;
 const STEPS: usize = 2000;
@@ -226,7 +226,7 @@ fn decompile(blocks: &[Block], machine: &TargetMachine) -> CFunction {
     program.pointer_size = 8;
 
     let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
-    let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
+    let (globals, prototypes, noreturn) = (HashMap::default(), HashMap::default(), HashSet::default());
     let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
     return super::decompile(&module, function, &ctx, None, 0);
@@ -481,7 +481,7 @@ impl Interpreter<'_> {
 
     /// Runs the function, following its gotos
     fn call(function: &CFunction, args: &[i32]) -> Option<i32> {
-        let mut interpreter = Interpreter { function, vars: HashMap::new(), steps: 0 };
+        let mut interpreter = Interpreter { function, vars: HashMap::default(), steps: 0 };
 
         for (&param, &arg) in function.params.iter().zip(args.iter()) {
             interpreter.vars.insert(param, Value::of_type(arg as i128, &function.vars[param].ty));

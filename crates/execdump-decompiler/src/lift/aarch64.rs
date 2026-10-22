@@ -6,6 +6,7 @@ use super::regs::{RegRef, RegisterFile};
 use super::{llvm, Access, Cond, FlagOp, Known, Lifter, MemAccess, Tracker};
 
 use crate::analysis::function::CallTarget;
+use execdump_core::program::GUARD_CHECK;
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -695,6 +696,8 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
         ("br" | "braa" | "brab" | "braaz" | "brabz", [target, ..]) => {
             l.jump = Some(get(l, target, 64)?);
         }
+        // The check of Control Flow Guard changes nothing
+        ("blr", _) if l.guard_call(insn.addr) == Some(GUARD_CHECK) => {}
         ("bl", _) | ("blr" | "blraa" | "blrab" | "blraaz" | "blrabz", _) => {
             let site = l.function.calls.iter().find(|c| c.addr == insn.addr).map(|c| c.target.clone()).unwrap_or(CallTarget::Indirect);
             let value = match ops.first() {

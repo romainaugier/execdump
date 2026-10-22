@@ -122,6 +122,31 @@ pub fn dump_pe(pe: &PE, args: &Args) {
         }
 
     }
+
+    if args.pe_delay_imports {
+        if pe.delay_imports.is_empty() {
+            println!("Delay Imports");
+            println!("No delay load imports found in PE");
+        }
+
+        for import in pe.delay_imports.iter() {
+            import.dump().print(0, args.padding_size);
+        }
+    }
+
+    if args.pe_tls {
+        match pe.tls.as_ref() {
+            Some(tls) => tls.dump().print(0, args.padding_size),
+            None => println!("TLS Directory\nNo TLS directory found in PE"),
+        }
+    }
+
+    if args.pe_load_config {
+        match pe.load_config.as_ref() {
+            Some(config) => config.dump().print(0, args.padding_size),
+            None => println!("Load Configuration\nNo load configuration found in PE"),
+        }
+    }
 }
 
 pub fn dump_elf(elf: &ELF, args: &Args) {
@@ -232,6 +257,14 @@ pub fn dump_macho(macho: &MachO, args: &Args) {
 
         if args.macho_imports {
             binary.dump_dylibs().print(0, args.padding_size);
+        }
+
+        if args.macho_fixups {
+            binary.dump_fixups().print(0, args.padding_size);
+        }
+
+        if args.macho_exports {
+            binary.dump_exports().print(0, args.padding_size);
         }
     }
 }

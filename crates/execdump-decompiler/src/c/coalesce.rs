@@ -12,7 +12,7 @@
 use super::ast::{Var, VarId};
 use super::ir::{Func, Op, ValueId, ValueKind};
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Position of a definition before the instructions of a block (phis, parameters)
 const ENTRY: i64 = -1;
@@ -60,7 +60,7 @@ impl Liveness {
     fn new(f: &Func, var_of: &[Option<VarId>]) -> Self {
         let mut values = Vec::new();
         let mut defs = Vec::new();
-        let mut position: HashMap<ValueId, (usize, i64)> = HashMap::new();
+        let mut position: HashMap<ValueId, (usize, i64)> = HashMap::default();
 
         for (b, block) in f.blocks.iter().enumerate() {
             for (i, &id) in block.insts.iter().enumerate() {
@@ -93,7 +93,7 @@ impl Liveness {
     fn use_points(&self, f: &Func, var_of: &[Option<VarId>], position: &HashMap<ValueId, (usize, i64)>, value: ValueId) -> Vec<(usize, i64)> {
         let mut points = Vec::new();
         let mut stack: Vec<ValueId> = vec![value];
-        let mut seen: HashSet<ValueId> = HashSet::new();
+        let mut seen: HashSet<ValueId> = HashSet::default();
 
         while let Some(id) = stack.pop() {
             for &user in f.values[id].uses.iter() {
@@ -196,7 +196,7 @@ pub fn coalesce(f: &Func, var_of: &mut [Option<VarId>], vars: &[Var], params: &[
     };
 
     // Classes of values sharing a variable
-    let mut class_of: HashMap<VarId, Vec<usize>> = HashMap::new();
+    let mut class_of: HashMap<VarId, Vec<usize>> = HashMap::default();
 
     for (i, &id) in liveness.values.iter().enumerate() {
         if let Some(v) = var(id) {
@@ -204,7 +204,7 @@ pub fn coalesce(f: &Func, var_of: &mut [Option<VarId>], vars: &[Var], params: &[
         }
     }
 
-    let mut renamed: HashMap<VarId, VarId> = HashMap::new();
+    let mut renamed: HashMap<VarId, VarId> = HashMap::default();
     let find = |renamed: &HashMap<VarId, VarId>, mut v: VarId| {
         while let Some(&next) = renamed.get(&v) {
             v = next;

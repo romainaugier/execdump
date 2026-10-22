@@ -9,7 +9,7 @@ use super::Context;
 
 use crate::types::CType;
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap as HashMap};
 
 const ROUNDS: usize = 6;
 
@@ -498,7 +498,7 @@ pub(super) fn frame_place(f: &Func, mut id: ValueId) -> Option<(ValueId, i64)> {
 
 /// The pointer-sized places of the frame stored to once, with the loads of the same width from them
 fn slots(f: &Func) -> Vec<(ValueId, Vec<ValueId>)> {
-    let mut places: HashMap<(ValueId, i64), (Vec<ValueId>, Vec<ValueId>)> = HashMap::new();
+    let mut places: HashMap<(ValueId, i64), (Vec<ValueId>, Vec<ValueId>)> = HashMap::default();
 
     for (id, value) in f.values.iter().enumerate() {
         match &value.kind {

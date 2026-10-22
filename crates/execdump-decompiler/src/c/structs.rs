@@ -13,7 +13,8 @@ use super::Context;
 use crate::typedb::{Aggregate, Field};
 use crate::types::CType;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Rounds of merging the pointers loaded from the same places (a merge can make two places one)
 const MAX_MERGE_ROUNDS: usize = 8;
@@ -171,9 +172,13 @@ fn layout(ctx: &Context, accesses: &[Access], types: &[CType]) -> Aggregate {
 
 /// Recovers the structs of a function: the pointers whose accesses make one point to it. The structs are
 /// named after the function (st_<address>_<n>), they are added to the context.
-pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType], addr: u64) {
-    let mut indexed: HashSet<ValueId> = HashSet::new();
+pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType], ret: Option<&CType>, addr: u64) {
+    let mut indexed: HashSet<ValueId> = HashSet::default();
     let mut accesses: BTreeMap<ValueId, Vec<Access>> = BTreeMap::new();
+    let returned: HashSet<ValueId> = f.values.iter().filter_map(|v| match &v.kind {
+        ValueKind::Inst { op: Op::Ret, operands, .. } => operands.first().copied(),
+        _ => None,
+    }).collect();
 
     for (id, value) in f.values.iter().enumerate() {
         let (address, accessed) = match &value.kind {
@@ -249,7 +254,7 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
 
     for _ in 0..MAX_MERGE_ROUNDS {
         let mut changed = false;
-        let mut places: HashMap<(ValueId, i64), ValueId> = HashMap::new();
+        let mut places: HashMap<(ValueId, i64), ValueId> = HashMap::default();
 
         for (&base, list) in accesses.iter().filter(|(base, _)| matches!(f.values[**base].kind, ValueKind::Global(_))) {
             for access in list.iter().filter(|a| pointer_sized(a.value) && !f.is_constant(a.value)) {
@@ -284,7 +289,7 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
         for (&arg, param) in operands.iter().zip(prototype.ty.params.iter()) {
             if let Some(CType::Struct(name)) = pointee(&param.ty).map(|p| p.unqualified()) {
                 if ctx.imported.contains_key(name) {
-                    let base = decompose(f, arg, &mut HashSet::new()).filter(|&(_, offset)| offset == 0).map_or(arg, |(base, _)| base);
+                    let base = decompose(f, arg, &mut HashSet::default()).filter(|&(_, offset)| offset == 0).map_or(arg, |(base, _)| base);
                     passed.entry(find(&mut parent, base)).or_default().push(name.clone());
                 }
             }
@@ -392,6 +397,17 @@ pub fn recover(f: &Func, ctx: &Context, types: &mut [CType], declared: &[CType],
                 types[v] = CType::ptr(header);
             } else if inside && typed && (found.iter().any(|a| a.offset == 0) || !passed_as_text(f, ctx, v)) {
                 structs.push(Recovered { name: format!("st_{:x}_{}", addr, structs.len()), group: group.clone(), found, frame });
+            }
+
+            continue;
+        }
+
+        // A pointer the function returns, declared to point to a struct of the database (its debug information)
+        let known_struct = ret.filter(|r| pointee(r).is_some_and(|p| matches!(ctx.resolve(p).unqualified(), CType::Struct(name) | CType::Union(name) if ctx.typedb.aggregates.contains_key(name))));
+
+        if let Some(known) = known_struct.filter(|_| group.iter().any(|v| returned.contains(v))) {
+            for &v in group.iter() {
+                types[v] = known.clone();
             }
 
             continue;
@@ -566,7 +582,7 @@ mod tests {
     fn fields_without_overlaps() {
         let program = execdump_core::program::Program { pointer_size: 8, ..Default::default() };
         let typedb = crate::typedb::TypeDb::bundled(crate::typedb::Platform::Unix, crate::types::DataModel::new(execdump_core::disasm::Architecture::X86_64, false));
-        let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
+        let (globals, prototypes, noreturn) = (HashMap::default(), HashMap::default(), HashSet::default());
         let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         let types = vec![CType::ptr(CType::Char), CType::int(32), CType::int(64), CType::int(16), CType::int(128)];

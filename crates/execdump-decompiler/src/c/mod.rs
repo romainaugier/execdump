@@ -21,6 +21,7 @@ mod scope;
 mod simplify;
 mod structs;
 mod structure;
+pub mod syscalls;
 mod typing;
 
 use ast::CFunction;
@@ -29,13 +30,14 @@ use crate::lift::text_at;
 use crate::typedb::{Aggregate, TypeDb};
 use crate::types::{CType, Prototype};
 
-use execdump_core::program::Program;
+use execdump_core::program::{Format, Program};
 
 use inkwell::module::Module;
 use inkwell::values::FunctionValue;
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// What the C backend knows about the program
 pub struct Context<'a> {
@@ -206,12 +208,34 @@ impl Context<'_> {
     /// stored next to each other (the fields of a &str), a pointer and a length returned in a pair of registers
     /// (low and high halves of an i128) or as a result and the first result after it
     fn note_sized_strings(&self, f: &ir::Func) {
+        let mut found: Vec<(u64, u64)> = Vec::new();
+
+        // The buffers written with their length, in every language (the strings of assembly are not NUL terminated)
+        let linux = self.program.format == Format::Elf;
+        let write_syscall = |n: i128| linux && syscalls::is_write(self.program.architecture(), n);
+
+        for value in f.values.iter() {
+            let ir::ValueKind::Inst { op: ir::Op::Call, operands, callee: Some(callee), .. } = &value.kind else {
+                continue;
+            };
+
+            let (buffer, length) = match callee.as_str() {
+                "write" | "send" => (1, 2),
+                name if name.starts_with("__syscall") && operands.first().and_then(|&n| f.int(n)).is_some_and(write_syscall) => (2, 3),
+                _ => continue,
+            };
+
+            if let (Some(&buffer), Some(&length)) = (operands.get(buffer), operands.get(length)) {
+                self.sized_pairs(f, buffer, length, 0, 4, &mut found);
+            }
+        }
+
         if !self.program.language.has_sized_strings() {
+            self.keep_sized(found);
             return;
         }
 
         let pointer_size = self.program.pointer_size.max(4) as i128;
-        let mut found: Vec<(u64, u64)> = Vec::new();
 
         for value in f.values.iter() {
             let ir::ValueKind::Inst { op, operands, .. } = &value.kind else {
@@ -276,6 +300,10 @@ impl Context<'_> {
             }
         }
 
+        self.keep_sized(found);
+    }
+
+    fn keep_sized(&self, found: Vec<(u64, u64)>) {
         let mut sized = self.sized.borrow_mut();
 
         for (addr, len) in found {
@@ -307,7 +335,7 @@ pub fn decompile(module: &Module, function: FunctionValue, ctx: &Context, protot
         .collect();
 
     let mut types = typing::infer(&f, ctx, &declared);
-    structs::recover(&f, ctx, &mut types, &declared, addr);
+    structs::recover(&f, ctx, &mut types, &declared, prototype.map(|p| &p.ty.ret), addr);
 
     let ret = return_type(&f, &types, prototype);
     let mut built = build::build(&f, ctx, types, &names);
@@ -434,7 +462,7 @@ mod tests {
         program.regions.push(Region { name: ".data".to_string(), vaddr: 0x3000, size: 4, data: b"ab\0\0".to_vec(), perms: Perms { write: true, ..read_only } });
 
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
-        let (globals, prototypes, noreturn) = (HashMap::new(), HashMap::new(), HashSet::new());
+        let (globals, prototypes, noreturn) = (HashMap::default(), HashMap::default(), HashSet::default());
         let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         assert_eq!(ctx.string_at(0x2000, false).as_deref(), Some("xx"));
@@ -461,7 +489,7 @@ mod tests {
         let typedb = TypeDb::bundled(Platform::Unix, DataModel::new(Architecture::X86_64, false));
         let prototypes: HashMap<String, Prototype> =
             module.get_functions().filter_map(|f| f.get_name().to_str().ok().and_then(|name| Some((name.to_string(), typedb.function(name)?)))).collect();
-        let (globals, noreturn) = (HashMap::new(), HashSet::new());
+        let (globals, noreturn) = (HashMap::default(), HashSet::default());
         let ctx = Context { program: &program, typedb: &typedb, globals: &globals, prototypes: &prototypes, noreturn: &noreturn, instruction: Box::new(|_| String::new()), ret: None, function: Box::new(|_| None), structs: Default::default(), callees: Default::default(), imported: Default::default(), sized: Default::default(), language: &crate::lang::c::C };
 
         return decompile(&module, function, &ctx, None, 0).print().text;

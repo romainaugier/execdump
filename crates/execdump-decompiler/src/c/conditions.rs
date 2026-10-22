@@ -15,7 +15,7 @@
 
 use super::ast::{BinaryOp, CFunction, Expr, Stmt, StmtKind, UnaryOp, VarId};
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashSet as HashSet};
 
 /// Variables of a condition on variables only (comparisons, logic, arithmetic), None for the other conditions
 fn condition_vars(e: &Expr, addressed: &HashSet<VarId>, vars: &mut Vec<VarId>) -> bool {
@@ -126,7 +126,7 @@ fn known(stmts: &mut Vec<Stmt>, mut facts: Vec<Expr>, addressed: &HashSet<VarId>
 
         // Inside a loop, the facts on the variables it assigns do not hold (nor after it)
         if matches!(stmts[index].kind, StmtKind::While(..) | StmtKind::DoWhile(..) | StmtKind::For(..)) {
-            let mut written = HashSet::new();
+            let mut written = HashSet::default();
             assigned(std::slice::from_ref(&stmts[index]), &mut written);
             forget(&mut facts, &written);
 
@@ -169,7 +169,7 @@ fn known(stmts: &mut Vec<Stmt>, mut facts: Vec<Expr>, addressed: &HashSet<VarId>
 
                         changed |= known(other, outside, addressed);
 
-                        let mut written = HashSet::new();
+                        let mut written = HashSet::default();
                         assigned(then, &mut written);
                         assigned(other, &mut written);
 
@@ -186,7 +186,7 @@ fn known(stmts: &mut Vec<Stmt>, mut facts: Vec<Expr>, addressed: &HashSet<VarId>
                 }
             }
             StmtKind::Switch(_, cases, default) => {
-                let mut written = HashSet::new();
+                let mut written = HashSet::default();
                 cases.iter().for_each(|case| assigned(&case.body, &mut written));
                 assigned(default, &mut written);
                 forget(&mut facts, &written);
@@ -243,7 +243,7 @@ fn merge(stmts: &mut Vec<Stmt>, addressed: &HashSet<VarId>) -> bool {
         let common = conjuncts(first);
         let parts = conjuncts(second);
 
-        let mut written = HashSet::new();
+        let mut written = HashSet::default();
         assigned(x, &mut written);
         assigned(other, &mut written);
 
@@ -332,7 +332,7 @@ fn addressed_vars(stmts: &[Stmt], out: &mut HashSet<VarId>) {
 
 /// Removes the tests whose result is known, joins the tests that follow each other on the same condition
 pub fn simplify(function: &mut CFunction) -> bool {
-    let mut addressed = HashSet::new();
+    let mut addressed = HashSet::default();
     addressed_vars(&function.body, &mut addressed);
 
     let mut changed = false;
@@ -377,7 +377,7 @@ mod tests {
             ],
         ))];
 
-        let addressed = HashSet::new();
+        let addressed = HashSet::default();
         assert!(known(&mut body, Vec::new(), &addressed));
         assert!(merge(&mut body, &addressed));
 
@@ -397,6 +397,6 @@ mod tests {
             stmt(StmtKind::Assign(Expr::Var(0), Expr::Int(0))),
             stmt(StmtKind::If(c.clone(), vec![call("x")], vec![])),
         ];
-        assert!(!known(&mut body, Vec::new(), &HashSet::new()));
+        assert!(!known(&mut body, Vec::new(), &HashSet::default()));
     }
 }

@@ -23,17 +23,18 @@ use anyhow::{anyhow, bail, Context as _, Result};
 
 use execdump_core::demangle::demangle_symbol;
 use execdump_core::disasm::Architecture;
-use execdump_core::program::{Format, Program};
+use execdump_core::program::{Format, Language as Kind, Program};
 
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
-use inkwell::values::BasicValue;
+use inkwell::values::{BasicValue, FunctionValue};
 use inkwell::OptimizationLevel;
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -91,7 +92,9 @@ const CRT_PROTOTYPES: &[(&str, &str)] = &[
 
 /// Cleanup passes, chosen to keep the code readable: no loop transformations, no vectorization,
 /// no switch to lookup table conversion and no jump threading (they duplicate or obfuscate code)
-pub(crate) const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
+/// The optimizations of a lifted function. GVN does not move the loads and the computations into the predecessors of
+/// the blocks they are redundant in (PRE): faster, and the phis it adds are variables and copies in the C
+pub(crate) const PASSES: &str = "function(sroa,mem2reg,early-cse,instcombine<no-verify-fixpoint>,simplifycfg,sccp,gvn<no-pre>,dse,adce,instcombine<no-verify-fixpoint>,simplifycfg)";
 
 /// Signatures shared by the decompilers of a program (one per thread): a signature is discovered once
 #[derive(Clone, Default)]
@@ -161,6 +164,8 @@ pub struct Decompiler<'a> {
     /// C names of the functions with a mangled symbol
     demangled: HashMap<u64, String>,
     signatures: RefCell<HashMap<u64, Signature>>,
+    /// The functions by the name of their signature
+    named: RefCell<HashMap<String, u64>>,
     in_progress: RefCell<HashSet<u64>>,
     /// Names given to the globals, and the C prototypes of the functions, for the C backend
     globals: RefCell<HashMap<String, u64>>,
@@ -180,6 +185,8 @@ pub struct Decompiler<'a> {
     /// Names and prototypes given by the user, by address (functions and globals share the names)
     user_names: RefCell<HashMap<u64, String>>,
     user_prototypes: RefCell<HashMap<u64, Prototype>>,
+    /// The prototypes of the debug information, by address
+    debug_prototypes: HashMap<u64, Prototype>,
     shared: Option<SharedSignatures>,
     epoch: Cell<u64>,
     /// Statement of the trivial functions (None for the others), their callers show it instead of the call
@@ -188,6 +195,8 @@ pub struct Decompiler<'a> {
     inlining: RefCell<HashSet<u64>>,
     /// Registers each function may write, for its callers
     clobbered: RefCell<HashMap<u64, u128>>,
+    /// What the code after a call does with a result register (the call, the register, unknown when unsure)
+    result_uses: RefCell<HashMap<(u64, Reg, bool), lift::ResultUse>>,
     /// Prototypes of the functions passed to known ones as callbacks (qsort, signal, atexit...)
     callbacks: std::cell::OnceCell<HashMap<u64, FuncType>>,
     /// Prototypes of the decompiled functions for their callers (None when the decompilation failed), and the
@@ -220,6 +229,11 @@ impl<'a> Decompiler<'a> {
             typedb.extend(source).context("bundled type database of a language")?;
         }
 
+        // The types and the prototypes of the debug information (C and C++: the other languages describe types of
+        // their own there)
+        let c_family = matches!(program.language, Kind::Unknown | Kind::Cxx);
+        let debug_prototypes = program.debug.as_ref().filter(|_| c_family).map(|debug| crate::debuginfo::apply(debug, &mut typedb)).unwrap_or_default();
+
         let demangled = demangled_names(program, analysis, &languages);
 
         return Ok(Decompiler {
@@ -231,28 +245,31 @@ impl<'a> Decompiler<'a> {
             typedb,
             languages,
             demangled,
-            signatures: RefCell::new(HashMap::new()),
-            in_progress: RefCell::new(HashSet::new()),
-            globals: RefCell::new(HashMap::new()),
-            prototypes: RefCell::new(HashMap::new()),
-            noreturn: RefCell::new(HashSet::new()),
+            signatures: RefCell::new(HashMap::default()),
+            named: RefCell::new(HashMap::default()),
+            in_progress: RefCell::new(HashSet::default()),
+            globals: RefCell::new(HashMap::default()),
+            prototypes: RefCell::new(HashMap::default()),
+            noreturn: RefCell::new(HashSet::default()),
             decoder: Decoder::new(arch)?,
             cs: lift::capstone(arch)?,
-            frames: RefCell::new((HashMap::new(), VecDeque::new())),
+            frames: RefCell::new((HashMap::default(), VecDeque::new())),
             machine: target_machine(program)?,
             assistant: None,
-            renames: RefCell::new(Renames::new()),
-            user_names: RefCell::new(HashMap::new()),
-            user_prototypes: RefCell::new(HashMap::new()),
+            renames: RefCell::new(Renames::default()),
+            user_names: RefCell::new(HashMap::default()),
+            user_prototypes: RefCell::new(HashMap::default()),
+            debug_prototypes,
             shared: None,
             epoch: Cell::new(0),
-            trivial: RefCell::new(HashMap::new()),
-            inlining: RefCell::new(HashSet::new()),
-            clobbered: RefCell::new(HashMap::new()),
+            trivial: RefCell::new(HashMap::default()),
+            inlining: RefCell::new(HashSet::default()),
+            clobbered: RefCell::new(HashMap::default()),
+            result_uses: RefCell::new(HashMap::default()),
             callbacks: std::cell::OnceCell::new(),
-            decompiled: RefCell::new(HashMap::new()),
-            decompiling: RefCell::new(HashSet::new()),
-            ready: RefCell::new(HashMap::new()),
+            decompiled: RefCell::new(HashMap::default()),
+            decompiling: RefCell::new(HashSet::default()),
+            ready: RefCell::new(HashMap::default()),
             components: std::cell::OnceCell::new(),
         });
     }
@@ -484,10 +501,10 @@ impl<'a> Decompiler<'a> {
                 })
             };
 
-            let mut index: HashMap<u64, (usize, usize)> = HashMap::new();
-            let mut component: HashMap<u64, usize> = HashMap::new();
+            let mut index: HashMap<u64, (usize, usize)> = HashMap::default();
+            let mut component: HashMap<u64, usize> = HashMap::default();
             let mut stack: Vec<u64> = Vec::new();
-            let mut on_stack: HashSet<u64> = HashSet::new();
+            let mut on_stack: HashSet<u64> = HashSet::default();
             let mut next = 0;
 
             for &root in self.analysis.functions.keys() {
@@ -601,7 +618,7 @@ impl<'a> Decompiler<'a> {
         // Callees first, without recursing: each one finds its own callees decompiled
         let known = |addr: u64| self.decompiled.borrow().contains_key(&addr) || self.decompiling.borrow().contains(&addr);
         let mut order: Vec<u64> = Vec::new();
-        let mut visited: HashSet<u64> = HashSet::new();
+        let mut visited: HashSet<u64> = HashSet::default();
         let mut work: Vec<(u64, Vec<u64>, usize)> = vec![(addr, direct(addr), 0)];
         visited.insert(addr);
 
@@ -630,7 +647,7 @@ impl<'a> Decompiler<'a> {
             let _ = self.decompiled_prototype(callee);
         }
 
-        let mut prototypes = HashMap::new();
+        let mut prototypes = HashMap::default();
         let mut structs = BTreeMap::new();
 
         for callee in direct(addr) {
@@ -646,10 +663,8 @@ impl<'a> Decompiler<'a> {
     /// The calls to trivial functions show their statement, with the name of the function as a note when
     /// it has one (a symbol, or a name given by the user)
     fn inline_trivial(&self, function: &mut CFunction) {
-        let names: HashMap<String, u64> = self.signatures.borrow().iter().map(|(addr, sig)| (sig.name.clone(), *addr)).collect();
-
         let lookup = |name: &str| -> Option<(Rc<Trivial>, Option<String>)> {
-            let addr = *names.get(name)?;
+            let addr = *self.named.borrow().get(name)?;
             let trivial = self.trivial(addr)?;
             let named = self.program.symbol_at(addr).is_some() || self.user_names.borrow().contains_key(&addr);
             Some((trivial, named.then(|| name.to_string())))
@@ -694,20 +709,34 @@ impl<'a> Decompiler<'a> {
         return self.lift(cx, addr, false).map(|(module, _)| module);
     }
 
-    /// Lifts and optimizes a function, with the notes of the storage of its values for the C code
+    /// Lifts and optimizes a function, with the notes of the storage of its values for the C code. A function whose
+    /// signature is discovered for it is not lifted again: its discovery, lifted with the notes, becomes it.
     fn lift<'ctx>(&self, cx: &'ctx Context, addr: u64, storage: bool) -> Result<(Module<'ctx>, Lifted)> {
         let function = self.analysis.functions.get(&addr).with_context(|| format!("no function at {:#x}", addr))?;
-        let sig = self.signature(addr);
+        let keep = Keep { cx, kept: RefCell::new(None) };
+        let sig = self.signature_keeping(addr, storage.then_some(&keep));
 
-        let module = self.module(cx, &function.name)?;
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
         let env = self.env(addr, &signature, &global_name);
 
+        // The function its signature was just discovered from, made the final one
+        if let Some(Kept { module, function: discovery, discovery: discovered, lifted }) = keep.kept.into_inner() {
+            let made = lift::final_function(cx, &module, &env, discovery, &discovered, &sig)?;
+
+            if made.is_some() {
+                let saved = lifted.frame.saved_slots(&env, function.addr);
+                self.optimize_final(&module, &saved, env.language)?;
+                return Ok((module, lifted));
+            }
+        }
+
+        let module = self.module(cx, &function.name)?;
+
         let frame = self.frame(&env, function)?;
         let (_, slot_writes) = lift::lift(cx, &module, &env, function, &frame, sig, false, storage)?;
 
-        let saved = frame.saved_slots(function.addr, env.abi.slot_size as i64);
+        let saved = frame.saved_slots(&env, function.addr);
         let canaries = self.optimize(&module, storage, &saved, env.language)?.into_iter().map(|index| index as i64 + frame.low).collect();
 
         return Ok((module, Lifted { frame, slot_writes, canaries }));
@@ -841,8 +870,33 @@ impl<'a> Decompiler<'a> {
             }
         }
 
-        // A buffer whose address only escaped through a store the split made dead (the arguments of a realigned
-        // frame, their address saved by the prologue) is split once that store is gone
+        self.split_again(module, storage, saved, language, again)?;
+        finish_module(module);
+
+        canaries.sort();
+        canaries.dedup();
+
+        return Ok(canaries);
+    }
+
+    /// Optimizes the final function made from an optimized discovery (see lift::final_function)
+    fn optimize_final(&self, module: &Module, saved: &[i64], language: &dyn Language) -> Result<()> {
+        self.split_again(module, true, saved, language, true)?;
+
+        for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
+            lift::return_phis(function);
+        }
+
+        finish_module(module);
+        return Ok(());
+    }
+
+    /// A buffer whose address only escaped through a store the split made dead (the arguments of a realigned frame,
+    /// their address saved by the prologue) is split once that store is gone: the passes run again while a frame is
+    /// split
+    fn split_again(&self, module: &Module, storage: bool, saved: &[i64], language: &dyn Language, mut again: bool) -> Result<()> {
+        let extent = |callee: &str, index: u32| language.argument_extent(self.program, callee, index);
+
         for round in 0..MAX_SPLIT_ROUNDS {
             if !again {
                 break;
@@ -863,23 +917,7 @@ impl<'a> Decompiler<'a> {
             }
         }
 
-        for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
-            lift::copy_global_arrays(function);
-        }
-
-        // Helpers and globals the optimizations made useless
-        for function in module.get_functions().filter(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
-            unsafe { function.delete() };
-        }
-
-        for global in module.get_globals().filter(|g| g.as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
-            unsafe { global.delete() };
-        }
-
-        canaries.sort();
-        canaries.dedup();
-
-        return Ok(canaries);
+        return Ok(());
     }
 
     /*
@@ -900,7 +938,7 @@ impl<'a> Decompiler<'a> {
 
         self.globals.borrow_mut().retain(|_, a| *a != addr);
 
-        let Some(mut sig) = self.signatures.borrow_mut().remove(&addr) else {
+        let Some(mut sig) = self.remove_signature(addr) else {
             return;
         };
 
@@ -920,7 +958,7 @@ impl<'a> Decompiler<'a> {
             self.noreturn.borrow_mut().insert(new);
         }
 
-        self.signatures.borrow_mut().insert(addr, sig);
+        self.insert_signature(addr, sig);
     }
 
     /// Gives a function a prototype (parameters and result), None goes back to the recovered one.
@@ -929,7 +967,7 @@ impl<'a> Decompiler<'a> {
         self.trivial.borrow_mut().clear();
         self.decompiled.borrow_mut().clear();
         self.ready.borrow_mut().clear();
-        let sig = self.signatures.borrow_mut().remove(&addr);
+        let sig = self.remove_signature(addr);
 
         if let Some(sig) = sig {
             self.prototypes.borrow_mut().remove(&sig.name);
@@ -1045,6 +1083,11 @@ impl<'a> Decompiler<'a> {
 
     /// Signature of a function of the program (cached)
     pub fn signature(&self, addr: u64) -> Signature {
+        return self.signature_keeping(addr, None);
+    }
+
+    /// Signature of a function, its discovery kept to become the final function when it is lifted for it
+    fn signature_keeping<'ctx>(&self, addr: u64, keep: Option<&Keep<'ctx>>) -> Signature {
         if let Some(sig) = self.signatures.borrow().get(&addr) {
             return sig.clone();
         }
@@ -1058,7 +1101,7 @@ impl<'a> Decompiler<'a> {
                 self.noreturn.borrow_mut().insert(sig.name.clone());
             }
 
-            self.signatures.borrow_mut().insert(addr, sig.clone());
+            self.insert_signature(addr, sig.clone());
             return sig;
         }
 
@@ -1067,7 +1110,7 @@ impl<'a> Decompiler<'a> {
             return self.call_signature(&CallTarget::Indirect);
         }
 
-        let sig = self.compute_signature(addr);
+        let sig = self.compute_signature(addr, keep);
         let prototype = self.prototype_of(&sig);
         self.add_prototype(prototype);
 
@@ -1076,7 +1119,7 @@ impl<'a> Decompiler<'a> {
         }
 
         self.in_progress.borrow_mut().remove(&addr);
-        self.signatures.borrow_mut().insert(addr, sig.clone());
+        self.insert_signature(addr, sig.clone());
 
         if let Some(shared) = self.shared.as_ref() {
             shared.publish(self.epoch.get(), addr, sig.clone(), self.prototypes.borrow().get(&sig.name).cloned());
@@ -1085,14 +1128,32 @@ impl<'a> Decompiler<'a> {
         return sig;
     }
 
-    fn compute_signature(&self, addr: u64) -> Signature {
+    /// Keeps the signature of a function, found by its name too
+    fn insert_signature(&self, addr: u64, sig: Signature) {
+        self.named.borrow_mut().insert(sig.name.clone(), addr);
+        self.signatures.borrow_mut().insert(addr, sig);
+    }
+
+    /// Forgets the signature of a function (and its name)
+    fn remove_signature(&self, addr: u64) -> Option<Signature> {
+        let sig = self.signatures.borrow_mut().remove(&addr)?;
+        let mut named = self.named.borrow_mut();
+
+        if named.get(&sig.name) == Some(&addr) {
+            named.remove(&sig.name);
+        }
+
+        return Some(sig);
+    }
+
+    fn compute_signature<'ctx>(&self, addr: u64, keep: Option<&Keep<'ctx>>) -> Signature {
         let symbol = self.program.symbol_at(addr).map_or("", |s| s.name.as_str());
 
         if let Some(sig) = self.languages.owner(self.program, addr).runtime_signature(self.program, self.abi(addr), &self.regs, symbol, &self.function_name(addr)) {
             return sig;
         }
 
-        let sig = self.compute_signature_without_clobbers(addr);
+        let sig = self.compute_signature_without_clobbers(addr, keep);
         return Signature { clobbers: self.clobbers(addr), ..sig };
     }
 
@@ -1109,7 +1170,8 @@ impl<'a> Decompiler<'a> {
 
         let mut mask = 0u128;
 
-        match self.analysis.functions.get(&addr).filter(|f| f.thunk.is_none()) {
+        // The code an indirect jump that is not resolved goes to may write anything
+        match self.analysis.functions.get(&addr).filter(|f| f.thunk.is_none() && f.unresolved_jumps == 0) {
             None => mask = lift::CLOBBERS_ALL,
             Some(function) => {
                 for insn in function.blocks.values().flat_map(|b| b.insns.iter()) {
@@ -1131,7 +1193,7 @@ impl<'a> Decompiler<'a> {
         return mask;
     }
 
-    fn compute_signature_without_clobbers(&self, addr: u64) -> Signature {
+    fn compute_signature_without_clobbers<'ctx>(&self, addr: u64, keep: Option<&Keep<'ctx>>) -> Signature {
         let name = self.function_name(addr);
         let function = self.analysis.functions.get(&addr);
         let noreturn = function.is_some_and(|f| f.noreturn);
@@ -1140,9 +1202,11 @@ impl<'a> Decompiler<'a> {
             return Signature { noreturn, ..self.import_signature(import) };
         }
 
-        if let Some(prototype) = self.user_prototypes.borrow().get(&addr).cloned() {
+        let given = self.user_prototypes.borrow().get(&addr).cloned().or_else(|| self.debug_prototypes.get(&addr).cloned());
+
+        if let Some(prototype) = given {
             if self.abi(addr).stack_results || self.abi(addr).register_results {
-                return Signature { noreturn, ..self.stack_signature_from_prototype(&prototype, addr, &name) };
+                return Signature { noreturn, ..self.stack_signature_from_prototype(&prototype, addr, &name, keep) };
             }
 
             return Signature { noreturn, ..self.signature_with_abi(&prototype, &name, self.abi(addr)) };
@@ -1184,13 +1248,25 @@ impl<'a> Decompiler<'a> {
             return Signature { noreturn, ..self.signature_with_abi(&Prototype { name: name.clone(), ty: ty.clone() }, &name, self.abi(addr)) };
         }
 
-        let mut discovered = self.discover(addr, &name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
+        let mut discovered = self.discover(addr, &name, keep).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
 
         self.languages.owner(self.program, addr).bound_signature(self.program, self.abi(addr), addr, &mut discovered);
 
+        // The other registers changed are results when a caller reads them after the call (the functions called from
+        // elsewhere follow the convention)
+        let extra_results = !self.abi(addr).extra_results.is_empty();
+
+        if extra_results {
+            discovered.outs.retain(|out| matches!(out.loc, Loc::Reg(reg) if self.result_read(addr, reg, false, &mut HashSet::default(), MAX_RESULT_DEPTH)));
+        }
+
         // A result nobody reads is a leftover in the return register
-        if discovered.ret.as_ref().is_some_and(|r| matches!(r.loc, Loc::Reg(_))) && discovered.outs.is_empty() && !self.result_read_by_callers(addr) {
+        if discovered.ret.as_ref().is_some_and(|r| matches!(r.loc, Loc::Reg(_))) && (discovered.outs.is_empty() || extra_results) && !self.result_read_by_callers(addr) {
             discovered.ret = None;
+        }
+
+        if extra_results && discovered.ret.is_none() && !discovered.outs.is_empty() {
+            discovered.ret = Some(discovered.outs.remove(0));
         }
 
         // Several results in registers: up to the last one a caller reads (the functions called from elsewhere only
@@ -1198,7 +1274,7 @@ impl<'a> Decompiler<'a> {
         if self.abi(addr).register_results && discovered.ret.is_some() {
             let first = self.result_read_by_callers(addr);
             let last = discovered.outs.iter().rposition(|out| match out.loc {
-                Loc::Reg(reg) => self.result_read(addr, reg, false, &mut HashSet::new(), MAX_RESULT_DEPTH),
+                Loc::Reg(reg) => self.result_read(addr, reg, false, &mut HashSet::default(), MAX_RESULT_DEPTH),
                 Loc::Stack(_) => true,
             });
 
@@ -1233,7 +1309,7 @@ impl<'a> Decompiler<'a> {
         return self.callbacks.get_or_init(|| {
             let signature = |target: &CallTarget| self.call_signature(target);
             let global_name = |addr: u64| self.global_name(addr);
-            let mut found: HashMap<u64, Option<FuncType>> = HashMap::new();
+            let mut found: HashMap<u64, Option<FuncType>> = HashMap::default();
 
             for caller in self.analysis.functions.values() {
                 let env = self.env(caller.addr, &signature, &global_name);
@@ -1294,7 +1370,7 @@ impl<'a> Decompiler<'a> {
     /// Whether a caller reads the result of a function: after the call, or as its own result read by its callers
     /// (a function without callers in the program is called from elsewhere)
     fn result_read_by_callers(&self, addr: u64) -> bool {
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         return self.result_read(addr, self.abi(addr).int_ret, true, &mut visited, MAX_RESULT_DEPTH);
     }
 
@@ -1328,7 +1404,10 @@ impl<'a> Decompiler<'a> {
 
                 // The return register is read when unsure, the high half of a result only when it is seen read
                 let unsure = if unknown { lift::ResultUse::Read } else { lift::ResultUse::Unused };
-                let used = if call.tail { lift::ResultUse::Returned } else { lift::result_used(&env, &self.cs, caller, call.addr, reg, unsure) };
+                let used = match call.tail {
+                    true => lift::ResultUse::Returned,
+                    false => *self.result_uses.borrow_mut().entry((call.addr, reg, unknown)).or_insert_with(|| lift::result_used(&env, &self.cs, caller, call.addr, reg, unsure)),
+                };
 
                 let read = match used {
                     lift::ResultUse::Read => true,
@@ -1345,25 +1424,52 @@ impl<'a> Decompiler<'a> {
         return sites == 0 && elsewhere;
     }
 
-    /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used
-    fn discover(&self, addr: u64, name: &str) -> Result<Signature> {
+    /// Lifts the function with every argument register as a parameter, optimizes it and keeps what is used. Kept, the
+    /// discovery has the notes of the final lift, unless the function calls itself (the calls see a provisional
+    /// signature) or keeps registers apart (see lift::discovery_saves).
+    fn discover<'ctx>(&self, addr: u64, name: &str, keep: Option<&Keep<'ctx>>) -> Result<Signature> {
         let function = self.analysis.functions.get(&addr).with_context(|| format!("no function at {:#x}", addr))?;
+        let recursive = function.calls.iter().any(|call| call.target == CallTarget::Function(addr));
 
-        let cx = anonymous_context();
-        let module = self.module(&cx, name)?;
+        match keep.filter(|_| !recursive) {
+            Some(keep) => {
+                let (sig, kept) = self.discover_in(keep.cx, function, name, true)?;
+                *keep.kept.borrow_mut() = kept;
+                return Ok(sig);
+            }
+            None => {
+                let cx = anonymous_context();
+                return Ok(self.discover_in(&cx, function, name, false)?.0);
+            }
+        }
+    }
+
+    /// The discovery of a function in a context, kept when asked (lifted with the notes of the final lift)
+    fn discover_in<'ctx>(&self, cx: &'ctx Context, function: &crate::analysis::function::Function, name: &str, keep: bool) -> Result<(Signature, Option<Kept<'ctx>>)> {
+        let addr = function.addr;
+        let module = self.module(cx, name)?;
         let signature = |target: &CallTarget| self.call_signature(target);
         let global_name = |addr: u64| self.global_name(addr);
         let env = self.env(addr, &signature, &global_name);
 
         let frame = self.frame(&env, function)?;
+        let keep = keep && lift::discovery_saves(&env, &frame).is_empty();
         let discovery = discovery_signature(name, env.abi, &self.regs, &frame.stack_params, &frame.stack_results);
-        let (llvm, _) = lift::lift(&cx, &module, &env, function, &frame, discovery.clone(), true, false)?;
+        let (llvm, slot_writes) = lift::lift(cx, &module, &env, function, &frame, discovery.clone(), true, keep)?;
 
-        let saved = frame.saved_slots(function.addr, env.abi.slot_size as i64);
-        self.optimize(&module, false, &saved, env.language)?;
+        let saved = frame.saved_slots(&env, function.addr);
+        let canaries = self.optimize(&module, keep, &saved, env.language)?;
 
-        let high_read = || env.abi.int_ret_high.is_some_and(|high| self.result_read(addr, high, false, &mut HashSet::new(), MAX_RESULT_DEPTH));
-        return Ok(refine(&module, llvm, &discovery, env.abi, &high_read));
+        let high_read = || env.abi.int_ret_high.is_some_and(|high| self.result_read(addr, high, false, &mut HashSet::default(), MAX_RESULT_DEPTH));
+        let mut sig = refine(&module, llvm, &discovery, env.abi, &high_read);
+
+        // A register the function saves and restores is one it keeps for its caller, not a result
+        sig.outs.retain(|out| !matches!(out.loc, Loc::Reg(reg) if frame.saves.iter().any(|save| save.2 == reg)));
+
+        let canaries = canaries.into_iter().map(|index| index as i64 + frame.low).collect();
+        let kept = keep.then(|| Kept { module, function: llvm, discovery, lifted: Lifted { frame, slot_writes, canaries } });
+
+        return Ok((sig, kept));
     }
 
     /// Stack frame of a function, decoded once for its discovery and its final lift
@@ -1466,8 +1572,8 @@ impl<'a> Decompiler<'a> {
     /// Signature of a prototype given to a function with several results (in stack slots or registers): its last
     /// parameters are the pointers to the results after the first one, as many as the discovery found, the results stay
     /// where they are
-    fn stack_signature_from_prototype(&self, prototype: &Prototype, addr: u64, name: &str) -> Signature {
-        let discovered = self.discover(addr, name).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
+    fn stack_signature_from_prototype<'ctx>(&self, prototype: &Prototype, addr: u64, name: &str, keep: Option<&Keep<'ctx>>) -> Signature {
+        let discovered = self.discover(addr, name, keep).unwrap_or_else(|_| self.call_signature(&CallTarget::Indirect));
         let count = discovered.outs.len().min(prototype.ty.params.len());
         let (params, outs) = prototype.ty.params.split_at(prototype.ty.params.len() - count);
 
@@ -1507,6 +1613,36 @@ impl<'a> Decompiler<'a> {
     }
 }
 
+/// The global arrays copied to the stack written by one copy, the helpers and the globals the optimizations made useless
+/// removed
+fn finish_module(module: &Module) {
+    for function in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
+        lift::copy_global_arrays(function);
+    }
+
+    for function in module.get_functions().filter(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
+        unsafe { function.delete() };
+    }
+
+    for global in module.get_globals().filter(|g| g.as_pointer_value().get_first_use().is_none()).collect::<Vec<_>>() {
+        unsafe { global.delete() };
+    }
+}
+
+/// A discovery kept with the notes of the final lift, to become the final function
+struct Kept<'ctx> {
+    module: Module<'ctx>,
+    function: FunctionValue<'ctx>,
+    discovery: Signature,
+    lifted: Lifted,
+}
+
+/// Where the discovery of the function lifted is kept: the context of the final lift
+struct Keep<'ctx> {
+    cx: &'ctx Context,
+    kept: RefCell<Option<Kept<'ctx>>>,
+}
+
 /// A lifted function: its frame, the stack slots its instructions write, the offsets of the slots of
 /// the stack canary
 struct Lifted {
@@ -1542,7 +1678,7 @@ fn printed_constants_size(module: &Module) -> u64 {
         return total;
     }
 
-    let mut sizes = HashMap::new();
+    let mut sizes = HashMap::default();
     let mut total = 0u64;
 
     for function in module.get_functions() {
@@ -1615,8 +1751,8 @@ fn target_machine(program: &Program) -> Result<TargetMachine> {
 /// their demangled name (core::fmt::Arguments::new_v1 is core_fmt_Arguments_new_v1). The names given to
 /// several functions (the instances of a Rust generic function, C++ overloads) end with their address.
 fn demangled_names(program: &Program, analysis: &Analysis, languages: &Languages) -> HashMap<u64, String> {
-    let mut names: HashMap<u64, String> = HashMap::new();
-    let mut plain: HashSet<String> = HashSet::new();
+    let mut names: HashMap<u64, String> = HashMap::default();
+    let mut plain: HashSet<String> = HashSet::default();
 
     for function in analysis.functions.values().filter(|f| f.thunk.is_none()) {
         let Some(symbol) = program.symbol_at(function.addr) else {
@@ -1638,7 +1774,7 @@ fn demangled_names(program: &Program, analysis: &Analysis, languages: &Languages
         }
     }
 
-    let mut count: HashMap<&str, usize> = HashMap::new();
+    let mut count: HashMap<&str, usize> = HashMap::default();
 
     for name in names.values() {
         *count.entry(name.as_str()).or_default() += 1;
@@ -1756,6 +1892,119 @@ mod tests {
         let ir = decompiler.llvm_ir(program.entry.unwrap()).unwrap();
         assert!(ir.contains("@__syscall3(i64 64, i64 1, i64 ptrtoint (ptr @msg to i64), i64 13)"), "{}", ir);
         assert!(ir.contains("@__syscall1(i64 93, i64 0)"), "{}", ir);
+
+        let code = decompiler.c_code(program.entry.unwrap()).unwrap();
+        assert!(code.contains("syscall(SYS_write, 1, &msg, 13);") && code.contains("syscall(SYS_exit, 0);"), "{}", code);
+    }
+
+    #[test]
+    fn aarch64_jump_tables() {
+        let program = fixture("elf_aarch64_switch");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = |name: &str| decompiler.c_code(function(&analysis, name)).unwrap();
+
+        // Entries of a byte added to a label of the function, the switch is on the index
+        let dense = code("dense");
+        assert!(dense.contains("switch (a1)") && dense.contains("case 15:") && !dense.contains("case 13:"), "{}", dense);
+        assert!(dense.contains("return lib_add(14, 43) * 100;") && dense.contains("default:\n            return -1;"), "{}", dense);
+
+        // The index is the value minus the first case
+        let biased = code("biased");
+        assert!(biased.contains("switch (a1)") && biased.contains("case 100:") && biased.contains("case 115:") && !biased.contains("case 107:"), "{}", biased);
+
+        // Entries of two bytes
+        let large = code("large");
+        assert!(large.contains("switch (a1)") && large.contains("case 13:"), "{}", large);
+    }
+
+    #[test]
+    fn code_of_the_executable_segment() {
+        // The section of code does not have the flag of code: the executable segment holds the code
+        let program = fixture("elf_x86_64_section_flags");
+        assert!(program.is_executable(program.entry.unwrap()) && !program.is_executable(program.regions[0].vaddr));
+
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = decompiler.c_code(program.entry.unwrap()).unwrap();
+
+        // The system calls by their name, the buffers written with their length, the paths
+        assert!(code.contains("syscall(SYS_write, 1, \"hello\\n\", 6);") && code.contains("syscall(SYS_write, 1, \"bye\\n\", 4);"), "{}", code);
+        assert!(code.contains("syscall(SYS_open, \"/tmp/x\", 0);") && code.contains("syscall(SYS_exit, 0);"), "{}", code);
+    }
+
+    #[test]
+    fn assembly_registers() {
+        let program = fixture("elf_i386_registers");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let entry = decompiler.c_code(program.entry.unwrap()).unwrap();
+        let checksum = decompiler.c_code(0x401128).unwrap();
+
+        // The checksum takes the bounds of the code in eax and ebx and returns its result in ecx
+        assert!(checksum.starts_with("int sub_401128(char *a1, int a2)") && checksum.contains("return v1;"), "{}", checksum);
+        assert!(entry.contains("int v2 = sub_401128(entry0, 0x401136);") && entry.contains("__builtin_rotateleft32(v2, 31)"), "{}", entry);
+
+        // The counter of the loop indexes the key, the exit does not go on into the checksum
+        assert!(entry.contains("v1[0x402135]") && entry.contains("syscall(SYS_exit, 1);") && !entry.contains("rotateleft32(v1"), "{}", entry);
+    }
+
+    #[test]
+    fn position_independent_x86() {
+        let program = fixture("elf_i386_pic");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = |name: &str| decompiler.c_code(function(&analysis, name)).unwrap();
+
+        // The imports through the PLT and ebx, the global offset table at the address __x86.get_pc_thunk.bx gives, the
+        // stack protector failing through a function without a name
+        let copy = code("lib_copy");
+        assert!(copy.contains("strcpy(dest, src);") && copy.contains("puts(dest);") && copy.contains("return strlen(dest) + *g_25b4;"), "{}", copy);
+
+        // gcc passes the arguments of its local functions in eax and edx
+        let weigh = code("lib_weigh");
+        assert!(weigh.contains("int v1 = sub_13b0(a1, 3);") && weigh.contains("*v2 = v3;"), "{}", weigh);
+        assert!(decompiler.c_code(0x13b0).unwrap().starts_with("int sub_13b0(char *a1, int a2)"));
+    }
+
+    #[test]
+    fn debug_information() {
+        let program = fixture("elf_x86_64_debuginfo");
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let code = |name: &str| decompiler.c_code(function(&analysis, name)).unwrap();
+
+        // The types of the program are in the database, as their debug information describes them
+        let shape = &decompiler.typedb.aggregates["shape"];
+        assert_eq!((shape.size, shape.fields.len()), (48, 8));
+        assert!(shape.fields.iter().any(|f| f.name == "next" && f.offset == 40));
+        assert!(decompiler.typedb.enums.contains_key("shape_kind") && decompiler.typedb.typedefs.contains_key("point_t"));
+
+        // The prototypes, with the names of the parameters; the pointer returned is the struct of the prototype
+        let make_rect = code("make_rect");
+        assert!(make_rect.starts_with("struct shape *make_rect(int x, int y, int16_t width, int16_t height)"), "{}", make_rect);
+        assert!(make_rect.contains("struct shape *ptr = malloc(48);") && make_rect.contains("ptr->origin.y = y;") && make_rect.contains("ptr->next = shapes;"), "{}", make_rect);
+
+        // The double a call of a pointer returns
+        let total_area = code("total_area");
+        assert!(total_area.starts_with("double total_area(const struct shape *list)"), "{}", total_area);
+        assert!(total_area.contains("v1->area(v1) + v2"), "{}", total_area);
+
+        let rect_area = code("rect_area");
+        assert!(rect_area.starts_with("double rect_area(const struct shape *self)"), "{}", rect_area);
+    }
+
+    #[test]
+    fn control_flow_guard() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/pe_x86_64_directories.exe");
+        let program = programs_from_exec(&Exec::PE(execdump_core::pe::parse_pe(&path).unwrap())).remove(0);
+        let analysis = analyze(&program, None).unwrap();
+        let decompiler = Decompiler::new(&program, &analysis).unwrap();
+        let entry = decompiler.c_code(program.entry.unwrap()).unwrap();
+
+        // The call through a pointer checked by Control Flow Guard (its dispatch) calls the pointer, the delay loaded
+        // function is an import
+        assert!(entry.contains(" + ((v1 << 3) & 8)))(v1);") && entry.contains("delayed_lib_delayed(g_140003044)"), "{}", entry);
     }
 
     #[test]

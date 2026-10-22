@@ -13,7 +13,7 @@ use inkwell::llvm_sys::{LLVMIntPredicate, LLVMOpcode, LLVMRealPredicate, LLVMTyp
 use inkwell::module::Module;
 use inkwell::values::{AsValueRef, FunctionValue};
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap as HashMap};
 
 pub type ValueId = usize;
 pub type BlockId = usize;
@@ -557,9 +557,9 @@ pub fn read(module: &Module, function: FunctionValue) -> Func {
         let raw = function.as_value_ref();
 
         let params: Vec<LLVMValueRef> = (0..LLVMCountParams(raw)).map(|i| LLVMGetParam(raw, i)).collect();
-        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::new(), blocks: HashMap::new(), params: params.clone(), data: HashMap::new() };
-        let mut allocated = HashMap::new();
-        let mut stack = HashMap::new();
+        let mut reader = Reader { module: module.as_mut_ptr(), values: Vec::new(), ids: HashMap::default(), blocks: HashMap::default(), params: params.clone(), data: HashMap::default() };
+        let mut allocated = HashMap::default();
+        let mut stack = HashMap::default();
 
         let param_ids: Vec<ValueId> = params.iter().map(|&p| reader.value(p)).collect();
 

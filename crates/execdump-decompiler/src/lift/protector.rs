@@ -17,7 +17,7 @@ use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMValueRef};
 use inkwell::llvm_sys::LLVMOpcode;
 use inkwell::values::{AsValueRef, FunctionValue};
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashSet as HashSet};
 
 /// What the removal changed
 #[derive(Default)]
@@ -123,7 +123,8 @@ fn is_check(condition: LLVMValueRef) -> bool {
     return unsafe { is_canary(LLVMGetOperand(condition, 0), 3) || is_canary(LLVMGetOperand(condition, 1), 3) };
 }
 
-/// A block that only calls __stack_chk_fail (the instructions before the call have no effect)
+/// A block that only calls __stack_chk_fail (the instructions before the call have no effect), or a function that
+/// does not return (__stack_chk_fail_local of a stripped program)
 fn is_failure_block(block: LLVMBasicBlockRef) -> bool {
     unsafe {
         let mut instruction = LLVMGetFirstInstruction(block);
@@ -132,7 +133,7 @@ fn is_failure_block(block: LLVMBasicBlockRef) -> bool {
             match LLVMGetInstructionOpcode(instruction) {
                 LLVMOpcode::LLVMPHI => return false,
                 LLVMOpcode::LLVMCall if !LLVMIsADbgInfoIntrinsic(instruction).is_null() => {}
-                LLVMOpcode::LLVMCall => return is_failure(&callee_name(instruction)),
+                LLVMOpcode::LLVMCall => return is_failure(&callee_name(instruction)) || is_unreachable(LLVMGetNextInstruction(instruction)),
                 LLVMOpcode::LLVMStore | LLVMOpcode::LLVMInvoke | LLVMOpcode::LLVMRet => return false,
                 _ => {}
             }
@@ -141,6 +142,17 @@ fn is_failure_block(block: LLVMBasicBlockRef) -> bool {
         }
 
         return false;
+    }
+}
+
+/// The instruction, after the debug intrinsics, is unreachable
+fn is_unreachable(mut instruction: LLVMValueRef) -> bool {
+    unsafe {
+        while !instruction.is_null() && !LLVMIsADbgInfoIntrinsic(instruction).is_null() {
+            instruction = LLVMGetNextInstruction(instruction);
+        }
+
+        return !instruction.is_null() && LLVMGetInstructionOpcode(instruction) == LLVMOpcode::LLVMUnreachable;
     }
 }
 
@@ -238,7 +250,7 @@ pub fn remove_stack_protector(function: FunctionValue) -> Protector {
         let mut dead = reads;
 
         if checks.is_empty() && cookies.is_empty() && stores.is_empty() {
-            erase_dead(dead, &mut HashSet::new());
+            erase_dead(dead, &mut HashSet::default());
             return protector;
         }
 
@@ -273,7 +285,7 @@ pub fn remove_stack_protector(function: FunctionValue) -> Protector {
             dead.push(pointer);
         }
 
-        erase_dead(dead, &mut HashSet::new());
+        erase_dead(dead, &mut HashSet::default());
     }
 
     return protector;

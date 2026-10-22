@@ -9,10 +9,13 @@ use crate::eh_frame::parse_eh_frame;
 use crate::elf::{ELF, ELFFileType, SectionFlags as ELFSectionFlags, SectionType as ELFSectionType, SymbolBinding, SymbolType as ELFSymbolType, SHN_UNDEF};
 use crate::exec::Exec;
 use crate::macho::{MachOBinary, SectionType as MachOSectionType};
+use crate::macho_fixups::Fixup;
 use crate::pe::{ExcFunctionEntry, SectionFlags as PESectionFlags, PE};
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Perms {
@@ -82,15 +85,27 @@ impl Symbol {
     }
 }
 
+/// The pointer of Control Flow Guard (PE) a call goes through to check its target before it calls it (the target is
+/// in rcx on x86_64, ecx on x86, x15 on aarch64): the check does not change what the code does
+pub const GUARD_CHECK: &str = "__guard_check_icall_fptr";
+/// The pointer of Control Flow Guard a call goes through instead of calling its target (in rax, x86_64)
+pub const GUARD_DISPATCH: &str = "__guard_dispatch_icall_fptr";
+
 /// Where a function start hint comes from, ordered by reliability
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SeedSource {
     Entry,
     Export,
+    /// A TLS callback of a PE (it runs before the entry point)
+    TlsCallback,
     Symbol,
+    /// The functions of the DWARF debug information
+    DebugInfo,
     /// The function table of the Go runtime
     GoPclntab,
     ExceptionTable,
+    /// The functions table of Control Flow Guard and the SEH handlers of a PE
+    LoadConfig,
     FunctionStarts,
     EhFrame,
     InitArray,
@@ -101,9 +116,12 @@ impl SeedSource {
         match self {
             SeedSource::Entry => "entry",
             SeedSource::Export => "export",
+            SeedSource::TlsCallback => "TLS callback",
             SeedSource::Symbol => "symbol",
+            SeedSource::DebugInfo => "debug information",
             SeedSource::GoPclntab => "go pclntab",
             SeedSource::ExceptionTable => "exception table",
+            SeedSource::LoadConfig => "load configuration",
             SeedSource::FunctionStarts => "function starts",
             SeedSource::EhFrame => "eh_frame",
             SeedSource::InitArray => "init array",
@@ -184,6 +202,8 @@ pub struct Program {
     pub language: Language,
     /// What the language keeps of the metadata of its runtime (the languages of the decompiler read it)
     pub language_data: LanguageData,
+    /// The DWARF debug information: functions, variables, types and lines
+    pub debug: Option<Arc<crate::dwarf::DebugInfo>>,
     /// Data the format puts in the sections of code (the import tables, the CLR header and metadata of PE), sorted
     pub data: Vec<(u64, u64)>,
     /// Strings the data points to with (pointer, length) pairs (tables of &str, panic locations), address ->
@@ -323,6 +343,28 @@ impl Program {
         }
     }
 
+    /// Writes a pointer in the data of the program, as the loader does
+    fn write_pointer(&mut self, addr: u64, value: u64) {
+        let size = self.pointer_size as usize;
+
+        let Some(region) = self.regions.iter_mut().find(|r| r.contains(addr) && !r.data.is_empty()) else {
+            return;
+        };
+
+        let offset = (addr - region.vaddr) as usize;
+
+        let Some(slot) = region.data.get_mut(offset..offset + size) else {
+            return;
+        };
+
+        match size {
+            4 if self.big_endian => slot.copy_from_slice(&(value as u32).to_be_bytes()),
+            4 => slot.copy_from_slice(&(value as u32).to_le_bytes()),
+            _ if self.big_endian => slot.copy_from_slice(&value.to_be_bytes()),
+            _ => slot.copy_from_slice(&value.to_le_bytes()),
+        }
+    }
+
     fn add_seed(&mut self, addr: u64, size: Option<u64>, source: SeedSource) {
         if addr != 0 {
             self.seeds.push(FunctionSeed { addr, size, source });
@@ -347,6 +389,8 @@ impl Program {
         if self.language == Language::Unknown && self.symbols.values().any(|s| matches!(detect_mangling_scheme(&s.name), ManglingScheme::Itanium | ManglingScheme::Msvc)) {
             self.language = Language::Cxx;
         }
+
+        self.add_debug_info();
 
         if self.language.has_sized_strings() {
             self.sized_strings = self.scan_sized_strings();
@@ -409,6 +453,39 @@ impl Program {
         }
 
         return self.regions.iter().filter(|r| !r.perms.exec && !r.perms.write).any(|r| RUST_MARKERS.iter().any(|marker| contains(&r.data, marker)));
+    }
+
+    /// The functions and the variables of the debug information: their symbols when the binary has none, the
+    /// functions as seeds with their size, the source file of each (after the ones the metadata of the language
+    /// gives: the compile units of Go are packages)
+    fn add_debug_info(&mut self) {
+        let Some(debug) = self.debug.clone() else {
+            return;
+        };
+
+        for function in debug.functions.iter() {
+            let name = function.linkage_name.as_ref().unwrap_or(&function.name);
+
+            if !self.symbols.contains_key(&function.low) {
+                self.add_symbol(Symbol::new(function.low, name, SymbolKind::Function, function.high.saturating_sub(function.low)));
+            }
+
+            self.add_seed(function.low, Some(function.high.saturating_sub(function.low)).filter(|&s| s > 0), SeedSource::DebugInfo);
+
+            if let Some(file) = function.file.as_ref() {
+                if !self.source_names.contains(file) {
+                    self.source_names.push(file.clone());
+                }
+
+                self.source_files.entry(function.low).or_insert(file.clone());
+            }
+        }
+
+        for variable in debug.variables.iter() {
+            if !self.symbols.contains_key(&variable.addr) {
+                self.add_symbol(Symbol::new(variable.addr, &variable.name, SymbolKind::Object, 0));
+            }
+        }
     }
 
     /// The functions of the Go runtime table: symbols (their names stay when the binary is stripped), seeds with
@@ -495,21 +572,12 @@ fn apply_relocations(program: &mut Program, elf: &ELF) {
                 continue;
             };
 
-            let Some(region) = program.regions.iter_mut().find(|r| r.contains(reloc.r_offset) && !r.data.is_empty()) else {
-                continue;
-            };
-
-            let offset = (reloc.r_offset - region.vaddr) as usize;
-
-            let Some(slot) = region.data.get_mut(offset..offset + size) else {
-                continue;
-            };
-
-            let in_place = match size {
-                4 if program.big_endian => u32::from_be_bytes(slot.try_into().unwrap()) as i64,
-                4 => u32::from_le_bytes(slot.try_into().unwrap()) as i32 as i64,
-                _ if program.big_endian => u64::from_be_bytes(slot.try_into().unwrap()) as i64,
-                _ => u64::from_le_bytes(slot.try_into().unwrap()) as i64,
+            let in_place = match program.read(reloc.r_offset, size) {
+                Some(slot) if size == 4 && program.big_endian => u32::from_be_bytes(slot.try_into().unwrap()) as i64,
+                Some(slot) if size == 4 => u32::from_le_bytes(slot.try_into().unwrap()) as i32 as i64,
+                Some(slot) if program.big_endian => u64::from_be_bytes(slot.try_into().unwrap()) as i64,
+                Some(slot) => u64::from_le_bytes(slot.try_into().unwrap()) as i64,
+                None => continue,
             };
 
             // The relocations without addend have it in place
@@ -524,12 +592,7 @@ fn apply_relocations(program: &mut Program, elf: &ELF) {
                 },
             };
 
-            match size {
-                4 if program.big_endian => slot.copy_from_slice(&(value as u32).to_be_bytes()),
-                4 => slot.copy_from_slice(&(value as u32).to_le_bytes()),
-                _ if program.big_endian => slot.copy_from_slice(&value.to_be_bytes()),
-                _ => slot.copy_from_slice(&value.to_le_bytes()),
-            }
+            program.write_pointer(reloc.r_offset, value);
         }
     }
 }
@@ -570,6 +633,25 @@ fn program_from_elf(elf: &ELF) -> Program {
                 exec: (flags & ELFSectionFlags::ExecInstr as u64) != 0,
             },
         });
+    }
+
+    // The loader only reads the segments: when no section has the flag of code (hand written headers), the code is
+    // in the executable segments, in the section of the entry point and the ones named as code (the data of the
+    // segment stays data: its strings are not functions)
+    if !relocatable && !program.regions.is_empty() && !program.regions.iter().any(|r| r.perms.exec) {
+        let executable: Vec<(u64, u64)> = elf.headers.program_headers.iter()
+            .filter(|ph| ph.program_type() == crate::elf::ProgramHeaderType::Load && ph.flags() & 0x1 != 0)
+            .map(|ph| (ph.virtual_address(), ph.virtual_address() + ph.memory_size()))
+            .collect();
+
+        let entry = elf.get_elf_header().entry();
+        let in_executable = |r: &Region| executable.iter().any(|&(start, end)| r.vaddr >= start && r.vaddr < end);
+        let code = |r: &Region| r.contains(entry) || [".text", "text", ".init", ".fini", ".plt", "CODE"].iter().any(|n| r.name.starts_with(n));
+        let named = program.regions.iter().any(|r| in_executable(r) && code(r));
+
+        for region in program.regions.iter_mut() {
+            region.perms.exec = in_executable(region) && (code(region) || !named);
+        }
     }
 
     // No section headers (stripped with sstrip for example), fall back on the loadable segments
@@ -685,6 +767,24 @@ fn program_from_elf(elf: &ELF) -> Program {
                 program.add_seed(fde.pc_begin, Some(fde.pc_range), SeedSource::EhFrame);
             }
         }
+
+        // The debug information of the sections that are not relocated (an object file has relocations for them)
+        let is_64 = program.pointer_size == 8;
+        let little_endian = !program.big_endian;
+
+        let section = |name: &str| -> Option<Cow<'_, [u8]>> {
+            const SHF_COMPRESSED: u64 = 0x800;
+
+            if let Some(section) = elf.sections.get(name).filter(|s| !s.data.is_empty()) {
+                let compressed = section.header.flags() & SHF_COMPRESSED != 0;
+                return if compressed { crate::dwarf::decompress(&section.data, true, is_64, little_endian).map(Cow::Owned) } else { Some(Cow::Borrowed(&section.data)) };
+            }
+
+            let zdebug = elf.sections.get(&name.replacen(".debug", ".zdebug", 1))?;
+            return crate::dwarf::decompress(&zdebug.data, false, is_64, little_endian).map(Cow::Owned);
+        };
+
+        program.debug = crate::dwarf::read(&section, little_endian).map(Arc::new);
     }
 
     program.finalize();
@@ -845,6 +945,50 @@ fn pe_exception_table(program: &mut Program, pe: &PE, image_base: u64) {
     }
 }
 
+/// The delay load imports (their slots, and the thunks they hold until the first call), the TLS callbacks, the
+/// functions of the load configuration and the pointers it names
+fn pe_directories(program: &mut Program, pe: &PE) {
+    for function in pe.delay_imports.iter().flat_map(|i| i.functions.iter()) {
+        program.import_slots.insert(function.slot, function.name.clone());
+
+        if program.is_executable(function.thunk) {
+            let name = function.name.rsplit('!').next().unwrap_or_default();
+            program.add_symbol(Symbol::new(function.thunk, &format!("__imp_load_{}", name), SymbolKind::Function, 0));
+            program.add_seed(function.thunk, None, SeedSource::Symbol);
+        }
+    }
+
+    for (i, &callback) in pe.tls.iter().flat_map(|t| t.callbacks.iter()).enumerate() {
+        if program.is_executable(callback) {
+            program.add_symbol(Symbol::new(callback, &format!("tls_callback_{}", i), SymbolKind::Function, 0));
+            program.add_seed(callback, None, SeedSource::TlsCallback);
+        }
+    }
+
+    let Some(config) = pe.load_config.as_ref() else {
+        return;
+    };
+
+    for (addr, name) in [(config.security_cookie, "__security_cookie"), (config.guard_check, GUARD_CHECK), (config.guard_dispatch, GUARD_DISPATCH)] {
+        if addr != 0 && program.region_at(addr).is_some() {
+            program.add_symbol(Symbol::new(addr, name, SymbolKind::Object, program.pointer_size as u64));
+        }
+    }
+
+    // The calls through the pointers of Control Flow Guard: the check of a target, the call of the target
+    for (addr, name) in [(config.guard_check, GUARD_CHECK), (config.guard_dispatch, GUARD_DISPATCH)] {
+        if addr != 0 && program.region_at(addr).is_some() {
+            program.import_slots.insert(addr, name.to_string());
+        }
+    }
+
+    for &function in config.guard_functions.iter().chain(config.se_handlers.iter()) {
+        if program.is_executable(function) {
+            program.add_seed(function, None, SeedSource::LoadConfig);
+        }
+    }
+}
+
 /// The data directories linkers put in the sections of code (imports, debug directory, CLR header and metadata), and
 /// the language of a .NET assembly
 fn pe_data(program: &mut Program, pe: &PE, image_base: u64) {
@@ -916,6 +1060,7 @@ fn program_from_pe(pe: &PE) -> Program {
     pe_import_slots(&mut program, pe, image_base);
     pe_exports(&mut program, pe, image_base);
     pe_exception_table(&mut program, pe, image_base);
+    pe_directories(&mut program, pe);
     pe_data(&mut program, pe, image_base);
 
     program.finalize();
@@ -986,6 +1131,28 @@ fn program_from_macho(binary: &MachOBinary) -> Program {
 
     for &addr in binary.function_starts.iter() {
         program.add_seed(addr, None, SeedSource::FunctionStarts);
+    }
+
+    // Stripped binaries keep the names they export
+    for (name, addr) in binary.exports.iter() {
+        let in_code = program.is_executable(*addr);
+        program.add_symbol(Symbol::new(*addr, name, if in_code { SymbolKind::Function } else { SymbolKind::Object }, 0));
+
+        if in_code {
+            program.add_seed(*addr, None, SeedSource::Export);
+        }
+    }
+
+    // The pointers dyld writes: the targets of the rebases (a chain of fixups on disk), the imported symbols of the
+    // binds (their slots stay empty)
+    for fixup in binary.fixups.iter() {
+        match fixup {
+            Fixup::Rebase { addr, target } => program.write_pointer(*addr, *target),
+            Fixup::Bind { addr, symbol, addend } => {
+                program.write_pointer(*addr, *addend as u64);
+                program.import_slots.entry(*addr).or_insert_with(|| symbol.clone());
+            }
+        }
     }
 
     let pointer_size = program.pointer_size as u64;
@@ -1140,6 +1307,97 @@ mod tests {
 
         assert_eq!(program.architecture(), Architecture::Aarch64);
         assert!(program.seeds.iter().any(|s| s.source == SeedSource::ExceptionTable && s.addr & 0xffff == 0x1008));
+    }
+
+    #[test]
+    fn dwarf() {
+        use crate::dwarf::{DebugType, Encoding};
+
+        // Compressed sections (zlib), DWARF 5
+        let program = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_x86_64_debuginfo")).unwrap())).remove(0);
+        let debug = program.debug.clone().unwrap();
+        let function = |name: &str| debug.functions.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no function {}", name));
+        let ty = |id: Option<usize>| id.map(|i| debug.types[i].clone());
+
+        // The parameters of a function, their names and types
+        let make_rect = function("make_rect");
+        let names: Vec<&str> = make_rect.params.iter().map(|p| p.name.as_deref().unwrap_or("")).collect();
+        assert_eq!(names, ["x", "y", "width", "height"]);
+        assert_eq!(ty(make_rect.params[2].ty), Some(DebugType::Base { name: "short int".to_string(), size: 2, encoding: Encoding::Signed }));
+        assert_eq!(program.symbol_at(make_rect.low).map(|s| s.name.as_str()), Some("make_rect"));
+        assert!(make_rect.file.as_deref().is_some_and(|f| f.ends_with("debuginfo.c")));
+
+        // A struct: its members, their offsets, the bitfields, the union, the pointer to a function
+        let Some(DebugType::Pointer(Some(shape))) = ty(make_rect.ret) else {
+            panic!("make_rect returns a pointer");
+        };
+
+        let DebugType::Aggregate { name, size, members, union: false, .. } = debug.types[shape].clone() else {
+            panic!("struct shape");
+        };
+
+        assert_eq!((name.as_deref(), size), (Some("shape"), 48));
+        let fields: Vec<(&str, u64, Option<u16>)> = members.iter().map(|m| (m.name.as_deref().unwrap_or(""), m.offset, m.bits)).collect();
+        assert_eq!(fields[..4], [("kind", 0, None), ("origin", 4, None), ("dims", 12, None), ("visible", 16, Some(1))]);
+        assert!(fields.contains(&("next", 40, None)));
+        assert!(matches!(ty(members[2].ty), Some(DebugType::Aggregate { name: None, union: true, .. })));
+
+        // The globals, their names and types, and the lines of the code
+        let shapes = debug.variables.iter().find(|v| v.name == "shapes").unwrap();
+        assert_eq!(ty(shapes.ty), Some(DebugType::Pointer(Some(shape))));
+        assert!(debug.variables.iter().any(|v| v.name == "shape_count"));
+        assert!(debug.line_at(make_rect.low).is_some_and(|(file, line)| file.ends_with("debuginfo.c") && line > 30));
+    }
+
+    #[test]
+    fn pe_directories() {
+        let pe = crate::pe::parse_pe(&fixture("pe_x86_64_directories.exe")).unwrap();
+        let callback = pe.tls.as_ref().unwrap().callbacks[0];
+        let guard_functions = pe.load_config.as_ref().unwrap().guard_functions.clone();
+        let program = programs_from_exec(&Exec::PE(pe)).remove(0);
+
+        // The slot of the delay loaded function, the thunk it holds until the first call
+        assert_eq!(program.import_slots.get(&0x140003030).map(String::as_str), Some("delayed!lib_delayed"));
+        assert_eq!(program.symbol_at(0x140001086).map(|s| s.name.as_str()), Some("__imp_load_lib_delayed"));
+
+        // The TLS callback runs before the entry point
+        assert_eq!(program.symbol_at(callback).map(|s| s.name.as_str()), Some("tls_callback_0"));
+        assert!(program.seeds.iter().any(|s| s.addr == callback && s.source == SeedSource::TlsCallback));
+
+        // The functions Control Flow Guard knows, the pointers of the load configuration
+        assert_eq!(guard_functions.len(), 5);
+        // (a seed of the exception table first, the leaf functions have none)
+        assert!(guard_functions.iter().all(|&f| program.seeds.iter().any(|s| s.addr == f)));
+        assert!(program.seeds.iter().any(|s| s.source == SeedSource::LoadConfig), "{:?}", program.seeds);
+        assert_eq!(program.symbol_at(0x140003010).map(|s| s.name.as_str()), Some("__security_cookie"));
+        assert_eq!(program.symbol_at(0x140003018).map(|s| s.name.as_str()), Some("__guard_check_icall_fptr"));
+    }
+
+    #[test]
+    fn macho_fixups() {
+        // The same program linked with chained fixups and with the opcodes of LC_DYLD_INFO
+        for name in ["macho_arm64_chained", "macho_arm64_dyld_info"] {
+            let program = programs_from_exec(&Exec::MachO(parse_macho(&fixture(name)).unwrap())).remove(0);
+            let symbol = |name: &str| program.symbols.values().find(|s| s.name == name).map(|s| s.addr).unwrap_or_else(|| panic!("no symbol {}", name));
+
+            // The table of strings and the one of local functions point to them
+            let names = symbol("_names");
+            let strings: Vec<String> = (0..3).map(|i| program.read_c_string(program.read_pointer(names + 8 * i).unwrap(), 16).unwrap()).collect();
+            assert_eq!(strings, ["alpha", "beta", "gamma"], "{}", name);
+
+            let locals = symbol("_locals");
+            assert!((0..2).all(|i| program.read_pointer(locals + 8 * i).is_some_and(|f| program.is_executable(f))), "{}", name);
+
+            // The imported functions and the imported object are import slots
+            let imported = symbol("_imported");
+            assert_eq!(program.import_slots.get(&imported).map(String::as_str), Some("_lib_add"), "{}", name);
+            assert_eq!(program.import_slots.get(&(imported + 8)).map(String::as_str), Some("_lib_mul"), "{}", name);
+            assert_eq!(program.import_slots.get(&symbol("_counter")).map(String::as_str), Some("_lib_counter"), "{}", name);
+            assert_eq!(program.read_pointer(imported), Some(0));
+
+            // The exports name the functions
+            assert!(program.seeds.iter().any(|s| s.source == SeedSource::Export && s.addr == symbol("_apply")), "{}", name);
+        }
     }
 
     #[test]

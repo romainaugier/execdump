@@ -13,7 +13,7 @@ use execdump_core::demangle::demangle_symbol;
 use execdump_core::demangle::symbol::Symbol;
 use execdump_core::program::{Language as Kind, Program};
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashSet as HashSet};
 
 pub struct Cxx {
     model: DataModel,

@@ -12,7 +12,8 @@ use crate::types::{CType, DataModel, FuncType, Prototype};
 
 use anyhow::Result;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::BTreeSet;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::fmt::Write;
 use std::sync::Mutex;
 
@@ -102,11 +103,11 @@ impl TypeDb {
     pub fn new(model: DataModel) -> Self {
         return TypeDb {
             model,
-            functions: HashMap::new(),
-            typedefs: HashMap::new(),
-            aggregates: HashMap::new(),
-            enums: HashMap::new(),
-            constants: HashMap::new(),
+            functions: HashMap::default(),
+            typedefs: HashMap::default(),
+            aggregates: HashMap::default(),
+            enums: HashMap::default(),
+            constants: HashMap::default(),
             order: Vec::new(),
         };
     }
@@ -152,6 +153,14 @@ impl TypeDb {
         }
 
         return self.parse(&format!("{}{}", prelude, source));
+    }
+
+    /// Takes out the functions whose name starts with a prefix (declared to be parsed with the types, kept elsewhere)
+    pub fn take_functions(&mut self, prefix: &str) -> HashMap<String, FuncType> {
+        let names: Vec<String> = self.functions.keys().filter(|n| n.starts_with(prefix)).cloned().collect();
+        let taken: HashMap<String, FuncType> = names.into_iter().filter_map(|n| self.functions.remove(&n).map(|f| (n, f))).collect();
+        self.order.retain(|decl| !matches!(decl, Decl::Function(name) if taken.contains_key(name)));
+        return taken;
     }
 
     /*
@@ -251,7 +260,7 @@ impl TypeDb {
 
     /// Keeps the functions and the types they use (directly or through other types)
     pub fn reduce(&mut self) {
-        let mut used: HashSet<String> = HashSet::new();
+        let mut used: HashSet<String> = HashSet::default();
         let mut stack: Vec<CType> = self.functions.values().map(|f| CType::Function(Box::new(f.clone()))).collect();
 
         while let Some(ty) = stack.pop() {

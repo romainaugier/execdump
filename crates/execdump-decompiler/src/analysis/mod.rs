@@ -2,6 +2,7 @@
  * Program analysis: function discovery, control flow graphs, call graph and strings
  */
 
+mod aarch64;
 pub mod dot;
 pub mod function;
 pub mod insn;
@@ -502,6 +503,21 @@ mod tests {
 
         assert!(comments.iter().any(|c| c.contains("hello from the analysis fixture")), "{:?}", comments);
         assert!(analysis.callers[&classify.addr].contains(&main.addr));
+    }
+
+    #[test]
+    fn elf_aarch64_switch() {
+        use crate::analysis::function::EdgeKind;
+
+        let program = programs_from_exec(&Exec::ELF(parse_elf(&fixture("elf_aarch64_switch")).unwrap())).remove(0);
+        let analysis = analyze(&program, None).unwrap();
+
+        // One target per case, and the default for the entry of a missing case
+        for (name, targets) in [("dense", 16), ("biased", 16), ("large", 14)] {
+            let function = analysis.function_by_name(name).unwrap();
+            let switch_edges: usize = function.blocks.values().map(|b| b.succs.iter().filter(|e| e.kind == EdgeKind::Switch).count()).sum();
+            assert_eq!((name, switch_edges, function.unresolved_jumps), (name, targets, 0));
+        }
     }
 
     #[test]

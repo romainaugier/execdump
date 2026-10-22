@@ -57,6 +57,18 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub pe_exc_table: bool,
 
+    /// Dump the delay load imports (their DLLs, functions and slots), if any
+    #[arg(long, default_value_t = false)]
+    pub pe_delay_imports: bool,
+
+    /// Dump the TLS Directory and its callbacks, if any
+    #[arg(long, default_value_t = false)]
+    pub pe_tls: bool,
+
+    /// Dump the Load Configuration (security cookie, Control Flow Guard functions), if any
+    #[arg(long, default_value_t = false)]
+    pub pe_load_config: bool,
+
     /*
      * ELF
      */
@@ -116,6 +128,14 @@ pub struct Args {
     /// Dumps the Mach-O imported libraries and symbols of each architecture, if any
     #[arg(long, default_value_t = false)]
     pub macho_imports: bool,
+
+    /// Dumps the pointers dyld writes of each architecture (chained fixups, binds), if any
+    #[arg(long, default_value_t = false)]
+    pub macho_fixups: bool,
+
+    /// Dumps the Mach-O exported symbols of each architecture (exports trie), if any
+    #[arg(long, default_value_t = false)]
+    pub macho_exports: bool,
 
     /*
      * Common

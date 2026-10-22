@@ -233,10 +233,17 @@ pub struct Abi {
     pub callee_saved: Vec<Reg>,
     /// Registers that hold a value of the runtime in every function (the goroutine of Go), named after it
     pub runtime: Vec<(Reg, &'static str)>,
+    /// Registers that hold zero when every function starts (the xmm15 of Go)
+    pub zeroed: Vec<Reg>,
     /// The results are in the stack slots above the arguments (Go ABI0), not in the return registers
     pub stack_results: bool,
     /// Several results in the integer argument registers, in order (Go ABIInternal), not a pair in the high half
     pub register_results: bool,
+    /// Registers the code written in assembly, and the local functions a compiler gives a convention of its own
+    /// (regparm), pass values in outside of the convention: parameters when a function reads them before writing
+    /// them, results when it changes them and a caller reads them after the call
+    pub extra_params: Vec<Reg>,
+    pub extra_results: Vec<Reg>,
 }
 
 impl Abi {
@@ -259,8 +266,11 @@ impl Abi {
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "rdi", "rsi", "r12", "r13", "r14", "r15", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"]),
                 runtime: Vec::new(),
+                zeroed: Vec::new(),
                 stack_results: false,
                 register_results: false,
+                extra_params: Vec::new(),
+                extra_results: Vec::new(),
             },
             Architecture::X86_64 => Abi {
                 int_args: r(&["rdi", "rsi", "rdx", "rcx", "r8", "r9"]),
@@ -276,8 +286,11 @@ impl Abi {
                 return_address: 8,
                 callee_saved: r(&["rbx", "rbp", "r12", "r13", "r14", "r15"]),
                 runtime: Vec::new(),
+                zeroed: Vec::new(),
                 stack_results: false,
                 register_results: false,
+                extra_params: Vec::new(),
+                extra_results: Vec::new(),
             },
             Architecture::X86 => Abi {
                 int_args: Vec::new(),
@@ -293,8 +306,13 @@ impl Abi {
                 return_address: 4,
                 callee_saved: r(&["ebx", "ebp", "esi", "edi"]),
                 runtime: Vec::new(),
+                zeroed: Vec::new(),
                 stack_results: false,
                 register_results: false,
+                // The registers of regparm first (eax, edx, ecx), the high half and the return register are results
+                // already
+                extra_params: r(&["eax", "edx", "ecx", "ebx", "esi", "edi"]),
+                extra_results: r(&["ecx", "ebx", "esi", "edi"]),
             },
             _ => Abi {
                 int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]),
@@ -311,8 +329,11 @@ impl Abi {
                 // x30 holds the return address of the function, v8 to v15 keep their low 64 bits
                 callee_saved: r(&["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15"]),
                 runtime: Vec::new(),
+                zeroed: Vec::new(),
                 stack_results: false,
                 register_results: false,
+                extra_params: Vec::new(),
+                extra_results: Vec::new(),
             },
         }
     }

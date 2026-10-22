@@ -4,12 +4,12 @@
  */
 
 use super::regs::Abi;
-use super::{LType, Loc, Signature, Value, RETURN_SINK_FLOAT, RETURN_SINK_HIGH, RETURN_SINK_INT, RETURN_SINK_REGS, RETURN_SINK_STACK};
+use super::{LType, Loc, Signature, Value, RETURN_SINK_EXTRA, RETURN_SINK_LOW, RETURN_SINK_FLOAT, RETURN_SINK_HIGH, RETURN_SINK_INT, RETURN_SINK_REGS, RETURN_SINK_STACK};
 
 use inkwell::module::Module;
 use inkwell::values::{AnyValue, AnyValueEnum, AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Results of the width analyses by value (None while in progress, phi cycles stop there)
 type Memo = HashMap<usize, Option<u32>>;
@@ -25,11 +25,17 @@ fn key(value: BasicValueEnum) -> usize {
 const MAX_DEPTH: usize = 8;
 
 /// Final signature of a function from its optimized discovery lifting: the parameters that are
-/// used (the ABI registers in order up to the last used one), narrowed to the bits they are
-/// used with, and the return register defined when returning. Registers used as addresses, and
-/// a result that is always an address, are pointers.
+/// used (the ABI registers in order up to the last used one, the other registers that are used),
+/// narrowed to the bits they are used with, and the return register defined when returning (the
+/// other registers changed when returning are candidate results in outs). Registers used as
+/// addresses, and a result that is always an address, are pointers.
 pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, abi: &Abi, high_read: &dyn Fn() -> bool) -> Signature {
-    let mut memo = DemandMemo::new();
+    let lows = match function.count_params() as usize > discovery.params.len() {
+        true => super::low_params(discovery),
+        false => Vec::new(),
+    };
+
+    let mut memo = DemandMemo::default();
     let sinks = [(RETURN_SINK_INT, Some(abi.int_ret)), (RETURN_SINK_FLOAT, Some(abi.float_ret)), (RETURN_SINK_HIGH, abi.int_ret_high)];
     let own = |loc: Loc| -> Option<&'static str> {
         let Loc::Reg(reg) = loc else {
@@ -40,13 +46,25 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
             return Some(*sink);
         }
 
+        if let Some(position) = abi.extra_results.iter().position(|&r| r == reg) {
+            return RETURN_SINK_EXTRA.get(position).copied();
+        }
+
         let position = abi.int_args.iter().position(|&r| r == reg).filter(|&p| abi.register_results && p > 0)?;
         return RETURN_SINK_REGS.get(position).copied();
     };
 
     // A return register received as a parameter reaches its return sink as it was when the function does not
     // write it, the other parameters reaching a sink are the result (mov rax, rdi)
-    let used: Vec<Option<u32>> = function.get_param_iter().zip(discovery.params.iter()).map(|(p, param)| demanded(p, 0, own(param.loc), &mut memo)).collect();
+    let mut used: Vec<Option<u32>> = function.get_param_iter().zip(discovery.params.iter()).map(|(p, param)| demanded(p, 0, own(param.loc), &mut memo)).collect();
+
+    // The low halves received apart (see low_params) are used as their register
+    for (position, &index) in lows.iter().enumerate() {
+        if let Some(bits) = function.get_nth_param((discovery.params.len() + position) as u32).and_then(|low| demanded(low, 0, None, &mut memo)) {
+            used[index] = Some(used[index].map_or(bits, |b| b.max(bits)));
+        }
+    }
+
     let mut keep = vec![false; discovery.params.len()];
 
     // Registers are assigned in order, a used register means the previous ones are parameters too
@@ -60,8 +78,11 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         }
     }
 
+    // The other registers are in no order
+    let extra = |loc: Loc| matches!(loc, Loc::Reg(r) if abi.extra_params.contains(&r) && !abi.int_args.contains(&r));
+
     for (i, param) in discovery.params.iter().enumerate() {
-        if (matches!(param.loc, Loc::Stack(_)) || !abi.ordered_args) && used[i].is_some() {
+        if (matches!(param.loc, Loc::Stack(_)) || !abi.ordered_args || extra(param.loc)) && used[i].is_some() {
             keep[i] = true;
         }
     }
@@ -76,7 +97,7 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
                 // Vector registers used as scalars are floats
                 (LType::Int(128), Some(bits)) if bits <= 32 => LType::Float(32),
                 (LType::Int(128), _) => LType::Float(64),
-                (LType::Int(full), Some(bits)) if bits >= full && used_as_address(function.get_nth_param(i as u32).unwrap(), 0, &mut HashSet::new()) => LType::Ptr,
+                (LType::Int(full), Some(bits)) if bits >= full && used_as_address(function.get_nth_param(i as u32).unwrap(), 0, &mut HashSet::default()) => LType::Ptr,
                 (LType::Int(full), Some(bits)) => LType::Int(c_width(bits).min(full)),
                 (ty, None) => ty,
                 (ty, _) => ty,
@@ -141,7 +162,18 @@ pub fn refine(module: &Module, function: FunctionValue, discovery: &Signature, a
         return Signature { params, ret: results.next(), outs: results.collect(), ..discovery.clone() };
     }
 
-    return Signature { params, ret: int_ret.or(float_ret), outs: Vec::new(), ..discovery.clone() };
+    let extra_results = abi
+        .extra_results
+        .iter()
+        .zip(RETURN_SINK_EXTRA)
+        .filter_map(|(&reg, sink)| {
+            let bits = returned(module, sink, &kept(sink))?;
+            let ty = if returns_address(module, sink) { LType::Ptr } else { LType::Int(c_width(bits)) };
+            Some(Value { loc: Loc::Reg(reg), ty, name: None })
+        })
+        .collect();
+
+    return Signature { params, ret: int_ret.or(float_ret), outs: extra_results, ..discovery.clone() };
 }
 
 /// The results in stack slots a value reaches on return, the lowest one first: the ones always holding an address
@@ -229,7 +261,52 @@ fn return_sink(instruction: InstructionValue) -> Option<&'static str> {
 
     let name = pointer.get_name().to_string_lossy();
 
-    return [RETURN_SINK_INT, RETURN_SINK_FLOAT, RETURN_SINK_HIGH].into_iter().chain(RETURN_SINK_REGS).find(|sink| *sink == name);
+    return [RETURN_SINK_INT, RETURN_SINK_FLOAT, RETURN_SINK_HIGH].into_iter().chain(RETURN_SINK_REGS).chain(RETURN_SINK_EXTRA).find(|sink| *sink == name);
+}
+
+/// A store to a low sink
+fn low_sink(instruction: InstructionValue) -> bool {
+    if instruction.get_opcode() != InstructionOpcode::Store {
+        return false;
+    }
+
+    let Some(BasicValueEnum::PointerValue(pointer)) = operand(instruction, 1) else {
+        return false;
+    };
+
+    return pointer.get_name().to_string_lossy().ends_with(RETURN_SINK_LOW);
+}
+
+/// A value only stored to low sinks (through the phis merging the returns)
+fn is_low_sink_only(value: InstructionValue) -> bool {
+    return low_sinks_only(value, &mut HashSet::default());
+}
+
+fn low_sinks_only(value: InstructionValue, visited: &mut HashSet<usize>) -> bool {
+    if !visited.insert(value.as_value_ref() as usize) {
+        return true;
+    }
+
+    let mut next = value.get_first_use();
+    let mut any = false;
+
+    while let Some(current) = next {
+        next = current.get_next_use();
+
+        let only = match instruction(current.get_user()) {
+            Some(user) if user.get_opcode() == InstructionOpcode::Phi => low_sinks_only(user, visited),
+            Some(user) => low_sink(user),
+            None => false,
+        };
+
+        if !only {
+            return false;
+        }
+
+        any = true;
+    }
+
+    return any;
 }
 
 /// Bits of a value its users need, None when nothing uses it. A value stored to a return sink is a result,
@@ -266,19 +343,30 @@ fn demanded_uncached(value: BasicValueEnum, depth: usize, own: Option<&'static s
 
         let bits = match user.get_opcode() {
             InstructionOpcode::Store if own.is_some() && return_sink(user) == own => continue,
+            // The low sinks are for the final function (see RETURN_SINK_LOW)
+            InstructionOpcode::Store if low_sink(user) => continue,
+            InstructionOpcode::Trunc if is_low_sink_only(user) => continue,
             InstructionOpcode::Trunc => Some(int_width(user.as_any_value_enum().try_into().unwrap_or(value))),
+            // The bits of a register kept when its low bits are written (mov al, 1: eax & ~0xff | 1) are not used
             InstructionOpcode::And => {
                 let mask = int_operand(user, 0).filter(|v| v.is_const()).or(int_operand(user, 1).filter(|v| v.is_const()));
-                let mask_bits = mask.and_then(constant_bits).unwrap_or(width);
-                let result_bits = user_demanded(user, depth, None, memo);
-                result_bits.map(|r| r.min(mask_bits))
+
+                match (user_demanded(user, depth, mask.and(own), memo), mask.and_then(|m| m.get_zero_extended_constant())) {
+                    // The low bits of the result that are used, of the ones the mask keeps (none: setne bl only uses bl)
+                    (Some(result), Some(mask)) => {
+                        let kept = mask & if result >= 64 { u64::MAX } else { (1u64 << result) - 1 };
+                        (kept != 0).then(|| 64 - kept.leading_zeros())
+                    }
+                    (result, _) => result,
+                }
             }
+            InstructionOpcode::Or => user_demanded(user, depth, own, memo),
             InstructionOpcode::Shl => {
                 let shift = int_operand(user, 1).and_then(|v| v.get_zero_extended_constant()).unwrap_or(0) as u32;
                 user_demanded(user, depth, None, memo).map(|r| r.saturating_sub(shift).max(1))
             }
             // The low bits of these results only depend on the low bits of their operands
-            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Or | InstructionOpcode::Xor => user_demanded(user, depth, None, memo),
+            InstructionOpcode::Add | InstructionOpcode::Sub | InstructionOpcode::Mul | InstructionOpcode::Xor => user_demanded(user, depth, None, memo),
             // A value joined with others is used where the join is (a register left as it was on some paths
             // only reaching the return sinks is not a parameter)
             InstructionOpcode::Phi => user_demanded(user, depth, own, memo),
@@ -424,7 +512,7 @@ fn returns_address(module: &Module, sink: &str) -> bool {
         let result = match value.as_instruction_value() {
             None => {
                 let parameter = matches!(value.as_any_value_enum(), AnyValueEnum::IntValue(int) if !int.is_const());
-                (parameter && used_as_address(value, 0, &mut HashSet::new())).then_some(true)
+                (parameter && used_as_address(value, 0, &mut HashSet::default())).then_some(true)
             }
             Some(instruction) => match instruction.get_opcode() {
                 InstructionOpcode::PtrToInt => Some(true),
@@ -460,7 +548,7 @@ fn returns_address(module: &Module, sink: &str) -> bool {
 
     let mut any = false;
     let mut next = global.as_pointer_value().get_first_use();
-    let mut memo = HashMap::new();
+    let mut memo = HashMap::default();
 
     while let Some(current) = next {
         next = current.get_next_use();
@@ -482,7 +570,7 @@ fn returns_address(module: &Module, sink: &str) -> bool {
 fn returned(module: &Module, sink: &str, kept: &[BasicValueEnum]) -> Option<u32> {
     let global = module.get_global(sink)?;
     let mut widest: Option<u32> = None;
-    let mut memo = Memo::new();
+    let mut memo = Memo::default();
     let mut next = global.as_pointer_value().get_first_use();
 
     while let Some(current) = next {

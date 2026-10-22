@@ -6,7 +6,7 @@ use super::scope::{self, list_id, ListId};
 use crate::typedb::Aggregate;
 use crate::types::{CType, FuncType, Param, Prototype};
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap as HashMap};
 use std::fmt::Write;
 
 pub type VarId = usize;
@@ -457,7 +457,7 @@ impl Printer<'_> {
     /// statement of the block that does not read it is declared there (int v = ...;), the others at the start
     fn block(&mut self, stmts: &[Stmt], depth: usize) {
         let vars = self.declared.get(&list_id(stmts)).cloned().unwrap_or_default();
-        let mut initialized: HashMap<usize, VarId> = HashMap::new();
+        let mut initialized: HashMap<usize, VarId> = HashMap::default();
         let mut declared_first = Vec::new();
 
         if !vars.is_empty() {
@@ -728,7 +728,7 @@ impl CFunction {
     }
 
     pub fn print(&self) -> Printed {
-        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
+        let mut printer = Printer { function: self, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::default() };
 
         let signature = self.signature();
 
@@ -875,7 +875,7 @@ mod tests {
             storage: Default::default(),
             structs: Vec::new(),
         };
-        let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::new() };
+        let printer = Printer { function: &function, out: String::new(), lines: Vec::new(), note: None, declared: HashMap::default() };
         let (a, b) = (Expr::Var(0), Expr::Var(1));
 
         let sum = Expr::binary(BinaryOp::Add, a.clone(), b.clone());

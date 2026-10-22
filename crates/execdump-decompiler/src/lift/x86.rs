@@ -14,6 +14,7 @@ use capstone::arch::ArchOperand;
 use capstone::Capstone;
 
 use execdump_core::disasm::Architecture;
+use execdump_core::program::{GUARD_CHECK, GUARD_DISPATCH};
 
 use inkwell::values::{IntValue, PointerValue};
 use inkwell::IntPredicate;
@@ -431,10 +432,30 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
 
         ("push", [src]) => {
             let value = get(l, src, slot as u32 * 8)?;
-            push(l, value, slot)?;
+
+            match src {
+                Op::Reg(r) => match l.saved_value(r.reg)? {
+                    Some(saved) => {
+                        l.store(saved, value)?;
+                        push(l, l.int(slot as u32 * 8).get_undef(), slot)?;
+                    }
+                    None => push(l, value, slot)?,
+                },
+                _ => push(l, value, slot)?,
+            }
         }
         ("pop", [dst]) => {
-            let value = pop(l, slot)?;
+            let restored = match dst {
+                Op::Reg(r) => l.restored_value(r.reg)?,
+                _ => None,
+            };
+
+            let mut value = pop(l, slot)?;
+
+            if let Some(saved) = restored {
+                value = l.load(saved, slot as u32 * 8)?;
+            }
+
             set(l, dst, value, wide)?;
         }
         ("leave", _) => {
@@ -659,6 +680,13 @@ pub fn lift<'ctx>(l: &mut Lifter<'ctx, '_>, insn: &Insn) -> Result<()> {
         ("jmp", [Op::Imm(..)]) => {}
         ("jmp", [target]) => {
             l.jump = Some(get(l, target, slot as u32 * 8)?);
+        }
+        // The check of Control Flow Guard changes nothing, its dispatch calls the target in rax
+        ("call", _) if l.guard_call(insn.addr) == Some(GUARD_CHECK) => {}
+        ("call", _) if l.guard_call(insn.addr) == Some(GUARD_DISPATCH) && wide => {
+            let rax = l.env.regs.full(l.env.regs.reg("rax"));
+            let target = l.read(rax)?;
+            l.call(&CallTarget::Indirect, Some(target), false)?;
         }
         ("call", [target]) => {
             let site = l.function.calls.iter().find(|c| c.addr == insn.addr).map(|c| c.target.clone()).unwrap_or(CallTarget::Indirect);
@@ -978,6 +1006,16 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
         }
     }
 
+    // or ecx, -1 and and ecx, 0 set every bit of the register, whatever it held
+    if let [Op::Reg(dst), Op::Imm(imm, _)] = insn.ops.as_slice() {
+        let bits = if dst.bits >= 64 { u64::MAX } else { (1u64 << dst.bits) - 1 };
+        let set = (mnemonic == "or" && *imm as u64 & bits == bits) || (mnemonic == "and" && *imm as u64 & bits == 0);
+
+        if set && dst.reg == reg && dst.offset == 0 && dst.bits >= 32 {
+            return Some(false);
+        }
+    }
+
     if insn.ops.iter().skip(1).any(uses) || insn.ops.iter().any(|op| matches!(op, Op::Mem(_)) && uses(op)) {
         return Some(true);
     }
@@ -991,13 +1029,14 @@ pub fn register_access(insn: &Insn, reg: super::regs::Reg) -> Option<bool> {
     }
 
     let write_only = matches!(mnemonic, "mov" | "movabs" | "lea" | "movzx" | "movsx" | "movsxd" | "pop" | "movd" | "movq" | "movbe")
+        || matches!(mnemonic, "movsd" | "movss" | "movapd" | "movaps" | "movupd" | "movups" | "sqrtsd" | "sqrtss")
         || matches!(mnemonic, "popcnt" | "lzcnt" | "tzcnt" | "andn" | "shlx" | "shrx" | "sarx" | "rorx" | "pdep" | "pext")
         || (mnemonic == "imul" && insn.ops.len() == 3)
         || mnemonic.starts_with("set")
         || mnemonic.starts_with("cvt");
 
     // xor eax, eax clears the register without reading it
-    let zeroing = matches!(mnemonic, "xor" | "sub") && insn.ops.get(1) == insn.ops.first();
+    let zeroing = matches!(mnemonic, "xor" | "sub" | "pxor" | "xorps" | "xorpd") && insn.ops.get(1) == insn.ops.first();
 
     // A write of the low bits (setb sil) keeps the others, it does not read what the register held as a value
     return if write_only || zeroing {

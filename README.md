@@ -43,6 +43,8 @@ SWEEP_COMPILE=1 SWEEP_REPORT=before.tsv cargo run --release -p execdump-project 
 SWEEP_COMPILE=1 SWEEP_BASELINE=before.tsv cargo run --release -p execdump-project --example sweep -- /usr/bin/tar
 ```
 
+`SWEEP_TEXT=file.c` writes the C code of every function, by binary and address: two runs compared with `diff` show every change of the output, not only the counts.
+
 A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
 
 Errors are `anyhow::Error` across the crates: a failure carries what was being done when it happened (`cannot parse a.out: Unexpected end of file`), the status line and the messages show the whole chain on one line. The typed errors that callers match on stay typed (`ReaderError` of the binary readers) and convert with `?`.
@@ -79,6 +81,12 @@ Options:
           Dump the debug information from the Debug Directory, if any
       --pe-exc-table
           Dump the exception information from the Exception Table, if any
+      --pe-delay-imports
+          Dump the delay load imports (their DLLs, functions and slots), if any
+      --pe-tls
+          Dump the TLS Directory and its callbacks, if any
+      --pe-load-config
+          Dump the Load Configuration (security cookie, Control Flow Guard functions), if any
 
       --elf-headers
           Dumps all the ELF headers
@@ -107,6 +115,10 @@ Options:
           Dumps the Mach-O Symbol Table of each architecture, if any
       --macho-imports
           Dumps the Mach-O imported libraries and symbols of each architecture, if any
+      --macho-fixups
+          Dumps the pointers dyld writes of each architecture (chained fixups, binds), if any
+      --macho-exports
+          Dumps the Mach-O exported symbols of each architecture (exports trie), if any
 
       --sections
           Dumps the Sections
@@ -162,11 +174,15 @@ Sections:
 - :x: Certificate Table
 - :x: Base Relocation Table
 - :heavy_check_mark: Debug
-- :x: TLS Table
-- :x: Load Config Table
+- :heavy_check_mark: TLS Table: its callbacks are functions that run before the entry point (`tls_callback_0`)
+- :heavy_check_mark: Load Config Table: the Control Flow Guard functions table (every function called through a
+  pointer) and the SEH handlers of 32-bit code are function starts, the security cookie and the guard check and
+  dispatch pointers are named. A call checked by Control Flow Guard is the call of its target in the C code (the
+  check is left out, the call through `__guard_dispatch_icall_fptr` calls the pointer in `rax`)
 - :x: Bound Import Table
 - :x: Import Address Table
-- :x: Delay Import Descriptor
+- :heavy_check_mark: Delay Import Descriptor: the functions of a DLL loaded at their first call are imports (their
+  slots), the thunks the slots hold until then are named (`__imp_load_<function>`)
 - :x: CLR Runtime Header
 
 Code:
@@ -179,7 +195,8 @@ Headers:
 
 - :heavy_check_mark: ELF Header
 - :heavy_check_mark: Program Headers (and interpreter)
-- :heavy_check_mark: Section Headers
+- :heavy_check_mark: Section Headers. When no section has the flag of code (hand written headers, the nasm binaries of
+  crackmes), the code is in the executable segments: the section of the entry point and the ones named as code
 
 Sections:
 
@@ -189,7 +206,10 @@ Sections:
 - :heavy_check_mark: Imports (needed libraries and imported symbols)
 - :heavy_check_mark: Notes (build-id, ABI tag, GNU properties)
 - :x: Symbol Versioning (.gnu.version, .gnu.version_r)
-- :x: DWARF debug information
+- :heavy_check_mark: DWARF debug information (DWARF 2 to 5, compressed sections included): the names and the source
+  files of the functions and the globals, and for C and C++ the types (structs, unions, enums, typedefs, as the
+  debug information lays them out) and the prototypes of the functions with the names of their parameters. The
+  object files (their debug sections need relocations) and the separate debug files are not read yet
 
 Code:
 
@@ -209,7 +229,11 @@ Load Commands:
 - :heavy_check_mark: Dylibs, Dylinker and Rpaths
 - :heavy_check_mark: Main, UUID, Build Version, Version Min, Source Version
 - :heavy_check_mark: Dyld Info, Function Starts, Chained Fixups, Exports Trie, Code Signature (offsets only)
-- :x: Dyld bind/rebase opcodes, chained fixups and exports trie contents
+- :heavy_check_mark: Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`, `_32`, the arm64e ones): the rebases are
+  written in the memory map of the program (on disk a pointer is a link of its chain), the binds are import slots
+- :heavy_check_mark: Bind opcodes of Dyld Info (binds and lazy binds: the imports referenced from data), the rebases are
+  already the pointers on disk
+- :heavy_check_mark: Exports trie: the exported symbols name the functions of stripped binaries
 - :x: Code Signature contents
 
 Code:
@@ -230,7 +254,11 @@ Disassembly:
 Utilities:
   - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
   - :heavy_check_mark: Shared libraries a binary needs, found where the loader looks for them (ELF: RPATH, LD_LIBRARY_PATH, RUNPATH, ld.so.conf, default directories; PE: next to the binary, PATH; Mach-O: @rpath, @loader_path, @executable_path)
-  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...). Each language adds a database of its runtime to the programs that have its code (`data/typedb/go.h`: the strings, slices, interfaces, itabs and types of Go, the allocations, conversions, channels and maps of the runtime, `fmt`, `strings`, `strconv`...; `data/typedb/rust.h`: `&str`, the allocator, the panics)
+  - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...). Each language adds a database of its runtime to the programs that have its code (`data/typedb/go.h`: the strings, slices, interfaces, itabs and types of Go, the allocations, conversions, channels and maps of the runtime, `fmt`, `strings`, `strconv`...; `data/typedb/rust.h`: `&str`, the allocator, the panics). A C or C++ program with debug information adds its own types to it, and its functions get the prototypes it describes (the names of their parameters included); a pointer the function returns is the struct of its prototype
+  - :heavy_check_mark: The Linux system calls by their name (`syscall(SYS_write, 1, "text", 4)`, x86_64, x86 and aarch64), the
+    paths they take as strings, the buffers written with their length (the strings of assembly are not NUL terminated).
+    `exit` and `exit_group` end the code: the function that follows them in the binary is not part of it
+  - :heavy_check_mark: The calls whose signature is not known (through a pointer) return a `double` when the code reads the floating point result register after them and not the integer one
 
 Analysis:
   - :heavy_check_mark: Format-agnostic program model (memory map, symbols, imports, entry point)
@@ -241,10 +269,13 @@ Analysis:
     already recovered (no copies of the rest of the function)
   - :heavy_check_mark: Noreturn functions (known names and propagation, the Rust panics of `core::panicking` and the
     ones of `std::panicking` that panic, not `set_hook`)
-  - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking)
+  - :heavy_check_mark: Imports resolution through PLT entries, Mach-O stubs, IAT thunks and indirect calls (aarch64 adrp/ldr tracking),
+    and the PLT of the position independent code of x86, which jumps through the global offset table ebx holds (`jmp [ebx+0xc]`)
   - :heavy_check_mark: Call graph and cross references
   - :heavy_check_mark: Strings (ASCII and UTF-8, UTF-16 for PE) and references annotations
-  - :x: aarch64 jump tables
+  - :heavy_check_mark: aarch64 jump tables: the instructions before the jump run for every index its bound check
+    allows (the copies of the compared register are the index), so the patterns of the compilers are all read the
+    same way: entries of a byte or two added to a label of the function (clang, gcc, MSVC), absolute entries (Go)
   - :heavy_check_mark: The data PE linkers put in the sections of code (import tables, debug directory, CLR header and
     metadata) is not taken for code when an instruction refers to it
   - :x: .NET assemblies: recognised (their CLR header), their code is CIL bytecode and is not decompiled yet (the only
@@ -276,7 +307,7 @@ Analysis:
     later) names every function, gives its bounds and its source file. The functions are in modules by package and
     file (`runtime/proc.go`, `main/main.go`). The decompiler uses the calling convention of the version: the register
     ABI of Go 1.17 on x86_64 and 1.18 on aarch64 (arguments and results in rax, rbx, rcx, rdi... or x0 to x15, the
-    goroutine in r14 or x28 is `runtime_g`), the stack ABI before (and on x86, and for the assembly of the runtime:
+    goroutine in r14 or x28 is `runtime_g`, xmm15 holds zero), the stack ABI before (and on x86, and for the assembly of the runtime:
     arguments then results in the slots above the return address, every register clobbered by calls). A function
     returns its first result, the next ones are written through pointers after its parameters, its callers pass the
     address of variables of their own: `n = fmt_Fprint(w, v, a, len, &v1, &v2)`, `*a2 = 5; return "quiet";`. The
@@ -302,7 +333,9 @@ Analysis:
 Decompiler:
   - :heavy_check_mark: CFG recovery
   - :heavy_check_mark: Lifting to LLVM IR (x86, x86_64, aarch64), with lazy flags and a statically tracked stack frame
-  - :heavy_check_mark: SSA construction and data-flow cleanups (LLVM passes)
+  - :heavy_check_mark: SSA construction while lifting: the registers and the flags are SSA values from the start (Braun et
+    al., the phis whose operands are one value are that value), only the stack frame is left to SROA, then
+    data-flow cleanups (LLVM passes)
   - :heavy_check_mark: Names of the functions with a mangled symbol (C++, Rust legacy and v0): their demangled path joined
     with underscores (`std::vector<int>::push_back` is `std_vector_int_push_back`, `core::fmt::Arguments::new_v1`
     is `core_fmt_Arguments_new_v1`, `<alloc::string::String as core::ops::deref::Deref>::deref` is
@@ -337,7 +370,13 @@ Decompiler:
     and a function returning nothing does not end with `return;` (nor its last branches). A function returning only
     0, 1 and tests (a bit of a value too: `(flags >> 2) & 1`) returns a `bool` (`return true;`), its callers test it
     as one (`if (!named(n))`). The format string of a variadic call passed on the stack is found through the
-    register it was computed in (`lea ecx, [fmt]; mov [esp], ecx`), so `printf` gets its extra arguments
+    register it was computed in (`lea ecx, [fmt]; mov [esp], ecx`), so `printf` gets its extra arguments. A
+    function is lifted once when its signature is discovered for its own C code: its discovery (every argument
+    register a parameter, the low halves of the 64-bit ones apart, the return registers stored to sinks, with the
+    notes of the storage), once optimized, becomes the function of the signature found (the parameters converted
+    to the registers they were received in, the values reaching the sinks returned where they are computed), and
+    the passes that run again have little left to do. The functions calling themselves, and the ones keeping
+    registers outside of the convention, are lifted again
   - :heavy_check_mark: Control-flow structuring (if/else, loops, switches with jump tables, short-circuit conditions, tail duplication of the returns).
     The branches join where their paths meet, the paths that return early left out; a loop whose exits all
     return is left from the block of its innermost loop the most paths reach, so the branches before it still
@@ -347,7 +386,9 @@ Decompiler:
     tails are repeated where they are reached: `return v;` inside the loop).
     Once the copies are gone the loops get their shape: the loops whose test is first or last are `while (c)` and
     `do { } while (c)` (also when the test leaves from its else: `if (c) { x } else { break; }`), a loop that
-    counts a variable initialized before it is a `for`, with an empty condition when it is left from its body
+    counts a variable initialized before it is a `for` (its initialization and its step found among the copies
+    before the loop and at the end of its body, in whatever order they come, when they can move past the others),
+    with an empty condition when it is left from its body
     (`for (i = 0;; i++)`, a pointer walking a list or a buffer is `p`: `for (p = head; p != 0; p = *p)`), and a
     loop tested before it is entered and after each iteration is a `while` (`if (c) { do { } while (c); }`). The
     counted loops compilers rotate are `for` loops again: `if (a < n) { i = a; do { ...; i++; } while (i != n); }` is
@@ -447,6 +488,22 @@ Decompiler:
     of the frame)
   - :heavy_check_mark: 32-bit calls: the stack arguments by size (doubles and 64-bit integers take two slots), the
     arguments of variadic functions from their format string, the pointer sized types of the headers (`size_t`...)
+  - :heavy_check_mark: The values known in the registers at the start of a block (the stack pointer, the constants
+    addresses are computed from) are the ones every path to the block agrees on: a counter set before a loop changes
+    in it, `mov al, [key + ecx - 1]` is an access to the array, not to one of its bytes
+  - :heavy_check_mark: Position independent code of x86: `call __x86.get_pc_thunk.bx` (a function that only reads its
+    return address) gives ebx the address after the call, so the accesses through the global offset table are the
+    globals of the program. A stripped `__stack_chk_fail_local` still fails the stack protector: a check whose
+    failing branch calls a function that does not return is removed like the others
+  - :heavy_check_mark: Registers outside of the calling convention, on x86: hand written assembly passes values in the
+    registers it chooses (a checksum taking its bounds in eax and ebx and returning it in ecx), and gcc gives its
+    local functions the convention of `regparm` (eax, edx, ecx). A register the function reads before writing it is
+    a parameter, a register it changes is a result when a caller reads it after the call (`int v2 =
+    sub_8048115(entry0, 0x8048123);`). The compiled code is not taken for assembly: the registers a function saves
+    and restores (`push ebx` ... `pop ebx`, wherever the frame is) are neither, the bits of a register kept when
+    its low byte is written (`mov al, 1`, `sete bl`) are no use of it, the stack room a compiler makes with a
+    register it does not use (`push ecx`) does not read it, and the functions called from elsewhere keep the
+    convention
   - :heavy_check_mark: C code generation (`--decompile c`)
   - :heavy_check_mark: Address of the statements: each machine instruction is the debug location of the LLVM instructions
     lifted from it, which the passes keep, so nearly every line of C has the address it comes from (the gutter of the C
@@ -458,9 +515,10 @@ Decompiler:
     stack canary; or a constant), a range 12 bytes (start and end as offsets from the start of the function, the
     location); the ranges of a variable are sorted and do not overlap, the location at an address is a binary
     search. The final lift notes the values with `llvm.dbg.value`, which the passes keep without changing the code:
-    the values written to the registers and the stack slots after each instruction, and the registers and the
-    split stack slots are debug variables, so mem2reg notes their phis at the start of the blocks (a marker gives
-    the address of each machine block). The C backend reads the notes of the values that are variables (or that
+    the values written to the registers and the stack slots after each instruction, and the phis of the registers
+    (noted by the lifter) and of the split stack slots (debug variables, noted by mem2reg) at the start of the
+    blocks (a marker gives the address of each machine block). The C backend reads the notes of the values that
+    are variables (or that
     an extension, a conversion or a phi of a variable comes from), then the ranges follow the machine code: a
     location holds a variable from a note until an instruction writes it (the registers it writes, the ones a call
     clobbers, the stack slots it stores to), a block starts with what all the blocks before it agree on. The

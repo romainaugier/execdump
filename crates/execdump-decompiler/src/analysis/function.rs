@@ -4,8 +4,9 @@
 
 use crate::analysis::insn::{Aarch64Tracker, Decoded, Decoder, Flow, Instruction, Operand};
 use execdump_core::disasm::Architecture;
-use execdump_core::program::{Program, SeedSource};
+use execdump_core::program::{Format, Program, SeedSource, GUARD_CHECK, GUARD_DISPATCH};
 
+use capstone::arch::arm64::Arm64Reg;
 use capstone::arch::x86::X86Reg;
 
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -18,8 +19,14 @@ const MAX_FUNCTION_INSNS: usize = 200_000;
 /// Maximum number of entries read from a jump table
 const MAX_JUMP_TABLE_ENTRIES: u64 = 1024;
 
+/// Instructions run before an aarch64 jump through a table: its bound check, the table and the base
+const MAX_AARCH64_TABLE_INSNS: usize = 16;
+
 /// Instructions looked at before a jump through a register for the constant it holds
 const MAX_CONSTANT_JUMP_INSNS: usize = 8;
+
+/// Instructions looked at before a system call for its number
+const MAX_SYSCALL_NUMBER_INSNS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EdgeKind {
@@ -254,6 +261,10 @@ impl Recovery<'_, '_> {
             self.add_refs(&insn);
 
             match insn.flow {
+                Flow::Seq if self.exits(&decoded) => {
+                    self.stops.insert(pc);
+                    return;
+                }
                 Flow::Seq => {}
                 Flow::Call(target) => {
                     let target = CallTarget::Function(target);
@@ -265,6 +276,11 @@ impl Recovery<'_, '_> {
                         self.stops.insert(pc);
                         return;
                     }
+                }
+                // The check of Control Flow Guard is not a call of the code, its dispatch is the call of the target
+                Flow::IndirectCall if self.ctx.import_name(insn.mem_ref).is_some_and(|n| n == GUARD_CHECK) => {}
+                Flow::IndirectCall if self.ctx.import_name(insn.mem_ref).is_some_and(|n| n == GUARD_DISPATCH) => {
+                    self.calls.push(CallSite { addr: pc, target: CallTarget::Indirect, tail: false });
                 }
                 Flow::IndirectCall => {
                     let target = self.ctx.import_name(insn.mem_ref).map_or(CallTarget::Indirect, |n| CallTarget::Import(n.clone()));
@@ -299,7 +315,7 @@ impl Recovery<'_, '_> {
                     self.leaders.insert(insn.end());
                 }
                 Flow::IndirectJump => {
-                    if let Some(name) = self.ctx.import_name(insn.mem_ref) {
+                    if let Some(name) = self.ctx.import_name(self.plt_slot(&decoded)) {
                         self.calls.push(CallSite { addr: pc, target: CallTarget::Import(name.clone()), tail: true });
                     } else if let Some(targets) = self.resolve_jump_table(&decoded) {
                         for &target in targets.iter() {
@@ -359,6 +375,69 @@ impl Recovery<'_, '_> {
         return None;
     }
 
+    /// The slot of the import a jump of the PLT goes through: its address, or in the position independent code of x86
+    /// an entry of the global offset table ebx holds the address of (jmp [ebx+0xc])
+    fn plt_slot(&self, jump: &Decoded) -> Option<u64> {
+        if jump.insn.mem_ref.is_some() || self.ctx.decoder.arch() != Architecture::X86 {
+            return jump.insn.mem_ref;
+        }
+
+        let Operand::Mem { base, index: 0, disp, .. } = jump.operand(0) else {
+            return None;
+        };
+
+        let plt = self.ctx.program.region_at(jump.insn.addr).is_some_and(|r| r.name.starts_with(".plt"));
+
+        if base != X86Reg::X86_REG_EBX as u16 || !plt {
+            return None;
+        }
+
+        // The table starts at .got.plt, or .got when the linker merged them (-z now)
+        let got = self.ctx.program.regions.iter().find(|r| r.name == ".got.plt").or_else(|| self.ctx.program.regions.iter().find(|r| r.name == ".got"))?;
+        return Some(got.vaddr.wrapping_add(disp as u64) & self.ctx.decoder.address_mask());
+    }
+
+    /// A system call of Linux that ends the process (exit, exit_group), its number set by the instructions before it
+    fn exits(&self, decoded: &Decoded) -> bool {
+        let arch = self.ctx.decoder.arch();
+        let system_call = matches!(
+            (arch, decoded.base_mnemonic(), decoded.operand(0)),
+            (Architecture::X86_64, "syscall", _) | (Architecture::X86, "int", Operand::Imm(0x80)) | (Architecture::Aarch64, "svc", Operand::Imm(0))
+        );
+
+        if !system_call || self.ctx.program.format != Format::Elf {
+            return false;
+        }
+
+        let number_regs: [u16; 2] = match arch {
+            Architecture::Aarch64 => [Arm64Reg::ARM64_REG_X8 as u16, Arm64Reg::ARM64_REG_W8 as u16],
+            _ => [X86Reg::X86_REG_RAX as u16, X86Reg::X86_REG_EAX as u16],
+        };
+        let is_number = |op: Operand| matches!(op, Operand::Reg(r) if number_regs.contains(&r));
+
+        for previous in self.previous_insns(decoded.insn.addr, MAX_SYSCALL_NUMBER_INSNS) {
+            let mnemonic = previous.base_mnemonic();
+
+            if previous.insn.flow != Flow::Seq || matches!(mnemonic, "mul" | "imul" | "div" | "idiv" | "cwde" | "cdqe" | "cbw" | "xchg" | "xadd" | "cmpxchg" | "cpuid" | "rdtsc") || mnemonic.starts_with("lods") {
+                return false;
+            }
+
+            if !is_number(previous.operand(0)) || matches!(mnemonic, "cmp" | "test" | "push" | "cmn" | "tst") {
+                continue;
+            }
+
+            let number = match (mnemonic, previous.operand(1)) {
+                ("mov" | "movz", Operand::Imm(imm)) => imm,
+                ("xor" | "sub", op) if is_number(op) => 0,
+                _ => return false,
+            };
+
+            return crate::c::syscalls::is_exit(arch, number as i128);
+        }
+
+        return false;
+    }
+
     /// Previous instructions in address order, closest first
     fn previous_insns(&self, addr: u64, count: usize) -> Vec<Decoded> {
         let mut res = Vec::new();
@@ -416,6 +495,10 @@ impl Recovery<'_, '_> {
     ///   jmp qword ptr [reg*8 + table]                          (absolute table)
     ///   lea rB, [rip + table] ; movsxd rX, dword ptr [rB + rI*4] ; add rX, rB ; jmp rX   (relative table)
     fn resolve_jump_table(&self, jump: &Decoded) -> Option<Vec<u64>> {
+        if self.ctx.decoder.arch() == Architecture::Aarch64 {
+            return self.resolve_aarch64_jump_table(jump);
+        }
+
         if !matches!(self.ctx.decoder.arch(), Architecture::X86 | Architecture::X86_64) {
             return None;
         }
@@ -480,6 +563,40 @@ impl Recovery<'_, '_> {
                 }
             }
             _ => return None,
+        }
+
+        if targets.is_empty() {
+            return None;
+        }
+
+        targets.sort_unstable();
+        targets.dedup();
+
+        return Some(targets);
+    }
+
+    /// The instructions before the jump run for every index of its table (see aarch64)
+    fn resolve_aarch64_jump_table(&self, jump: &Decoded) -> Option<Vec<u64>> {
+        let program = self.ctx.program;
+        let mut window = self.previous_insns(jump.insn.addr, MAX_AARCH64_TABLE_INSNS);
+        window.reverse();
+
+        let read = |addr: u64, size: usize| -> Option<u64> {
+            let bytes = program.read(addr, size)?;
+
+            return Some(match program.big_endian {
+                true => bytes.iter().fold(0u64, |v, &b| v << 8 | b as u64),
+                false => bytes.iter().rev().fold(0u64, |v, &b| v << 8 | b as u64),
+            });
+        };
+
+        let mut targets = Vec::new();
+
+        for target in crate::analysis::aarch64::jump_table(&window, jump, &read, MAX_JUMP_TABLE_ENTRIES)? {
+            match target.filter(|&t| self.table_target_valid(t)) {
+                Some(target) => targets.push(target),
+                None => break,
+            }
         }
 
         if targets.is_empty() {

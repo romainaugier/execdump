@@ -27,6 +27,9 @@ pub(crate) enum ExplorerItem {
     PEExportTable,
     PEExceptionTable,
     PEDebugDirectory,
+    PEDelayImports,
+    PETls,
+    PELoadConfig,
     ELFHeader,
     ELFProgramHeaders,
     ELFSymbols,
@@ -39,6 +42,8 @@ pub(crate) enum ExplorerItem {
     MachOLoadCommands(usize),
     MachOSymbols(usize),
     MachOImports(usize),
+    MachOFixups(usize),
+    MachOExports(usize),
     /// Section of a program (program index, section name)
     Section(usize, String),
     /// Shared library needed by the binary or by a library
@@ -79,6 +84,9 @@ impl ExplorerItem {
             ExplorerItem::PEExportTable => "  Export Table".to_string(),
             ExplorerItem::PEExceptionTable => "  Exception Table".to_string(),
             ExplorerItem::PEDebugDirectory => "  Debug Directory".to_string(),
+            ExplorerItem::PEDelayImports => "  Delay Imports".to_string(),
+            ExplorerItem::PETls => "  TLS Directory".to_string(),
+            ExplorerItem::PELoadConfig => "  Load Configuration".to_string(),
             ExplorerItem::ELFHeader => "  Header".to_string(),
             ExplorerItem::ELFProgramHeaders => "  Program Headers".to_string(),
             ExplorerItem::ELFSymbols => "  Symbols".to_string(),
@@ -91,6 +99,8 @@ impl ExplorerItem {
             ExplorerItem::MachOLoadCommands(p) => format!("  Load Commands{}", suffix(p)),
             ExplorerItem::MachOSymbols(p) => format!("  Symbols{}", suffix(p)),
             ExplorerItem::MachOImports(p) => format!("  Imports{}", suffix(p)),
+            ExplorerItem::MachOFixups(p) => format!("  Fixups{}", suffix(p)),
+            ExplorerItem::MachOExports(p) => format!("  Exports{}", suffix(p)),
             ExplorerItem::Section(p, name) => format!("  {}{}", name, suffix(p)),
             ExplorerItem::Library(library) => format!("  {} ({})", app.libraries[*library].file_name(), app.library_status(*library)),
         }
@@ -248,9 +258,15 @@ fn tree_items(app: &App, collapsed: &std::collections::HashSet<String>) -> (Vec<
 
         if tree.group(1, format!("{}/tables", key), title.to_string()) {
             match exec {
-                Exec::PE(_) => [ExplorerItem::PEImportTable, ExplorerItem::PEExportTable, ExplorerItem::PEExceptionTable, ExplorerItem::PEDebugDirectory].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::PE(_) => {
+                    [ExplorerItem::PEImportTable, ExplorerItem::PEExportTable, ExplorerItem::PEExceptionTable, ExplorerItem::PEDebugDirectory, ExplorerItem::PEDelayImports, ExplorerItem::PETls, ExplorerItem::PELoadConfig]
+                        .into_iter()
+                        .for_each(|i| tree.item(2, i))
+                }
                 Exec::ELF(_) => [ExplorerItem::ELFSymbols, ExplorerItem::ELFDynamic, ExplorerItem::ELFRelocations, ExplorerItem::ELFImports, ExplorerItem::ELFNotes].into_iter().for_each(|i| tree.item(2, i)),
-                Exec::MachO(_) => [ExplorerItem::MachOSymbols(p), ExplorerItem::MachOImports(p)].into_iter().for_each(|i| tree.item(2, i)),
+                Exec::MachO(_) => {
+                    [ExplorerItem::MachOSymbols(p), ExplorerItem::MachOImports(p), ExplorerItem::MachOFixups(p), ExplorerItem::MachOExports(p)].into_iter().for_each(|i| tree.item(2, i))
+                }
             }
         }
     }
@@ -418,6 +434,13 @@ impl App {
                     (Exec::PE(pe), ExplorerItem::PEExportTable) => pe.export_data.as_ref().map_or(Dump::new("No export table found"), |t| t.dump()),
                     (Exec::PE(pe), ExplorerItem::PEExceptionTable) => pe.exception_table.as_ref().map_or(Dump::new("No exception table found"), |t| t.dump()),
                     (Exec::PE(pe), ExplorerItem::PEDebugDirectory) => pe.debug_directory.as_ref().map_or(Dump::new("No debug directory found"), |t| t.dump()),
+                    (Exec::PE(pe), ExplorerItem::PEDelayImports) => {
+                        let mut dump = Dump::new_from_string(format!("Delay Imports ({})", pe.delay_imports.len()));
+                        pe.delay_imports.iter().for_each(|i| dump.push_child(i.dump()));
+                        dump
+                    }
+                    (Exec::PE(pe), ExplorerItem::PETls) => pe.tls.as_ref().map_or(Dump::new("No TLS directory found"), |t| t.dump()),
+                    (Exec::PE(pe), ExplorerItem::PELoadConfig) => pe.load_config.as_ref().map_or(Dump::new("No load configuration found"), |t| t.dump()),
                     (Exec::ELF(elf), ExplorerItem::ELFHeader) => elf.get_elf_header().dump(),
                     (Exec::ELF(elf), ExplorerItem::ELFProgramHeaders) => elf.dump_program_headers(),
                     (Exec::ELF(elf), ExplorerItem::ELFSymbols) => {
@@ -438,6 +461,8 @@ impl App {
                     (Exec::MachO(macho), ExplorerItem::MachOLoadCommands(p)) => macho.binaries[*p].dump_load_commands(),
                     (Exec::MachO(macho), ExplorerItem::MachOSymbols(p)) => macho.binaries[*p].dump_symbols(),
                     (Exec::MachO(macho), ExplorerItem::MachOImports(p)) => macho.binaries[*p].dump_dylibs(),
+                    (Exec::MachO(macho), ExplorerItem::MachOFixups(p)) => macho.binaries[*p].dump_fixups(),
+                    (Exec::MachO(macho), ExplorerItem::MachOExports(p)) => macho.binaries[*p].dump_exports(),
                     _ => return,
                 };
 

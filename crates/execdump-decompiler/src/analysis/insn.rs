@@ -61,12 +61,32 @@ pub enum Operand {
     Mem { base: u16, index: u16, scale: i32, disp: i64 },
 }
 
+/// Extension then shift left of an aarch64 operand: a register (add x0, x1, w2, sxtw #2), the index of a memory
+/// operand (ldr w0, [x1, w2, uxtw #2]), an immediate (add x0, x1, #1, lsl #12)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Modifier {
+    /// Bits kept and sign extension
+    pub extend: Option<(u8, bool)>,
+    pub shift: Shift,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shift {
+    #[default]
+    None,
+    Lsl(u8),
+    /// A shift to the right or a rotation
+    Other,
+}
+
 /// Fully decoded instruction, only used during the analysis
 #[derive(Clone, Debug)]
 pub struct Decoded {
     pub insn: Instruction,
     pub mnemonic: String,
     pub operands: [Operand; 4],
+    /// Shifts and extensions of the operands (aarch64)
+    pub modifiers: [Modifier; 4],
     pub num_operands: usize,
 }
 
@@ -129,6 +149,28 @@ fn classify_x86(mnemonic: &str, operand: Operand, addr_mask: u64) -> Flow {
     }
 }
 
+fn aarch64_modifier(op: &capstone::arch::arm64::Arm64Operand) -> Modifier {
+    use capstone::arch::arm64::{Arm64Extender as E, Arm64Shift};
+
+    let extend = match op.ext {
+        E::ARM64_EXT_UXTB => Some((8, false)),
+        E::ARM64_EXT_UXTH => Some((16, false)),
+        E::ARM64_EXT_UXTW => Some((32, false)),
+        E::ARM64_EXT_SXTB => Some((8, true)),
+        E::ARM64_EXT_SXTH => Some((16, true)),
+        E::ARM64_EXT_SXTW => Some((32, true)),
+        _ => None,
+    };
+
+    let shift = match op.shift {
+        Arm64Shift::Invalid => Shift::None,
+        Arm64Shift::Lsl(amount) => Shift::Lsl(amount as u8),
+        _ => Shift::Other,
+    };
+
+    return Modifier { extend, shift };
+}
+
 fn classify_aarch64(mnemonic: &str, operands: &[Operand]) -> Flow {
     let last_imm = operands.iter().rev().find_map(|op| match op {
         Operand::Imm(imm) => Some(*imm as u64),
@@ -174,6 +216,7 @@ impl Decoder {
         let detail = self.detailed.insn_detail(&insn).ok()?;
 
         let mut operands = [Operand::None; 4];
+        let mut modifiers = [Modifier::default(); 4];
         let mut num_operands = 0;
 
         for op in detail.arch_detail().operands().iter().take(4) {
@@ -189,17 +232,21 @@ impl Decoder {
                     },
                     _ => Operand::None,
                 },
-                ArchOperand::Arm64Operand(op) => match &op.op_type {
-                    Arm64OperandType::Reg(reg) => Operand::Reg(reg.0),
-                    Arm64OperandType::Imm(imm) | Arm64OperandType::Cimm(imm) => Operand::Imm(*imm),
-                    Arm64OperandType::Mem(mem) => Operand::Mem {
-                        base: mem.base().0,
-                        index: mem.index().0,
-                        scale: 1,
-                        disp: mem.disp() as i64,
-                    },
-                    _ => Operand::None,
-                },
+                ArchOperand::Arm64Operand(op) => {
+                    modifiers[num_operands] = aarch64_modifier(op);
+
+                    match &op.op_type {
+                        Arm64OperandType::Reg(reg) => Operand::Reg(reg.0),
+                        Arm64OperandType::Imm(imm) | Arm64OperandType::Cimm(imm) => Operand::Imm(*imm),
+                        Arm64OperandType::Mem(mem) => Operand::Mem {
+                            base: mem.base().0,
+                            index: mem.index().0,
+                            scale: 1,
+                            disp: mem.disp() as i64,
+                        },
+                        _ => Operand::None,
+                    }
+                }
                 _ => Operand::None,
             };
 
@@ -255,6 +302,7 @@ impl Decoder {
             insn: Instruction { addr: insn.address(), size: insn.len() as u8, flow, mem_ref, imm_ref },
             mnemonic,
             operands,
+            modifiers,
             num_operands,
         });
     }

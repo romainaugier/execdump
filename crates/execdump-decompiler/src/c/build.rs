@@ -15,8 +15,11 @@ use super::Context;
 
 use crate::types::CType;
 
+use execdump_core::program::Format;
+
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Term {
@@ -63,6 +66,44 @@ pub struct Built {
     pub globals: Vec<(String, Option<CType>)>,
     pub notes: Vec<VarNote>,
     pub frame_vars: Vec<(VarId, Loc)>,
+}
+
+/// The operations Builder::evaluate_value computes from their operands
+fn evaluated(op: Op) -> bool {
+    return matches!(
+        op,
+        Op::Add | Op::Sub | Op::Mul | Op::Shl | Op::LShr | Op::AShr | Op::And | Op::Or | Op::Xor | Op::ZExt | Op::SExt | Op::Trunc | Op::IntToPtr
+            | Op::PtrToInt | Op::Freeze | Op::BitCast | Op::Gep | Op::ICmp | Op::Select | Op::Load
+    );
+}
+
+/// An expression compiled for repeated evaluation (see Builder::evaluator)
+struct Evaluator {
+    order: Vec<ValueId>,
+    /// Position in the order of the operands of each value
+    operands: Vec<Vec<usize>>,
+    known: ValueId,
+    results: Vec<Option<i128>>,
+}
+
+impl Evaluator {
+    fn run(&mut self, builder: &Builder, value: i128) -> Option<i128> {
+        let mut inputs: Vec<Option<i128>> = Vec::new();
+
+        for index in 0..self.order.len() {
+            let id = self.order[index];
+
+            self.results[index] = if id == self.known {
+                Some(value)
+            } else {
+                inputs.clear();
+                inputs.extend(self.operands[index].iter().map(|&o| self.results[o]));
+                builder.evaluate_value(id, &inputs)
+            };
+        }
+
+        return self.results.last().copied().flatten();
+    }
 }
 
 struct Builder<'a> {
@@ -706,7 +747,8 @@ impl<'a> Builder<'a> {
         }
 
         let signed = |v: i128, b: u32| if (v >> (b - 1)) & 1 == 1 { v - (1i128 << b) } else { v };
-        let at = |input: i128| self.evaluate(id, *x, input & ((1i128 << input_bits) - 1)).map(|v| signed(v, bits));
+        let mut evaluator = self.evaluator(id, *x);
+        let mut at = |input: i128| evaluator.run(self, input & ((1i128 << input_bits) - 1)).map(|v| signed(v, bits));
 
         let tests: [i128; 14] = [0, 1, 2, 3, 7, 100, 12345, 1000003, -1, -2, -7, -100, -1000003, (1i128 << (input_bits - 1)) - 1];
 
@@ -720,8 +762,29 @@ impl<'a> Builder<'a> {
             candidates.push(((large / quotient) + 1, false));
         }
 
-        if let Some(d) = (2..=4096i128).find(|&d| at(d) == Some(0)) {
-            candidates.push((d, true));
+        // A remainder by d is the input itself below d: the first input that is not (found doubling, then halving)
+        if at(1) == Some(1) {
+            let mut low = 1i128;
+            let mut high = 2i128;
+
+            while high <= 4096 && at(high) == Some(high) {
+                low = high;
+                high *= 2;
+            }
+
+            while high - low > 1 {
+                let middle = (low + high) / 2;
+
+                if at(middle) == Some(middle) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+
+            if high <= 4096 && at(high) == Some(0) {
+                candidates.push((high, true));
+            }
         }
 
         for (d, remainder) in candidates.into_iter().filter(|(d, _)| *d >= 2) {
@@ -1230,9 +1293,18 @@ impl<'a> Builder<'a> {
             };
         }
 
-        // System calls: __syscallN(number, args...)
+        // System calls: __syscallN(number, args...), the number of the Linux ones by its name, their paths strings
         if callee.starts_with("__syscall") {
-            return call("syscall", args.iter().map(|&a| self.expr(a)).collect());
+            let linux = self.ctx.program.format == Format::Elf;
+            let known = args.first().and_then(|&n| f.int(n)).filter(|_| linux).and_then(|n| super::syscalls::linux(self.ctx.program.architecture(), n));
+
+            let Some((name, paths)) = known else {
+                return call("syscall", args.iter().map(|&a| self.expr(a)).collect());
+            };
+
+            let mut list = vec![Expr::Name(format!("SYS_{}", name))];
+            list.extend(args[1..].iter().enumerate().map(|(i, &a)| if paths.contains(&i) { self.argument(a) } else { self.expr(a) }));
+            return call("syscall", list);
         }
 
         return call(callee, args.iter().map(|&a| self.argument(a)).collect());
@@ -1334,8 +1406,10 @@ impl<'a> Builder<'a> {
         let (index, count) = self.range_check(block)?;
         let mut table = Vec::new();
 
+        let mut evaluator = self.evaluator(operands[0], index);
+
         for i in 0..count.min(4096) {
-            let target = self.evaluate(operands[0], index, i)?;
+            let target = evaluator.run(self, i)?;
             let case = operands[1..].iter().position(|&c| f.int(c) == Some(target));
 
             if let Some(case) = case {
@@ -1392,20 +1466,57 @@ impl<'a> Builder<'a> {
 
     /// Value of an expression when a value is known, reading the constant memory of the program
     fn evaluate(&self, id: ValueId, known: ValueId, value: i128) -> Option<i128> {
-        let f = self.f;
+        return self.evaluator(id, known).run(self, value);
+    }
 
-        if id == known {
-            return Some(value);
+    /// An expression compiled to be evaluated for many values of one of its leaves (the indices of a jump table,
+    /// the inputs of a division by a constant): its values once each, the operands before their users
+    fn evaluator(&self, id: ValueId, known: ValueId) -> Evaluator {
+        let f = self.f;
+        let mut order: Vec<ValueId> = Vec::new();
+        let mut slots: HashMap<ValueId, usize> = HashMap::default();
+        let mut stack = vec![(id, false)];
+
+        while let Some((v, expanded)) = stack.pop() {
+            if slots.contains_key(&v) {
+                continue;
+            }
+
+            // The phis are not evaluated: the cycles of the loops go through them
+            let operands: &[ValueId] = match &f.values[v].kind {
+                ValueKind::Inst { op, operands, .. } if v != known && evaluated(*op) => operands,
+                _ => &[],
+            };
+
+            if expanded || operands.is_empty() {
+                slots.insert(v, order.len());
+                order.push(v);
+                continue;
+            }
+
+            stack.push((v, true));
+            stack.extend(operands.iter().filter(|o| !slots.contains_key(o)).map(|&o| (o, false)));
         }
 
+        let operands = order.iter().map(|&v| match &f.values[v].kind {
+            ValueKind::Inst { op, operands, .. } if v != known && evaluated(*op) => operands.iter().map(|o| slots[o]).collect(),
+            _ => Vec::new(),
+        }).collect();
+
+        return Evaluator { results: vec![None; order.len()], order, operands, known };
+    }
+
+    /// The value of one value of an expression from the ones of its operands
+    fn evaluate_value(&self, id: ValueId, operands: &[Option<i128>]) -> Option<i128> {
+        let f = self.f;
         let bits = f.values[id].ty.bits().max(1);
         let mask = |v: i128, b: u32| if b >= 128 { v } else { v & ((1i128 << b) - 1) };
 
         return match &f.values[id].kind {
             ValueKind::Int(c) => Some(*c),
             ValueKind::Global(name) => self.ctx.globals.get(name).map(|&a| a as i128),
-            ValueKind::Inst { op, operands, scales, .. } => {
-                let e = |i: usize| self.evaluate(operands[i], known, value);
+            ValueKind::Inst { op, operands: ids, scales, pred, .. } => {
+                let e = |i: usize| operands.get(i).copied().flatten();
 
                 let result = match op {
                     // The arithmetic wraps as the machine's does, on 128 bits then masked to the width of the value
@@ -1418,9 +1529,9 @@ impl<'a> Builder<'a> {
                     Op::And => e(0)? & e(1)?,
                     Op::Or => e(0)? | e(1)?,
                     Op::Xor => e(0)? ^ e(1)?,
-                    Op::ZExt => mask(e(0)?, f.values[operands[0]].ty.bits()),
+                    Op::ZExt => mask(e(0)?, f.values[ids[0]].ty.bits()),
                     Op::SExt => {
-                        let from = f.values[operands[0]].ty.bits();
+                        let from = f.values[ids[0]].ty.bits();
                         let v = mask(e(0)?, from);
                         if from > 0 && from < 128 && v >> (from - 1) & 1 == 1 { v - (1i128 << from) } else { v }
                     }
@@ -1435,15 +1546,11 @@ impl<'a> Builder<'a> {
                         address
                     }
                     Op::ICmp => {
-                        let width = f.values[operands[0]].ty.bits().max(1);
+                        let width = f.values[ids[0]].ty.bits().max(1);
                         let (a, b) = (mask(e(0)?, width), mask(e(1)?, width));
                         let signed = |v: i128| if width < 128 && v >> (width - 1) & 1 == 1 { v - (1i128 << width) } else { v };
 
-                        let ValueKind::Inst { pred: Some(pred), .. } = &f.values[id].kind else {
-                            return None;
-                        };
-
-                        let result = match pred {
+                        let result = match pred.as_ref()? {
                             Pred::Eq => a == b,
                             Pred::Ne => a != b,
                             Pred::Ugt => a > b,
@@ -1500,8 +1607,8 @@ impl<'a> Builder<'a> {
     /// The decisions of the function by their first block, the blocks of one are not the start of another
     fn decisions(&self) -> HashMap<usize, Decision> {
         let f = self.f;
-        let mut decisions = HashMap::new();
-        let mut taken: HashSet<usize> = HashSet::new();
+        let mut decisions = HashMap::default();
+        let mut taken: HashSet<usize> = HashSet::default();
 
         // Reverse post order: the first test of a decision comes before the others
         let mut order = Vec::new();
@@ -1716,7 +1823,7 @@ impl<'a> Builder<'a> {
         };
 
         // The tests after the head whose predecessors are all tests
-        let mut region: HashSet<usize> = HashSet::from([head]);
+        let mut region: HashSet<usize> = HashSet::from_iter([head]);
         let mut changed = true;
 
         while changed && region.len() < MAX_DECISION_BLOCKS {
@@ -1724,7 +1831,7 @@ impl<'a> Builder<'a> {
             let frontier: BTreeSet<usize> = region.iter().flat_map(|&b| f.blocks[b].succs.iter().copied()).filter(|b| !region.contains(b) && !taken.contains(b)).collect();
 
             for block in frontier {
-                if f.blocks[block].preds.iter().all(|p| region.contains(p)) && self.is_test(block, value, &HashSet::new()) {
+                if f.blocks[block].preds.iter().all(|p| region.contains(p)) && self.is_test(block, value, &HashSet::default()) {
                     region.insert(block);
                     changed = true;
                 }
@@ -1794,7 +1901,7 @@ impl<'a> Builder<'a> {
         // The edges that do the same thing are one (the same phi assignments to the same block)
         let mut keys: Vec<(usize, Vec<(VarId, Expr)>, Option<Option<Expr>>)> = Vec::new();
         let mut representatives: Vec<(usize, usize)> = Vec::new();
-        let mut known: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut known: HashMap<(usize, usize), usize> = HashMap::default();
 
         let mut edge_of = |x: i128| -> Option<usize> {
             let edge = self.route(head, &region, value, x)?;
@@ -1851,7 +1958,7 @@ impl<'a> Builder<'a> {
             Some(&edge) if ranges.iter().all(|&e| e == edge) => edge,
             Some(_) => return None,
             None => {
-                let mut counts: HashMap<usize, usize> = HashMap::new();
+                let mut counts: HashMap<usize, usize> = HashMap::default();
                 edges.values().for_each(|e| *counts.entry(*e).or_default() += 1);
                 *counts.iter().max_by_key(|(e, c)| (**c, std::cmp::Reverse(**e)))?.0
             }

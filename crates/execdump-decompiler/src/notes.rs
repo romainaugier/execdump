@@ -11,7 +11,8 @@ use crate::types::{CType, FuncType, Param, Prototype};
 
 use anyhow::{bail, Context, Result};
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use rustc_hash::{FxHashSet as HashSet};
 
 /// New name and type of a parameter or a local variable
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]

@@ -8,6 +8,8 @@ edition.workspace = true
 anyhow.workspace = true
 capstone.workspace = true
 chrono.workspace = true
+gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
+miniz_oxide = "0.8"
 strum.workspace = true
 strum_macros.workspace = true
 

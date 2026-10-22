@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod c;
 mod chat;
+pub mod debuginfo;
 pub mod decompiler;
 pub mod lang;
 pub mod lift;

@@ -16,7 +16,7 @@ use super::build::{SBlock, Term};
 use super::reaching::{Atoms, Cond};
 use crate::types::CType;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /*
  * Graph
@@ -121,7 +121,7 @@ fn dominators(succs: &[Vec<usize>], entry: usize) -> Vec<Option<usize>> {
 
 /// Natural loops of the back edges, merged by header: their header and their nodes
 fn natural_loops(succs: &[Vec<usize>], order: &[usize], idom: &[Option<usize>], preds: &[Vec<usize>]) -> HashMap<usize, HashSet<usize>> {
-    let mut loops: HashMap<usize, HashSet<usize>> = HashMap::new();
+    let mut loops: HashMap<usize, HashSet<usize>> = HashMap::default();
     let reachable: HashSet<usize> = order.iter().copied().collect();
 
     for &node in order.iter() {
@@ -130,7 +130,7 @@ fn natural_loops(succs: &[Vec<usize>], order: &[usize], idom: &[Option<usize>], 
                 continue;
             }
 
-            let body = loops.entry(target).or_insert_with(|| HashSet::from([target]));
+            let body = loops.entry(target).or_insert_with(|| HashSet::from_iter([target]));
             let mut stack = vec![node];
 
             while let Some(n) = stack.pop() {
@@ -424,7 +424,7 @@ impl<'a> Structurer<'a> {
 
         // Reverse post order of the region from the branch (none when it is too large or has a cycle)
         let mut order = Vec::new();
-        let mut state: HashMap<usize, bool> = HashMap::new();
+        let mut state: HashMap<usize, bool> = HashMap::default();
         let mut stack = vec![(branch, 0usize)];
         state.insert(branch, false);
 
@@ -466,7 +466,7 @@ impl<'a> Structurer<'a> {
         let edges = |n: usize| next(n).unwrap_or_default().into_iter().filter(|s| position.contains_key(s) && *s != branch);
 
         // Shared blocks: reached from several blocks of the region
-        let mut preds: HashMap<usize, usize> = HashMap::new();
+        let mut preds: HashMap<usize, usize> = HashMap::default();
 
         for &n in order.iter() {
             let mut targets: Vec<usize> = edges(n).collect();
@@ -519,7 +519,7 @@ impl<'a> Structurer<'a> {
         // The blocks already emitted the region leads to are copied there when they are small: what
         // they change can change before the guards too
         let mut copied = Effects::default();
-        let mut seen: HashSet<usize> = HashSet::new();
+        let mut seen: HashSet<usize> = HashSet::default();
         let mut stack: Vec<usize> = order.iter().flat_map(|&n| next(n).unwrap_or_default()).filter(|&t| self.emitted[t] && !position.contains_key(&t)).collect();
 
         while let Some(n) = stack.pop() {
@@ -552,7 +552,7 @@ impl<'a> Structurer<'a> {
         // blocks is one atom, the blocks are its owners) and the cases of the switches
         let mut atoms = Atoms::default();
         let mut owners: Vec<Vec<usize>> = Vec::new();
-        let mut first_atom: HashMap<usize, usize> = HashMap::new();
+        let mut first_atom: HashMap<usize, usize> = HashMap::default();
 
         for &n in order.iter().filter(|n| !self.loops.contains_key(n) || **n == branch) {
             match &self.blocks[n].term {
@@ -614,7 +614,7 @@ impl<'a> Structurer<'a> {
         };
 
         // Reaching conditions, in the order of the region (None when unknown, too large)
-        let mut reaching: HashMap<usize, Option<Cond>> = HashMap::new();
+        let mut reaching: HashMap<usize, Option<Cond>> = HashMap::default();
         reaching.insert(branch, Some(Cond::truth()));
 
         for &n in order.iter() {
@@ -660,7 +660,7 @@ impl<'a> Structurer<'a> {
             let rejected: Vec<usize> = shared.iter().copied().filter(|n| !accepted.contains(n)).collect();
 
             let reaches = |from: usize| -> bool {
-                let mut seen = HashSet::from([from]);
+                let mut seen = HashSet::from_iter([from]);
                 let mut stack = vec![from];
 
                 while let Some(n) = stack.pop() {
@@ -696,7 +696,7 @@ impl<'a> Structurer<'a> {
                     continue;
                 }
 
-                let mut seen = HashSet::from([n]);
+                let mut seen = HashSet::from_iter([n]);
                 let mut stack = vec![n];
 
                 while let Some(x) = stack.pop() {
@@ -979,7 +979,7 @@ impl Effects {
 
 /// What an expression reads: its variables, whether it reads memory (or globals), whether it calls
 fn reads(e: &Expr) -> (HashSet<VarId>, bool, bool) {
-    let (mut vars, mut memory, mut call) = (HashSet::new(), false, false);
+    let (mut vars, mut memory, mut call) = (HashSet::default(), false, false);
 
     e.visit(&mut |e| match e {
         Expr::Var(v) => {
@@ -1368,7 +1368,7 @@ fn step_where_needed(body: &mut Vec<Stmt>, uses: &[usize], assigns: &[usize]) {
 
     let end = body.len() - 1;
 
-    let mut written = HashSet::new();
+    let mut written = HashSet::default();
     assigned(&body[at + 1..end], &mut written);
 
     // Every read of next is in the loop after its assignment, var is not written there
@@ -1556,7 +1556,7 @@ fn holds(test: &Expr) -> bool {
 fn counted_loops(stmts: &mut Vec<Stmt>) {
     let counted = |body: &[Stmt], test: &Expr, var: VarId| -> Option<i128> {
         let (stepped, k) = loop_step(body.last()?)?;
-        let mut written = HashSet::new();
+        let mut written = HashSet::default();
         assigned(&body[..body.len() - 1], &mut written);
 
         let Expr::Binary(_, a, b) = test else {
@@ -1704,40 +1704,70 @@ fn assigned_var(stmt: &Stmt) -> Option<(VarId, &Expr)> {
     };
 }
 
-/// v = init; while (cond(v)) { ...; v = v + k; } -> for (v = init; cond(v); v += k) { ... }
+/// v = init; while (cond(v)) { ...; v = v + k; } -> for (v = init; cond(v); v += k) { ... }. The copies of the
+/// variables joined at the loop come in no particular order: the init and the step of the counter are found among
+/// the assignments right before the loop and at the end of its body, when they can move past the others.
 fn for_loops(stmts: &mut Vec<Stmt>) {
     let mut i = 1;
 
     while i < stmts.len() {
-        let (before, after) = stmts.split_at_mut(i);
-        let init = &before[i - 1];
-
-        let StmtKind::While(cond, body) = &mut after[0].kind else {
+        let StmtKind::While(cond, body) = &stmts[i].kind else {
             i += 1;
             continue;
         };
 
-        let Some((var, _)) = assigned_var(init) else {
+        let inits = (0..i).rev().take_while(|&p| assigned_var(&stmts[p]).is_some()).collect::<Vec<_>>();
+        let found = inits.iter().find_map(|&p| {
+            let (var, _) = assigned_var(&stmts[p])?;
+            movable(&stmts[p], &stmts[p + 1..i]).then_some(())?;
+
+            let steps = body.len() - body.iter().rev().take_while(|s| assigned_var(s).is_some()).count();
+            let q = (steps..body.len()).rev().find(|&q| assigned_var(&body[q]).is_some_and(|(v, _)| v == var))?;
+            let (_, step) = assigned_var(&body[q])?;
+            (step.uses(var) && movable(&body[q], &body[q + 1..])).then_some(())?;
+
+            // A loop left from its body counts in its header too: for (v = init;; v += k) { ...; if (c) break; ... }
+            let rest: Vec<Stmt> = body.iter().enumerate().filter(|&(k, _)| k != q).map(|(_, s)| s.clone()).collect();
+            let counted = *cond == Expr::Int(1) && super::ast::mentioned(&rest).contains(&var);
+
+            ((cond.uses(var) || counted) && !has_loop_jump(body, &StmtKind::Continue)).then_some((p, q))
+        });
+
+        let Some((p, q)) = found else {
             i += 1;
             continue;
         };
 
-        let step = body.last().and_then(|s| assigned_var(s)).filter(|(v, value)| *v == var && value.uses(var)).is_some();
+        let addr = stmts[i].addr;
+        let StmtKind::While(cond, body) = &mut stmts[i].kind else {
+            unreachable!();
+        };
 
-        // A loop left from its body counts in its header too: for (v = init;; v += k) { ...; if (c) break; ... }
-        let counted = *cond == Expr::Int(1) && super::ast::mentioned(&body[..body.len().saturating_sub(1)]).contains(&var);
-
-        if step && (cond.uses(var) || counted) && !has_loop_jump(body, &StmtKind::Continue) {
-            let step = body.pop().unwrap();
-            let (cond, body) = (cond.clone(), std::mem::take(body));
-            let addr = after[0].addr;
-            let init = stmts.remove(i - 1);
-            stmts[i - 1] = Stmt::new(StmtKind::For(Box::new(init), cond, Box::new(step), body), addr);
-            continue;
-        }
-
-        i += 1;
+        let step = body.remove(q);
+        let (cond, body) = (cond.clone(), std::mem::take(body));
+        let init = stmts.remove(p);
+        stmts[i - 1] = Stmt::new(StmtKind::For(Box::new(init), cond, Box::new(step), body), addr);
     }
+}
+
+/// An assignment can move after the ones that follow it: none of them writes what it reads, reads or writes what it
+/// assigns, or calls a function
+fn movable(stmt: &Stmt, after: &[Stmt]) -> bool {
+    let Some((var, value)) = assigned_var(stmt) else {
+        return false;
+    };
+
+    let calls = |e: &Expr| {
+        let mut found = false;
+        e.visit(&mut |e| found |= matches!(e, Expr::Call(..)));
+        found
+    };
+
+    return !calls(value)
+        && after.iter().all(|other| match assigned_var(other) {
+            Some((written, read)) => written != var && !read.uses(var) && !value.uses(written) && !calls(read),
+            None => false,
+        });
 }
 
 /// The statements without their addresses, to compare what they do
@@ -1812,7 +1842,7 @@ fn remove_labels(stmts: &mut Vec<Stmt>, gotos: &HashSet<String>) {
 }
 
 fn collect_gotos(stmts: &mut Vec<Stmt>) -> HashSet<String> {
-    let mut gotos = HashSet::new();
+    let mut gotos = HashSet::default();
 
     walk(stmts, &mut |list: &mut Vec<Stmt>| {
         for stmt in list.iter() {
@@ -1826,7 +1856,7 @@ fn collect_gotos(stmts: &mut Vec<Stmt>) -> HashSet<String> {
 }
 
 fn collect_labels(stmts: &mut Vec<Stmt>) -> HashSet<String> {
-    let mut labels = HashSet::new();
+    let mut labels = HashSet::default();
 
     walk(stmts, &mut |list: &mut Vec<Stmt>| {
         for stmt in list.iter() {
@@ -1930,7 +1960,7 @@ pub fn structure(mut blocks: Vec<SBlock>, vars: &mut Vec<Var>) -> Vec<Stmt> {
 
     // Blocks only jumped to that were never emitted with their label (left from inside the loops, or
     // small tails always repeated) go at the end, the statements before do not fall through to them
-    let mut appended = HashSet::new();
+    let mut appended = HashSet::default();
 
     loop {
         let labels = collect_labels(&mut stmts);
@@ -2074,7 +2104,7 @@ mod tests {
 
     impl Machine {
         fn new(count: usize, seed: u64) -> Self {
-            return Machine { runs: vec![0; count], trace: Vec::new(), vars: HashMap::new(), seed, steps: 0 };
+            return Machine { runs: vec![0; count], trace: Vec::new(), vars: HashMap::default(), seed, steps: 0 };
         }
 
         fn eval(&mut self, e: &Expr) -> i128 {

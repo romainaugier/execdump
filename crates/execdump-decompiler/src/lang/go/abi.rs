@@ -28,8 +28,11 @@ pub fn register_abi(regs: &RegisterFile) -> Option<Abi> {
             return_address: 8,
             callee_saved: r(&["rbp", "r14", "r15", "xmm15"]),
             runtime: vec![(regs.reg("r14"), "runtime_g")],
+            zeroed: r(&["xmm15"]),
             stack_results: false,
             register_results: true,
+            extra_params: Vec::new(),
+            extra_results: Vec::new(),
         }),
         Architecture::Aarch64 => Some(Abi {
             int_args: r(&["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15"]),
@@ -45,8 +48,11 @@ pub fn register_abi(regs: &RegisterFile) -> Option<Abi> {
             return_address: 0,
             callee_saved: r(&["x28", "x29", "x30"]),
             runtime: vec![(regs.reg("x28"), "runtime_g")],
+            zeroed: Vec::new(),
             stack_results: false,
             register_results: true,
+            extra_params: Vec::new(),
+            extra_results: Vec::new(),
         }),
         _ => None,
     };
@@ -62,6 +68,8 @@ pub fn stack_abi(regs: &RegisterFile) -> Abi {
     let mut abi = Abi::new(regs, false);
 
     abi.float_args = Vec::new();
+    abi.extra_params = Vec::new();
+    abi.extra_results = Vec::new();
     abi.ordered_args = false;
     abi.int_ret_high = None;
     abi.stack_results = true;

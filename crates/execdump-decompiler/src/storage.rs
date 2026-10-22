@@ -18,7 +18,8 @@ use crate::lift::SlotWrite;
 use crate::typedb::TypeDb;
 use crate::types::CType;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use rustc_hash::{FxHashMap as HashMap};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Loc(pub u32);
@@ -282,9 +283,9 @@ const MAX_ROUNDS: usize = 16;
 /// with what all the blocks before it agree on, and the notes of its start. The ranges of a variable do not
 /// overlap: when two locations hold it, the one holding it first is kept.
 pub fn ranges(function: u64, blocks: &[Block], notes: &[VarNote], slot_writes: &[SlotWrite]) -> Vec<(usize, Vec<Range>)> {
-    let mut entry: HashMap<u64, Vec<&VarNote>> = HashMap::new();
-    let mut written: HashMap<u64, Vec<&VarNote>> = HashMap::new();
-    let mut slots: HashMap<u64, Vec<&SlotWrite>> = HashMap::new();
+    let mut entry: HashMap<u64, Vec<&VarNote>> = HashMap::default();
+    let mut written: HashMap<u64, Vec<&VarNote>> = HashMap::default();
+    let mut slots: HashMap<u64, Vec<&SlotWrite>> = HashMap::default();
 
     for note in notes.iter() {
         if note.entry { entry.entry(note.start).or_default().push(note) } else { written.entry(note.start).or_default().push(note) }
@@ -343,7 +344,7 @@ pub fn ranges(function: u64, blocks: &[Block], notes: &[VarNote], slot_writes: &
     }
 
     // Intervals of each variable: a location keeps it from where it gets it to where it loses it
-    let mut intervals: HashMap<usize, Vec<Range>> = HashMap::new();
+    let mut intervals: HashMap<usize, Vec<Range>> = HashMap::default();
     let offset = |addr: u64| addr.wrapping_sub(function) as u32;
 
     for (b, block) in blocks.iter().enumerate() {

@@ -1,6 +1,7 @@
 use crate::demangle::demangle;
 use crate::disasm::{Architecture, disasm_and_format_code};
 use crate::dump::{Dump, DumpRawData};
+use crate::macho_fixups::{self, Fixup, Segment};
 use crate::reader::Reader;
 
 use anyhow::{bail, Result};
@@ -957,6 +958,10 @@ pub struct MachOBinary {
     pub function_starts: Vec<u64>,
     /// Entry point address (LC_MAIN)
     pub entry_point: Option<u64>,
+    /// The pointers dyld writes: chained fixups, or the binds of LC_DYLD_INFO
+    pub fixups: Vec<Fixup>,
+    /// Exported symbols (LC_DYLD_EXPORTS_TRIE or LC_DYLD_INFO) and their addresses
+    pub exports: Vec<(String, u64)>,
 }
 
 impl MachOBinary {
@@ -983,6 +988,7 @@ impl MachOBinary {
         binary.parse_symbols(&mut reader)?;
         binary.parse_indirect_symbols(&mut reader)?;
         binary.parse_function_starts(&mut reader)?;
+        binary.parse_fixups(bytes);
         binary.entry_point = binary.find_entry_point();
 
         return Ok(binary);
@@ -1055,12 +1061,7 @@ impl MachOBinary {
     }
 
     fn parse_function_starts(&mut self, reader: &mut Reader) -> Result<()> {
-        let function_starts = self.load_commands.iter().find_map(|c| match c.data {
-            LoadCommandData::LinkeditData { dataoff, datasize } if c.cmd == LoadCommandType::LcFunctionStarts as u32 => Some((dataoff, datasize)),
-            _ => None,
-        });
-
-        let Some((dataoff, datasize)) = function_starts else {
+        let Some((dataoff, datasize)) = self.linkedit_data(LoadCommandType::LcFunctionStarts) else {
             return Ok(());
         };
 
@@ -1085,6 +1086,40 @@ impl MachOBinary {
         }
 
         return Ok(());
+    }
+
+    fn linkedit_data(&self, command: LoadCommandType) -> Option<(u32, u32)> {
+        return self.load_commands.iter().find_map(|c| match c.data {
+            LoadCommandData::LinkeditData { dataoff, datasize } if c.cmd == command as u32 => Some((dataoff, datasize)),
+            _ => None,
+        });
+    }
+
+    fn parse_fixups(&mut self, file: &[u8]) {
+        let segments: Vec<Segment> = self.segments().map(|s| Segment { vmaddr: s.vmaddr, vmsize: s.vmsize, fileoff: s.fileoff, filesize: s.filesize }).collect();
+        let pointer_size = if self.header.is_64() { 8 } else { 4 };
+        let blob = |(offset, size): (u32, u32)| file.get(offset as usize..offset as usize + size as usize);
+
+        let dyld_info = self.load_commands.iter().find_map(|c| match c.data {
+            LoadCommandData::DyldInfo(fields) => Some(fields),
+            _ => None,
+        });
+
+        if let Some(data) = self.linkedit_data(LoadCommandType::LcDyldChainedFixups).and_then(blob) {
+            self.fixups = macho_fixups::chained_fixups(file, data, &segments);
+        } else if let Some(fields) = dyld_info {
+            for (offset, size, lazy) in [(fields[2], fields[3], false), (fields[6], fields[7], true)] {
+                if let Some(stream) = blob((offset, size)).filter(|s| !s.is_empty()) {
+                    self.fixups.extend(macho_fixups::bind_opcodes(stream, &segments, pointer_size, lazy));
+                }
+            }
+        }
+
+        let trie = self.linkedit_data(LoadCommandType::LcDyldExportsTrie).or(dyld_info.map(|f| (f[8], f[9])));
+
+        if let Some(trie) = trie.and_then(blob).filter(|t| !t.is_empty()) {
+            self.exports = macho_fixups::exports_trie(trie, macho_fixups::base_address(&segments));
+        }
     }
 
     fn find_entry_point(&self) -> Option<u64> {
@@ -1162,6 +1197,35 @@ impl MachOBinary {
 
         for symbol in self.symbols.iter().filter(|s| s.is_import()) {
             dump.push_field("", symbol.demangled_name(), None);
+        }
+
+        return dump;
+    }
+
+    pub fn dump_fixups(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Fixups ({}, {} pointers)", self.cpu_name(), self.fixups.len()));
+
+        dump.push_field("", format!("{:<18} {:<6} {}", "Address", "Type", "Target"), None);
+
+        for fixup in self.fixups.iter() {
+            let line = match fixup {
+                Fixup::Rebase { addr, target } => format!("{:#018x} rebase {:#x}", addr, target),
+                Fixup::Bind { addr, symbol, addend: 0 } => format!("{:#018x} bind   {}", addr, symbol),
+                Fixup::Bind { addr, symbol, addend } if *addend < 0 => format!("{:#018x} bind   {} - {:#x}", addr, symbol, addend.unsigned_abs()),
+                Fixup::Bind { addr, symbol, addend } => format!("{:#018x} bind   {} + {:#x}", addr, symbol, addend),
+            };
+
+            dump.push_field("", line, None);
+        }
+
+        return dump;
+    }
+
+    pub fn dump_exports(&self) -> Dump {
+        let mut dump = Dump::new_from_string(format!("Exports ({}, {})", self.cpu_name(), self.exports.len()));
+
+        for (name, addr) in self.exports.iter() {
+            dump.push_field("", format!("{:#018x} {}", addr, demangle(name).unwrap_or(name.clone())), None);
         }
 
         return dump;

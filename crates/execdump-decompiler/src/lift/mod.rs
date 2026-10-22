@@ -1,8 +1,8 @@
 /*
  * Lifting of a recovered function to LLVM IR
  *
- * Every register and flag lives in an alloca and the stack frame is a single byte array, LLVM's
- * mem2reg and SROA then turn them into SSA values and local variables. The stack pointer is
+ * The registers and the flags are SSA values built while lifting (see ssa) and the stack frame is
+ * a single byte array, LLVM's SROA then turns it into local variables. The stack pointer is
  * tracked as an offset from its value at the entry, so stack accesses address the frame directly
  * (keeping the pointer provenance), the other memory accesses go through inttoptr.
  *
@@ -15,12 +15,15 @@ pub mod regs;
 mod frame;
 mod protector;
 mod refine;
+mod reuse;
+mod ssa;
 mod x86;
 mod aarch64;
 
 pub use frame::{copy_global_arrays, declare_slots, fold_frame_addresses, split_frame, stack_offset};
 pub use protector::{remove_stack_protector, Protector};
 pub use refine::refine;
+pub use reuse::{final_function, return_phis};
 
 use crate::analysis::function::{BasicBlock, CallTarget, EdgeKind, Function};
 use crate::analysis::insn::Flow;
@@ -33,7 +36,7 @@ use regs::{Abi, Reg, RegRef, RegisterFile};
 use anyhow::{bail, Context as _, Result};
 
 use execdump_core::disasm::Architecture;
-use execdump_core::program::Program;
+use execdump_core::program::{Program, Region, GUARD_CHECK, GUARD_DISPATCH};
 
 use inkwell::basic_block::BasicBlock as LlvmBlock;
 use inkwell::builder::Builder;
@@ -41,15 +44,18 @@ use inkwell::context::Context;
 use inkwell::debug_info::{AsDIScope, DIFile, DIFlags, DIFlagsConstants, DILocalVariable, DIScope, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
 use inkwell::module::{FlagBehavior, Linkage, Module};
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FunctionType};
-use inkwell::types::IntType;
+use inkwell::types::{AsTypeRef, IntType};
+use inkwell::llvm_sys::prelude::LLVMMetadataRef;
 use inkwell::values::{AsValueRef, BasicMetadataValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, GlobalValue, InstructionOpcode, InstructionValue, IntValue, PointerValue};
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::num::NonZeroU32;
 
-/// Name of the globals the discovery functions store their return registers to
+/// Name of the globals the discovery functions store their return registers to (they start with RETURN_SINK)
+pub(crate) const RETURN_SINK: &str = "__return_";
 pub(crate) const RETURN_SINK_INT: &str = "__return_int";
 pub(crate) const RETURN_SINK_FLOAT: &str = "__return_float";
 pub(crate) const RETURN_SINK_HIGH: &str = "__return_high";
@@ -60,6 +66,13 @@ pub(crate) const RETURN_SINK_REGS: [&str; 16] = [
     "__return_reg_0", "__return_reg_1", "__return_reg_2", "__return_reg_3", "__return_reg_4", "__return_reg_5", "__return_reg_6", "__return_reg_7",
     "__return_reg_8", "__return_reg_9", "__return_reg_10", "__return_reg_11", "__return_reg_12", "__return_reg_13", "__return_reg_14", "__return_reg_15",
 ];
+/// Sinks of the other registers results can be in (see Abi::extra_results), by position
+pub(crate) const RETURN_SINK_EXTRA: [&str; 8] = ["__return_extra_0", "__return_extra_1", "__return_extra_2", "__return_extra_3", "__return_extra_4", "__return_extra_5", "__return_extra_6", "__return_extra_7"];
+/// Suffix of the sinks of the low 32 bits of the 64-bit registers, in a discovery that becomes the final function:
+/// a 32-bit result computed in 32 bits stays so (alone, the 64-bit sink makes the passes compute it in 64 bits)
+pub(crate) const RETURN_SINK_LOW: &str = "_low";
+/// Width of the low sinks
+pub(crate) const RETURN_SINK_LOW_BITS: u32 = 32;
 
 /// The register of the high half of a result twice as wide as the return register (rdx:rax)
 pub fn high_half(abi: &Abi, regs: &RegisterFile, value: &Value) -> Option<Reg> {
@@ -156,7 +169,7 @@ pub struct SlotWrite {
 
 /// What the final lift notes of the storage: the debug variable of each location (llvm.dbg.value of the
 /// values written to the registers and the stack slots, the passes keep them), the registers tracked
-/// (declared as debug variables, mem2reg notes their phis), and the stack slots written
+/// (debug variables, the phis of their values are noted too), and the stack slots written
 struct Notes<'ctx> {
     file: DIFile<'ctx>,
     /// Type of the variables, of the size of the values (mem2reg drops the values smaller than their variable)
@@ -182,17 +195,19 @@ pub struct Env<'a> {
     pub language: &'a dyn Language,
 }
 
-/// Signature of a function before its parameters are known: every argument register and the
-/// stack slots it reads, the return registers are stored to sinks to see which ones are set (and the
-/// stack slots of the results, kept in outs, with an ABI that has them)
+/// Signature of a function before its parameters are known: every argument register (and the other registers
+/// values can be passed in) and the stack slots it reads, the return registers are stored to sinks to see which
+/// ones are set (and the stack slots of the results, kept in outs, with an ABI that has them)
 pub fn discovery_signature(name: &str, abi: &Abi, regs: &RegisterFile, stack_params: &BTreeSet<i64>, stack_results: &BTreeMap<i64, u32>) -> Signature {
     let int_bits = regs.regs[abi.int_ret].bits;
     let mut params: Vec<Value> = Vec::new();
 
     let int = abi.int_args.iter().map(|&r| Value { loc: Loc::Reg(r), ty: LType::Int(int_bits), name: None });
+    let extra = abi.extra_params.iter().filter(|r| !abi.int_args.contains(r)).map(|&r| Value { loc: Loc::Reg(r), ty: LType::Int(regs.regs[r].bits), name: None });
     let float = abi.float_args.iter().map(|&r| Value { loc: Loc::Reg(r), ty: LType::Int(128), name: None });
 
     params.extend(int);
+    params.extend(extra);
     params.extend(float);
     params.extend(stack_params.iter().map(|&offset| Value { loc: Loc::Stack(offset), ty: LType::Int(abi.slot_size as u32 * 8), name: None }));
     let outs = stack_results.iter().map(|(&offset, &bytes)| Value { loc: Loc::Stack(offset), ty: LType::Int(bytes * 8), name: None }).collect();
@@ -365,6 +380,22 @@ impl Insn {
         };
     }
 
+    /// A full register pushed (true) or popped (false)
+    fn pushed_or_popped(&self, slot: i64) -> Option<(bool, Reg)> {
+        let Insn::X86(insn) = self else {
+            return None;
+        };
+
+        return match (insn.mnemonic.as_str(), insn.ops.as_slice()) {
+            ("push" | "pop", [x86::Op::Reg(r)]) if r.offset == 0 && r.bits as i64 == slot * 8 => Some((insn.mnemonic == "push", r.reg)),
+            _ => None,
+        };
+    }
+
+    fn is_push(&self) -> bool {
+        return matches!(self, Insn::X86(insn) if insn.mnemonic == "push");
+    }
+
     /// Whether the instruction reads (Some(true)) or overwrites (Some(false)) a register
     pub fn register_access(&self, reg: Reg) -> Option<bool> {
         return match self {
@@ -396,6 +427,9 @@ pub struct Frame {
     pub stack_results: BTreeMap<i64, u32>,
     /// With the same ABIs, the stack slots around each call (by address of the call)
     pub call_slots: HashMap<u64, CallSlots>,
+    /// Registers pushed and popped back from the same slot (saved then restored): the address of the push, the slot
+    /// and the register
+    pub saves: Vec<(u64, i64, Reg)>,
 }
 
 /// Slots above the stack pointer of a call (offsets from it, and sizes): the ones written before it in its block are
@@ -406,13 +440,16 @@ pub struct CallSlots {
     pub results: BTreeMap<i64, u32>,
     /// With several results in registers: the argument registers read after the call before being written
     pub registers: Vec<Reg>,
+    /// The floating point result register is read after the call before being written, the integer one is not
+    pub float_result: bool,
 }
 
 impl Frame {
     /// Stack slots the prologue pushes registers to (and the copy of the return address of a realigned frame:
     /// lea ecx, [esp+4]; and esp, -16; push [ecx-4]), as offsets from the stack pointer at the entry. They are
     /// variables of their own, the buffers below them end there.
-    pub fn saved_slots(&self, entry: u64, slot: i64) -> Vec<i64> {
+    pub fn saved_slots(&self, env: &Env, entry: u64) -> Vec<i64> {
+        let slot = env.abi.slot_size;
         let mut offset = 0;
         let mut saved = Vec::new();
 
@@ -421,12 +458,17 @@ impl Frame {
                 break;
             };
 
+            // The position independent code sets its register of the global offset table between the pushes (call
+            // __x86.get_pc_thunk.bx; add ebx, offset)
             match (insn.mnemonic.as_str(), insn.ops.as_slice()) {
                 ("push", [x86::Op::Reg(_) | x86::Op::Mem(_)]) => {
                     offset -= slot;
                     saved.push(offset);
                 }
                 ("mov", [x86::Op::Reg(_), x86::Op::Reg(_)]) | ("lea", [x86::Op::Reg(_), x86::Op::Mem(_)]) | ("and", [x86::Op::Reg(_), x86::Op::Imm(..)]) => {}
+                ("endbr32" | "endbr64", _) => {}
+                ("call", [x86::Op::Imm(target, _)]) if pc_thunk(env, *target as u64).is_some() => {}
+                ("add", [x86::Op::Reg(r), x86::Op::Imm(..)]) if r.reg != env.abi.stack_pointer => {}
                 _ => break,
             }
         }
@@ -478,10 +520,12 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
     let arch = env.program.architecture();
     let sp = env.abi.stack_pointer;
 
-    let mut frame = Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: 0, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::new() };
+    let mut frame = Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::default(), low: 0, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::default(), saves: Vec::new() };
     let mut incoming: BTreeMap<i64, (u32, bool)> = BTreeMap::new();
     let mut around: Vec<Around> = Vec::new();
     let mut writes: BTreeSet<i64> = BTreeSet::new();
+    let mut pushes: Vec<(u64, i64, Reg)> = Vec::new();
+    let mut pops: BTreeSet<(i64, Reg)> = BTreeSet::new();
 
     for block in function.blocks.values() {
         let mut insns = Vec::new();
@@ -494,9 +538,7 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
         frame.blocks.insert(block.start, insns);
     }
 
-    let mut entry = Tracker::default();
-    entry.set(sp, Some(Known::Stack(0)));
-    frame.entry_trackers.insert(function.addr, entry);
+    frame.entry_trackers = entry_trackers(env, function, &frame.blocks);
 
     for addr in reverse_post_order(function) {
         let Some(mut tracker) = frame.entry_trackers.get(&addr).cloned() else {
@@ -565,7 +607,19 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
                 }
             }
 
+            if let (Some((pushed, reg)), Some(Known::Stack(at))) = (insn.pushed_or_popped(env.abi.slot_size), tracker.get(sp)) {
+                if pushed {
+                    pushes.push((info.addr, at - env.abi.slot_size, reg));
+                } else {
+                    pops.insert((at, reg));
+                }
+            }
+
             insn.track(env.regs, &mut tracker);
+
+            if let Some(reg) = pc_thunk_call(env, info) {
+                tracker.set(reg, Some(Known::Const(info.end())));
+            }
 
             if let Some(Known::Stack(offset)) = tracker.get(sp) {
                 frame.low = frame.low.min(offset);
@@ -585,12 +639,16 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
         writes.extend(accesses.iter().filter(|a| a.2).map(|a| a.0));
     }
 
+    frame.saves = pushes.into_iter().filter(|&(_, slot, reg)| pops.contains(&(slot, reg))).collect();
+
     if env.abi.stack_results {
         frame.call_slots = call_slots(&around, &writes, env.abi.slot_size);
     }
 
     if env.abi.register_results {
         result_registers(env, function, &mut frame);
+    } else if !env.abi.stack_results {
+        float_results(env, function, &mut frame);
     }
 
     if env.abi.stack_results {
@@ -605,6 +663,59 @@ pub fn analyze_frame(env: &Env, cs: &capstone::Capstone, function: &Function) ->
     }
 
     return Ok(frame);
+}
+
+/// Rounds of the computation of the values known at the start of the blocks, each one only removes values
+const MAX_TRACKER_ROUNDS: usize = 16;
+
+/// The values known at the start of each block: the ones every path to it agrees on (a counter set before a loop
+/// changes in it), the stack pointer of the first path
+fn entry_trackers(env: &Env, function: &Function, blocks: &BTreeMap<u64, Vec<Insn>>) -> HashMap<u64, Tracker> {
+    let sp = env.abi.stack_pointer;
+    let order = reverse_post_order(function);
+    let mut entries: HashMap<u64, Tracker> = HashMap::default();
+
+    let mut entry = Tracker::default();
+    entry.set(sp, Some(Known::Stack(0)));
+    entries.insert(function.addr, entry);
+
+    for _ in 0..MAX_TRACKER_ROUNDS {
+        let mut changed = false;
+
+        for addr in order.iter() {
+            let Some(mut tracker) = entries.get(addr).cloned() else {
+                continue;
+            };
+
+            for (insn, info) in blocks[addr].iter().zip(function.blocks[addr].insns.iter()) {
+                insn.track(env.regs, &mut tracker);
+
+                if let Some(reg) = pc_thunk_call(env, info) {
+                    tracker.set(reg, Some(Known::Const(info.end())));
+                }
+            }
+
+            for edge in function.blocks[addr].succs.iter() {
+                match entries.get_mut(&edge.to) {
+                    None => {
+                        entries.insert(edge.to, tracker.clone());
+                        changed = true;
+                    }
+                    Some(known) => {
+                        let before = known.values.len();
+                        known.values.retain(|&reg, value| reg == sp || tracker.get(reg) == Some(*value));
+                        changed |= known.values.len() != before;
+                    }
+                }
+            }
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    return entries;
 }
 
 fn align(offset: i64, to: i64) -> i64 {
@@ -644,6 +755,23 @@ fn result_registers(env: &Env, function: &Function, frame: &mut Frame) {
             }
 
             frame.call_slots.entry(infos[index].addr).or_default().registers = env.abi.int_args.iter().copied().filter(|r| read.contains(r)).collect();
+        }
+    }
+}
+
+/// The calls whose floating point result is read after them (the calls of a pointer return a double the code uses)
+fn float_results(env: &Env, function: &Function, frame: &mut Frame) {
+    for (addr, insns) in frame.blocks.iter() {
+        let infos = &function.blocks[addr].insns;
+        let is_call = |i: usize| matches!(infos[i].flow, Flow::Call(_) | Flow::IndirectCall);
+
+        for index in (0..insns.len()).filter(|&i| is_call(i)) {
+            let first_access = |reg: Reg| (index + 1..insns.len()).take_while(|&i| !is_call(i)).find_map(|i| insns[i].register_access(reg));
+            let float = first_access(env.abi.float_ret) == Some(true);
+
+            if float && first_access(env.abi.int_ret) != Some(true) {
+                frame.call_slots.entry(infos[index].addr).or_default().float_result = true;
+            }
         }
     }
 }
@@ -799,7 +927,7 @@ pub fn result_used(env: &Env, cs: &capstone::Capstone, caller: &Function, call: 
     };
 
     let mut pending = vec![(first, call)];
-    let mut seen = HashSet::from([first.start]);
+    let mut seen = HashSet::from_iter([first.start]);
     let (mut returned, mut undecided) = (false, false);
 
     while let Some((block, start)) = pending.pop() {
@@ -854,10 +982,21 @@ fn result_in_block(env: &Env, cs: &capstone::Capstone, block: &BasicBlock, start
             return Seen::Use(ResultUse::Unused);
         }
 
+        // Compilers push a register they do not use to make room on the stack (push ecx): it does not read a result
+        // in a register of no convention
+        if env.abi.extra_results.contains(&reg) && decoded.is_push() {
+            continue;
+        }
+
         match decoded.register_access(reg) {
             Some(true) => return Seen::Use(ResultUse::Read),
             Some(false) => return Seen::Use(ResultUse::Unused),
             None => {}
+        }
+
+        // Written without being an operand (cpuid writes ebx, ecx and edx)
+        if matches!(&decoded, Insn::X86(x86_insn) if x86::written(x86_insn, env.regs) >> reg & 1 == 1) {
+            return Seen::Use(ResultUse::Unused);
         }
 
         if insn.flow == Flow::IndirectJump {
@@ -866,6 +1005,43 @@ fn result_in_block(env: &Env, cs: &capstone::Capstone, block: &BasicBlock, start
     }
 
     return Seen::Nothing;
+}
+
+/// The register a function returns its return address in when it does nothing else (mov ebx, [esp]; ret: the
+/// __x86.get_pc_thunk.bx of the position independent code of x86, the code adds the offset of its data to it)
+pub fn pc_thunk(env: &Env, addr: u64) -> Option<Reg> {
+    if env.program.architecture() != Architecture::X86 {
+        return None;
+    }
+
+    let function = env.analysis.functions.get(&addr)?;
+    let block = function.blocks.get(&addr).filter(|_| function.blocks.len() == 1)?;
+
+    let [mov, ret] = block.insns.as_slice() else {
+        return None;
+    };
+
+    if ret.flow != Flow::Ret {
+        return None;
+    }
+
+    let Some(Insn::X86(insn)) = env.program.read(mov.addr, mov.size as usize).and_then(|bytes| Insn::decode(Architecture::X86, env.regs, env.cs, bytes, mov.addr)) else {
+        return None;
+    };
+
+    return match (insn.mnemonic.as_str(), insn.ops.as_slice()) {
+        ("mov", [x86::Op::Reg(dst), x86::Op::Mem(m)]) if dst.bits == 32 && m.base.is_some_and(|b| b.reg == env.abi.stack_pointer) && m.index.is_none() && m.disp == 0 => Some(dst.reg),
+        _ => None,
+    };
+}
+
+/// The register a call sets to the address after it (see pc_thunk)
+fn pc_thunk_call(env: &Env, call: &crate::analysis::insn::Instruction) -> Option<Reg> {
+    let Flow::Call(target) = call.flow else {
+        return None;
+    };
+
+    return pc_thunk(env, target);
 }
 
 /// Address a register holds at a call, when the instruction that last writes it before the call computes
@@ -1049,7 +1225,8 @@ pub struct Lifter<'ctx, 'a> {
     call_slots: &'a HashMap<u64, CallSlots>,
     pub llvm: FunctionValue<'ctx>,
     pub sig: Signature,
-    regs: Vec<PointerValue<'ctx>>,
+    /// The values of the registers (and of the flags)
+    ssa: RefCell<ssa::Ssa>,
     flag_regs: FlagRegs,
     frame: PointerValue<'ctx>,
     /// Frame index of the stack pointer at the entry
@@ -1083,6 +1260,14 @@ pub struct Lifter<'ctx, 'a> {
     block_flags: HashMap<u64, BlockFlags<'ctx>>,
     /// A register holding the sign of another one, and their width (rdx after cqo: rdx:rax is rax sign extended)
     pub sign_of: Cell<Option<(Reg, Reg, u32)>>,
+    /// In a discovery, the registers outside of the convention a function saves and restores (push ebx ... pop ebx):
+    /// the address of the push, the slot and the register. The value saved is kept apart from the frame, a frame
+    /// whose address escapes keeps its slots, the value would be used and changed by the calls.
+    saves: Vec<(u64, i64, Reg)>,
+    saved: RefCell<HashMap<i64, PointerValue<'ctx>>>,
+    /// In a discovery that becomes the final function, the 64-bit registers received and the parameter of their low
+    /// half: the reads of at most 32 bits of the value received read it (see low_params)
+    lows: HashMap<Reg, (IntValue<'ctx>, IntValue<'ctx>)>,
 }
 
 struct BlockFlags<'ctx> {
@@ -1094,17 +1279,23 @@ struct BlockFlags<'ctx> {
 }
 
 /// Lifts a function into a module, with its signature or the discovery one. With the storage, the values
-/// written to the registers and the stack slots are noted with their location, returns the stack slots
-/// written.
+/// written to the registers and the stack slots are noted with their location (a discovery with them has the
+/// addresses of the instructions too, to become the final function), returns the stack slots written.
 pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function: &Function, frame: &Frame, sig: Signature, discovery: bool, storage: bool) -> Result<(FunctionValue<'ctx>, Vec<SlotWrite>)> {
-    let fn_type = function_type(cx, &sig, discovery);
+    // A discovery that becomes the final function receives the low halves of its 64-bit registers apart
+    let lows = match discovery && storage {
+        true => low_params(&sig),
+        false => Vec::new(),
+    };
+
+    let fn_type = function_type(cx, &sig, discovery, lows.len());
     let llvm = module.get_function(&sig.name).unwrap_or_else(|| module.add_function(&sig.name, fn_type, None));
 
     let builder = cx.create_builder();
     let entry = cx.append_basic_block(llvm, "entry");
 
-    // The discovery of a signature does not need the addresses
-    let debug = (!discovery).then(|| debug_info(cx, module, llvm, &sig.name));
+    // The discovery of a signature does not need the addresses, unless it becomes the final function
+    let debug = (!discovery || storage).then(|| debug_info(cx, module, llvm, &sig.name));
     builder.position_at_end(entry);
 
     let notes = match debug.as_ref() {
@@ -1118,12 +1309,15 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         builder.set_current_debug_location(debug.create_debug_location(cx, line, column, *scope, None));
     }
 
-    let regs: Vec<PointerValue> = env.regs.regs.iter().map(|r| builder.build_alloca(int_type(cx, r.bits), r.name).unwrap()).collect();
+    let types = env.regs.regs.iter().map(|r| int_type(cx, r.bits).as_type_ref()).collect();
+    let (vars, phi_notes) = register_notes(cx, env, debug.as_ref(), notes.as_ref());
+    let ssa = RefCell::new(ssa::Ssa::new(entry.as_mut_ptr(), types, vars, phi_notes));
 
     let frame_size = (frame.high - frame.low).max(1) as u32;
     let frame_ptr = builder.build_alloca(cx.i8_type().array_type(frame_size), "frame")?;
 
-    if storage {
+    // The discovery splits the frame at the slots the prologue saves registers to: what is saved there is not used
+    if storage || discovery {
         frame::set_stack_offset(frame_ptr.as_value_ref(), frame.low);
     }
 
@@ -1136,7 +1330,7 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         call_slots: &frame.call_slots,
         llvm,
         sig: sig.clone(),
-        regs,
+        ssa,
         flag_regs: FlagRegs::new(env.regs),
         frame: frame_ptr,
         frame_base: -frame.low,
@@ -1150,16 +1344,30 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         notes,
         next: function.addr,
         written: RefCell::new(BTreeMap::new()),
-        written_out: HashMap::new(),
+        written_out: HashMap::default(),
         unread_flags: RefCell::new(Vec::new()),
         dead_flags: RefCell::new(Vec::new()),
         produced_flags: Cell::new(false),
         reads_flags: Cell::new(false),
-        block_flags: HashMap::new(),
+        block_flags: HashMap::default(),
         sign_of: Cell::new(None),
+        saves: Vec::new(),
+        saved: RefCell::new(HashMap::default()),
+        lows: HashMap::default(),
     };
 
-    lifter.declare_registers();
+    if discovery {
+        lifter.saves = discovery_saves(env, frame);
+    }
+
+    for (position, &index) in lows.iter().enumerate() {
+        let (Loc::Reg(reg), Some(value), Some(low)) = (sig.params[index].loc, llvm.get_nth_param(index as u32), llvm.get_nth_param((sig.params.len() + position) as u32)) else {
+            continue;
+        };
+
+        lifter.lows.insert(reg, (value.into_int_value(), low.into_int_value()));
+    }
+
     lifter.lift_entry()?;
     lifter.note_entry(function.addr);
 
@@ -1180,14 +1388,6 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         lifter.block_flags.insert(addr, BlockFlags { produces: lifter.produced_flags.get(), reads_on_entry: lifter.reads_flags.get(), tail });
     }
 
-    lifter.drop_unread_tail_flags();
-
-    if let Some((builder, _)) = lifter.debug.as_ref() {
-        builder.finalize();
-    }
-
-    let slot_writes = lifter.notes.as_ref().map(|n| n.slot_writes.take()).unwrap_or_default();
-
     // Blocks the reverse post order did not reach (only reachable through unresolved jumps)
     for block in blocks.values() {
         if block.get_terminator().is_none() {
@@ -1196,7 +1396,50 @@ pub fn lift<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, env: &Env, function:
         }
     }
 
+    lifter.ssa.borrow_mut().finish(llvm.as_value_ref());
+    lifter.drop_unread_tail_flags();
+    lifter.read_lows()?;
+
+    if let Some((builder, _)) = lifter.debug.as_ref() {
+        builder.finalize();
+    }
+
+    let slot_writes = lifter.notes.as_ref().map(|n| n.slot_writes.take()).unwrap_or_default();
+
     return Ok((llvm, slot_writes));
+}
+
+/// The registers outside of the convention a function saves and restores, kept apart in its discovery (see
+/// Lifter::saves): a discovery that keeps some does not become the final function
+pub fn discovery_saves(env: &Env, frame: &Frame) -> Vec<(u64, i64, Reg)> {
+    let extra = |reg: Reg| env.abi.callee_saved.contains(&reg) && (env.abi.extra_params.contains(&reg) || env.abi.extra_results.contains(&reg));
+    return frame.saves.iter().copied().filter(|&(_, _, reg)| extra(reg)).collect();
+}
+
+/// The debug variables of the registers whose values are noted (the line of a variable is its location, at the start
+/// of a block), and what the notes of the phis need
+fn register_notes<'ctx>(cx: &'ctx Context, env: &Env, debug: Option<&(DebugInfoBuilder<'ctx>, DIScope<'ctx>)>, notes: Option<&Notes<'ctx>>) -> (Vec<Option<LLVMMetadataRef>>, Option<ssa::PhiNotes>) {
+    let mut vars = vec![None; env.regs.regs.len()];
+
+    let (Some((builder, scope)), Some(notes)) = (debug, notes) else {
+        return (vars, None);
+    };
+
+    for &reg in notes.tracked.iter() {
+        let Some(loc) = storage::Loc::register(reg, env.regs.regs[reg].bits, 0) else {
+            continue;
+        };
+
+        let key = loc.0 | ENTRY_NOTE;
+        let ty = notes.ty(builder, env.regs.regs[reg].bits);
+        vars[reg] = Some(builder.create_auto_variable(*scope, &format!("loc_{:x}", key), notes.file, key, ty, true, DIFlags::ZERO, 0).as_mut_ptr());
+    }
+
+    // Without an address: the marker of the block gives it
+    let location = builder.create_debug_location(cx, 0, 0, *scope, None).as_mut_ptr();
+    let expression = builder.create_expression(Vec::new()).as_mut_ptr();
+
+    return (vars, Some(ssa::PhiNotes { builder: builder.as_mut_ptr(), location, expression }));
 }
 
 impl<'ctx> Notes<'ctx> {
@@ -1218,7 +1461,7 @@ fn notes<'ctx>(env: &Env, frame: &Frame, sig: &Signature, debug: &DebugInfoBuild
     let tracked = (0..env.regs.regs.len()).filter(|&r| mask >> r & 1 == 1 && env.regs.regs[r].bits >= 8 && r != env.abi.stack_pointer).collect();
     let file = debug.create_file("binary", ".");
 
-    return Ok(Notes { file, types: RefCell::new(HashMap::new()), vars: RefCell::new(HashMap::new()), tracked, slot_writes: RefCell::new(Vec::new()) });
+    return Ok(Notes { file, types: RefCell::new(HashMap::default()), vars: RefCell::new(HashMap::default()), tracked, slot_writes: RefCell::new(Vec::new()) });
 }
 
 /// Debug information of a lifted function: a compile unit and a subprogram, the scope of the locations
@@ -1253,9 +1496,19 @@ fn debug_info<'ctx>(cx: &'ctx Context, module: &Module<'ctx>, function: Function
     return (builder, subprogram.as_debug_info_scope());
 }
 
-/// The parameters, then a pointer per result after the first (none in a discovery)
-fn function_type<'ctx>(cx: &'ctx Context, sig: &Signature, discovery: bool) -> FunctionType<'ctx> {
+/// The 64-bit registers of a discovery that becomes the final function whose low half is a parameter of its own (after
+/// the others), by position. The final function receives an int in the low half of its register: what reads it reads
+/// its parameter, the passes do not compute with the register in 64 bits (an int extended to 64 bits for an address
+/// stays an int extended); the final function gives it the parameter.
+pub fn low_params(sig: &Signature) -> Vec<usize> {
+    return sig.params.iter().enumerate().filter(|(_, p)| matches!((p.loc, p.ty), (Loc::Reg(_), LType::Int(64)))).map(|(i, _)| i).collect();
+}
+
+/// The parameters (and the low halves of the registers of a discovery, see low_params), then a pointer per result
+/// after the first (none in a discovery)
+pub(crate) fn function_type<'ctx>(cx: &'ctx Context, sig: &Signature, discovery: bool, lows: usize) -> FunctionType<'ctx> {
     let mut params: Vec<BasicMetadataTypeEnum> = sig.params.iter().map(|p| llvm_type(cx, p.ty).into()).collect();
+    params.extend((0..lows).map(|_| BasicMetadataTypeEnum::from(cx.i32_type())));
 
     if !discovery {
         params.extend(sig.outs.iter().map(|_| BasicMetadataTypeEnum::from(cx.ptr_type(AddressSpace::default()))));
@@ -1323,7 +1576,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     fn lift_entry(&mut self) -> Result<()> {
         let sp = self.env.abi.stack_pointer;
         let sp_value = self.stack_value(0)?;
-        llvm!(self.builder.build_store(self.regs[sp], sp_value));
+        self.set_value(sp, sp_value);
 
         // The registers of the runtime hold a global of it (reading them is not reading an undefined value)
         for &(reg, name) in self.env.abi.runtime.iter() {
@@ -1335,7 +1588,11 @@ impl<'ctx> Lifter<'ctx, '_> {
 
             let value = llvm!(self.builder.build_load(self.ptr_type(), global.as_pointer_value(), name)).into_pointer_value();
             let value = llvm!(self.builder.build_ptr_to_int(value, self.int(self.env.regs.regs[reg].bits), ""));
-            llvm!(self.builder.build_store(self.regs[reg], value));
+            self.set_value(reg, value);
+        }
+
+        for &reg in self.env.abi.zeroed.iter() {
+            self.set_value(reg, self.int(self.env.regs.regs[reg].bits).const_zero());
         }
 
         for (index, param) in self.sig.params.clone().iter().enumerate() {
@@ -1349,7 +1606,7 @@ impl<'ctx> Lifter<'ctx, '_> {
                 Loc::Reg(reg) => {
                     let bits = self.env.regs.regs[reg].bits;
                     let value = self.to_int(value, bits)?;
-                    llvm!(self.builder.build_store(self.regs[reg], value));
+                    self.set_value(reg, value);
                 }
                 Loc::Stack(offset) => {
                     let ptr = self.frame_ptr(offset)?;
@@ -1392,31 +1649,10 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
     }
 
-    /// The start of a machine block: the notes mem2reg makes of the phis of the registers before it are at
-    /// its address (its value is the address: identical notes would be merged)
+    /// The start of a machine block: the notes of the phis of the registers (and the ones mem2reg makes for the
+    /// split stack slots) before it are at its address (its value is the address: identical notes would be merged)
     fn note_entry(&self, addr: u64) {
         self.note(storage::Loc::NONE, self.int(64).const_int(addr, false), addr, true);
-    }
-
-    /// The tracked registers are debug variables: mem2reg notes their phis
-    fn declare_registers(&self) {
-        let (Some(notes), Some((builder, scope)), Some(block)) = (self.notes.as_ref(), self.debug.as_ref(), self.builder.get_insert_block()) else {
-            return;
-        };
-
-        let (line, column) = encode_location(self.function.addr);
-        let location = builder.create_debug_location(self.cx, line, column, *scope, None);
-
-        for &reg in notes.tracked.iter() {
-            let Some(loc) = storage::Loc::register(reg, self.env.regs.regs[reg].bits, 0) else {
-                continue;
-            };
-
-            let key = loc.0 | ENTRY_NOTE;
-            let ty = notes.ty(builder, self.env.regs.regs[reg].bits);
-            let var = builder.create_auto_variable(*scope, &format!("loc_{:x}", key), notes.file, key, ty, true, DIFlags::ZERO, 0);
-            builder.insert_declare_at_end(self.regs[reg], Some(var), None, location, block);
-        }
     }
 
     fn lift_block(&mut self, addr: u64, insns: &[Insn], blocks: &HashMap<u64, LlvmBlock<'ctx>>) -> Result<()> {
@@ -1445,7 +1681,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.locate(addr);
         self.note_entry(addr);
 
-        for insn in insns.iter() {
+        for (insn, info) in insns.iter().zip(block.insns.iter()) {
             self.addr = insn.addr();
             self.next = insn.end();
             self.locate(self.addr);
@@ -1456,6 +1692,10 @@ impl<'ctx> Lifter<'ctx, '_> {
             }
 
             insn.track(self.env.regs, &mut self.tracker);
+
+            if let Some(reg) = pc_thunk_call(self.env, info) {
+                self.tracker.set(reg, Some(Known::Const(insn.end())));
+            }
         }
 
         for instruction in std::mem::take(&mut *self.dead_flags.borrow_mut()).into_iter().rev() {
@@ -1594,19 +1834,18 @@ impl<'ctx> Lifter<'ctx, '_> {
             let sinks = [(RETURN_SINK_INT, Some(self.env.abi.int_ret)), (RETURN_SINK_FLOAT, Some(self.env.abi.float_ret)), (RETURN_SINK_HIGH, self.env.abi.int_ret_high)];
 
             for (sink, reg) in sinks.into_iter().filter_map(|(sink, reg)| Some((sink, reg?))).filter(|_| !self.env.abi.stack_results) {
-                let value = self.read(self.env.regs.full(reg))?;
-                let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
-                llvm!(self.builder.build_store(global.as_pointer_value(), value));
+                self.store_sink(sink, reg, reg != self.env.abi.float_ret)?;
             }
 
             // The argument registers after the first one, results with the ABIs that return several in them
             if self.env.abi.register_results {
                 for (position, &reg) in self.env.abi.int_args.iter().enumerate().skip(1).take(RETURN_SINK_REGS.len()) {
-                    let value = self.read(self.env.regs.full(reg))?;
-                    let sink = RETURN_SINK_REGS[position];
-                    let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
-                    llvm!(self.builder.build_store(global.as_pointer_value(), value));
+                    self.store_sink(RETURN_SINK_REGS[position], reg, true)?;
                 }
+            }
+
+            for (&reg, sink) in self.env.abi.extra_results.iter().zip(RETURN_SINK_EXTRA) {
+                self.store_sink(sink, reg, true)?;
             }
 
             // The candidate results in stack slots, each to a sink of its own
@@ -1658,6 +1897,64 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(());
     }
 
+    /// Stores a register to its return sink in a discovery, and its low 32 bits to the low sink in one that becomes the
+    /// final function (see RETURN_SINK_LOW)
+    fn store_sink(&self, sink: &str, reg: Reg, int: bool) -> Result<()> {
+        let value = self.read(self.env.regs.full(reg))?;
+        let global = self.module.get_global(sink).unwrap_or_else(|| self.module.add_global(value.get_type(), None, sink));
+        llvm!(self.builder.build_store(global.as_pointer_value(), value));
+
+        if int && self.notes.is_some() && value.get_type().get_bit_width() == 2 * RETURN_SINK_LOW_BITS {
+            let low = llvm!(self.builder.build_int_truncate(value, self.int(RETURN_SINK_LOW_BITS), ""));
+            let name = format!("{}{}", sink, RETURN_SINK_LOW);
+            let global = self.module.get_global(&name).unwrap_or_else(|| self.module.add_global(low.get_type(), None, &name));
+            llvm!(self.builder.build_store(global.as_pointer_value(), low));
+        }
+
+        return Ok(());
+    }
+
+    /// The reads of at most the low 32 bits of the 64-bit registers received read the parameter of their low half (the
+    /// values of the registers are known once every block is lifted)
+    fn read_lows(&self) -> Result<()> {
+        use inkwell::llvm_sys::core::{LLVMGetFirstUse, LLVMGetIntTypeWidth, LLVMGetNextUse, LLVMGetUser, LLVMInstructionEraseFromParent, LLVMIsATruncInst, LLVMReplaceAllUsesWith, LLVMTypeOf};
+
+        for &(received, low) in self.lows.values() {
+            let mut reads = Vec::new();
+
+            unsafe {
+                let mut used = LLVMGetFirstUse(received.as_value_ref());
+
+                while !used.is_null() {
+                    let user = LLVMGetUser(used);
+
+                    if !LLVMIsATruncInst(user).is_null() && LLVMGetIntTypeWidth(LLVMTypeOf(user)) <= 32 {
+                        reads.push(user);
+                    }
+
+                    used = LLVMGetNextUse(used);
+                }
+            }
+
+            for read in reads {
+                unsafe {
+                    let bits = LLVMGetIntTypeWidth(LLVMTypeOf(read));
+                    self.builder.position_before(&InstructionValue::new(read));
+                    let value = self.resize(low, bits, false)?;
+
+                    if let Some(instruction) = value.as_instruction() {
+                        instruction.set_debug_location(InstructionValue::new(read).get_debug_location());
+                    }
+
+                    LLVMReplaceAllUsesWith(read, value.as_value_ref());
+                    LLVMInstructionEraseFromParent(read);
+                }
+            }
+        }
+
+        return Ok(());
+    }
+
     /// The return register and the register of its high half as one integer (rdx:rax)
     fn pair(&self, high: Reg) -> Result<IntValue<'ctx>> {
         let low = self.read_reg(self.env.abi.int_ret)?;
@@ -1674,6 +1971,44 @@ impl<'ctx> Lifter<'ctx, '_> {
      * Registers
      */
 
+    /// The variable a push saving a register keeps the value in (see saves)
+    pub fn saved_value(&self, reg: Reg) -> Result<Option<PointerValue<'ctx>>> {
+        let Some(Known::Stack(sp)) = self.tracker.get(self.env.abi.stack_pointer) else {
+            return Ok(None);
+        };
+
+        let slot = sp - self.env.abi.slot_size;
+
+        if !self.saves.iter().any(|&(addr, at, saved)| addr == self.addr && at == slot && saved == reg) {
+            return Ok(None);
+        }
+
+        return self.save_slot(slot).map(Some);
+    }
+
+    /// The variable a pop restoring a register reads (see saves)
+    pub fn restored_value(&self, reg: Reg) -> Result<Option<PointerValue<'ctx>>> {
+        let Some(Known::Stack(slot)) = self.tracker.get(self.env.abi.stack_pointer) else {
+            return Ok(None);
+        };
+
+        if !self.saves.iter().any(|&(_, at, saved)| at == slot && saved == reg) {
+            return Ok(None);
+        }
+
+        return self.save_slot(slot).map(Some);
+    }
+
+    fn save_slot(&self, slot: i64) -> Result<PointerValue<'ctx>> {
+        if let Some(&pointer) = self.saved.borrow().get(&slot) {
+            return Ok(pointer);
+        }
+
+        let pointer = self.entry_alloca(self.int(self.env.abi.slot_size as u32 * 8).into())?;
+        self.saved.borrow_mut().insert(slot, pointer);
+        return Ok(pointer);
+    }
+
     /// Reads a register view (al is the low 8 bits of rax), a value read is no longer a call argument candidate
     pub fn read(&self, r: RegRef) -> Result<IntValue<'ctx>> {
         self.written.borrow_mut().remove(&r.reg);
@@ -1682,7 +2017,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     fn load_reg(&self, r: RegRef) -> Result<IntValue<'ctx>> {
         let full_bits = self.env.regs.regs[r.reg].bits;
-        let mut value = llvm!(self.builder.build_load(self.int(full_bits), self.regs[r.reg], "")).into_int_value();
+        let mut value = self.value(r.reg)?;
 
         if r.offset > 0 {
             value = llvm!(self.builder.build_right_shift(value, self.constant(full_bits, r.offset as u64), false, ""));
@@ -1705,7 +2040,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.note_register(r, value);
 
         if r.bits == full_bits {
-            llvm!(self.builder.build_store(self.regs[r.reg], value));
+            self.set_value(r.reg, value);
             return Ok(());
         }
 
@@ -1721,7 +2056,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         let merged = llvm!(self.builder.build_or(kept, wide, ""));
-        llvm!(self.builder.build_store(self.regs[r.reg], merged));
+        self.set_value(r.reg, merged);
 
         return Ok(());
     }
@@ -1734,8 +2069,21 @@ impl<'ctx> Lifter<'ctx, '_> {
         self.note_register(RegRef { bits: value.get_type().get_bit_width(), ..r }, value);
 
         let value = self.resize(value, full_bits, false)?;
-        llvm!(self.builder.build_store(self.regs[r.reg], value));
+        self.set_value(r.reg, value);
         return Ok(());
+    }
+
+    /// The value of a full register in the current block
+    fn value(&self, reg: Reg) -> Result<IntValue<'ctx>> {
+        let block = self.builder.get_insert_block().context("no current block")?;
+        let value = self.ssa.borrow_mut().read(block.as_mut_ptr(), reg);
+        return Ok(unsafe { IntValue::new(value) });
+    }
+
+    fn set_value(&self, reg: Reg, value: IntValue<'ctx>) {
+        if let Some(block) = self.builder.get_insert_block() {
+            self.ssa.borrow_mut().write(block.as_mut_ptr(), reg, value.as_value_ref());
+        }
     }
 
     fn forget_sign(&self, reg: Reg) {
@@ -1851,7 +2199,8 @@ impl<'ctx> Lifter<'ctx, '_> {
 
     /// Constant last stored at [sp + delta] in the current block (an argument written before a call)
     /// Text of the constant string whose address was stored at [sp + delta]: a number, or the address of a string
-    /// global (lea of an absolute address), directly or through the register it was computed in
+    /// global (lea of an absolute address), directly or through the registers it was computed in (their values are
+    /// what was written to them)
     fn stored_text(&self, delta: i64) -> Option<String> {
         let mut value = self.stored_value(delta)?.as_value_ref();
 
@@ -1884,20 +2233,6 @@ impl<'ctx> Lifter<'ctx, '_> {
                     LLVMGetOperand(value, 0)
                 } else if !LLVMIsAInstruction(value).is_null() && cast(LLVMGetInstructionOpcode(value)) {
                     LLVMGetOperand(value, 0)
-                } else if !LLVMIsALoadInst(value).is_null() {
-                    // A register: the value last written to it before
-                    let register = LLVMGetOperand(value, 0);
-                    let mut previous = LLVMGetPreviousInstruction(value);
-
-                    while !previous.is_null() && (LLVMIsAStoreInst(previous).is_null() || LLVMGetOperand(previous, 1) != register) {
-                        previous = LLVMGetPreviousInstruction(previous);
-                    }
-
-                    if previous.is_null() || !self.regs.iter().any(|r| r.as_value_ref() == register) {
-                        return None;
-                    }
-
-                    LLVMGetOperand(previous, 0)
                 } else {
                     return None;
                 };
@@ -2057,7 +2392,10 @@ impl<'ctx> Lifter<'ctx, '_> {
             return Ok(self.declare(&sig).as_global_value().as_pointer_value());
         }
 
-        let Some(region) = program.region_at(addr) else {
+        // The address of code inside a function (a label: the base a jump table adds its entries to) is a number
+        let label = |region: &Region| region.perms.exec && self.env.analysis.function_containing(addr).is_some();
+
+        let Some(region) = program.region_at(addr).filter(|r| !label(r)) else {
             let value = self.constant(self.pointer_bits(), addr);
             return Ok(llvm!(self.builder.build_int_to_ptr(value, self.ptr_type(), "")));
         };
@@ -2211,7 +2549,7 @@ impl<'ctx> Lifter<'ctx, '_> {
     /// Declares a function of the module with a signature
     pub fn declare(&self, sig: &Signature) -> FunctionValue<'ctx> {
         return self.module.get_function(&sig.name).unwrap_or_else(|| {
-            let function = self.module.add_function(&sig.name, function_type(self.cx, sig, false), Some(Linkage::External));
+            let function = self.module.add_function(&sig.name, function_type(self.cx, sig, false, 0), Some(Linkage::External));
 
             for (param, value) in sig.params.iter().zip(function.get_param_iter()) {
                 if let Some(name) = &param.name {
@@ -2244,12 +2582,27 @@ impl<'ctx> Lifter<'ctx, '_> {
         return Ok(call.try_as_basic_value().basic());
     }
 
+    /// The pointer of Control Flow Guard a call at an address goes through (see GUARD_CHECK and GUARD_DISPATCH)
+    pub fn guard_call(&self, addr: u64) -> Option<&'static str> {
+        let block = self.function.blocks.range(..=addr).next_back().map(|(_, b)| b)?;
+        let insn = block.insns.iter().find(|i| i.addr == addr)?;
+        let name = self.env.program.import_slots.get(&insn.mem_ref?)?;
+
+        return [GUARD_CHECK, GUARD_DISPATCH].into_iter().find(|g| g == name);
+    }
+
     /// Calls a function: the arguments are read where its signature puts them, the result is written back.
     /// A tail call (a jump) passes the arguments above the return address of the function.
     pub fn call(&mut self, target: &CallTarget, indirect: Option<IntValue<'ctx>>, tail: bool) -> Result<()> {
         let language = self.env.language;
 
         if let (CallTarget::Function(addr), false) = (target, tail) {
+            if let Some(reg) = pc_thunk(self.env, *addr) {
+                let bits = self.env.regs.regs[reg].bits;
+                self.write_reg(reg, self.constant(bits, self.next))?;
+                return Ok(());
+            }
+
             if let Some(intrinsic) = language.intrinsic(self.env, *addr) {
                 return self.intrinsic(intrinsic);
             }
@@ -2260,6 +2613,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         let sig = match self.call_slots.get(&self.addr) {
             Some(slots) if sig.guessed && !tail && self.env.abi.stack_results => self.slots_signature(sig, slots),
             Some(slots) if sig.guessed && !tail && self.env.abi.register_results => self.registers_signature(sig, slots),
+            Some(slots) if sig.guessed && !tail && slots.float_result => Signature { ret: Some(Value { loc: Loc::Reg(self.env.abi.float_ret), ty: LType::Float(64), name: None }), ..sig },
             _ => sig,
         };
 
@@ -2300,11 +2654,11 @@ impl<'ctx> Lifter<'ctx, '_> {
             (CallTarget::Indirect, Some(pointer)) => {
                 let pointer = self.resize(pointer, self.pointer_bits(), false)?;
                 let pointer = llvm!(self.builder.build_int_to_ptr(pointer, self.ptr_type(), ""));
-                llvm!(self.builder.build_indirect_call(function_type(self.cx, &sig, false), pointer, &args, ""))
+                llvm!(self.builder.build_indirect_call(function_type(self.cx, &sig, false, 0), pointer, &args, ""))
             }
             _ => {
                 let function = self.declare(&sig);
-                let fn_type = function_type(self.cx, &sig, false);
+                let fn_type = function_type(self.cx, &sig, false, 0);
 
                 // Overloads (C++) share their C name, the first one declared it with its own type
                 if function.get_type() == fn_type {
@@ -2324,7 +2678,7 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         for (reg, info) in self.env.regs.regs.iter().enumerate() {
             if sig.clobbers >> reg & 1 == 1 && reg != self.env.abi.stack_pointer && Some(reg) != result && !self.env.abi.callee_saved.contains(&reg) {
-                llvm!(self.builder.build_store(self.regs[reg], self.int(info.bits).get_undef()));
+                self.set_value(reg, self.int(info.bits).get_undef());
             }
         }
 
@@ -2490,10 +2844,10 @@ impl<'ctx> Lifter<'ctx, '_> {
             FlagOp::Logic | FlagOp::Float => (self.int(1).const_zero(), self.int(1).const_zero()),
         };
 
-        llvm!(self.builder.build_store(self.regs[flags.zero], zf));
-        llvm!(self.builder.build_store(self.regs[flags.sign], sf));
-        llvm!(self.builder.build_store(self.regs[flags.carry], cf));
-        llvm!(self.builder.build_store(self.regs[flags.overflow], of));
+        self.set_value(flags.zero, zf);
+        self.set_value(flags.sign, sf);
+        self.set_value(flags.carry, cf);
+        self.set_value(flags.overflow, of);
 
         if let Some(pf) = flags.parity {
             let low = self.resize(result, 8.min(bits), false)?;
@@ -2501,7 +2855,7 @@ impl<'ctx> Lifter<'ctx, '_> {
             let count = self.call_intrinsic("llvm.ctpop.i8", &[low.into()], Some(self.int(8).into()))?.unwrap().into_int_value();
             let odd = llvm!(self.builder.build_and(count, self.constant(8, 1), ""));
             let parity = llvm!(self.builder.build_int_compare(IntPredicate::EQ, odd, self.constant(8, 0), "pf"));
-            llvm!(self.builder.build_store(self.regs[pf], parity));
+            self.set_value(pf, parity);
         }
 
         self.flags = Some(FlagProducer { op, lhs: lhs.into(), rhs: rhs.into(), result: Some(result) });
@@ -2593,13 +2947,13 @@ impl<'ctx> Lifter<'ctx, '_> {
 
         let sf = if flags.carry_is_borrow { self.int(1).const_zero() } else { compare(FloatPredicate::OLT, "n")? };
 
-        llvm!(self.builder.build_store(self.regs[flags.zero], zf));
-        llvm!(self.builder.build_store(self.regs[flags.sign], sf));
-        llvm!(self.builder.build_store(self.regs[flags.carry], cf));
-        llvm!(self.builder.build_store(self.regs[flags.overflow], of));
+        self.set_value(flags.zero, zf);
+        self.set_value(flags.sign, sf);
+        self.set_value(flags.carry, cf);
+        self.set_value(flags.overflow, of);
 
         if let Some(pf) = flags.parity {
-            llvm!(self.builder.build_store(self.regs[pf], compare(FloatPredicate::UNO, "pf")?));
+            self.set_value(pf, compare(FloatPredicate::UNO, "pf")?);
         }
 
         self.flags = Some(FlagProducer { op: FlagOp::Float, lhs: lhs.into(), rhs: rhs.into(), result: None });
@@ -2628,7 +2982,7 @@ impl<'ctx> Lifter<'ctx, '_> {
         }
 
         let flags = self.flag_regs;
-        let read = |reg| self.builder.build_load(self.int(1), self.regs[reg], "").map(|v| v.into_int_value()).map_err(anyhow::Error::from);
+        let read = |reg| self.value(reg);
         let not = |v| self.builder.build_not(v, "").map_err(anyhow::Error::from);
         let or = |a, b| self.builder.build_or(a, b, "").map_err(anyhow::Error::from);
         let and = |a, b| self.builder.build_and(a, b, "").map_err(anyhow::Error::from);
@@ -2774,7 +3128,7 @@ mod tests {
     }
 
     fn empty_frame() -> Frame {
-        return Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::new(), low: -0x40, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::new() };
+        return Frame { blocks: BTreeMap::new(), entry_trackers: HashMap::default(), low: -0x40, high: 0, stack_params: BTreeSet::new(), stack_results: BTreeMap::new(), call_slots: HashMap::default(), saves: Vec::new() };
     }
 
     #[test]

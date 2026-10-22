@@ -11,3 +11,4 @@ void exit(int status) { for (;;) {} }
 void *memset(void *s, int c, __SIZE_TYPE__ n) { return s; }
 char *fgets(char *s, int n, void *stream) { return s; }
 void *stdin;
+void *malloc(__SIZE_TYPE__ size) { return 0; }

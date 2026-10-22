@@ -1982,6 +1982,9 @@ pub struct PE {
     pub hint_name_table: Option<HintNameTable>,
     pub debug_directory: Option<DebugDirectory>,
     pub exception_table: Option<ExceptionTable>,
+    pub delay_imports: Vec<crate::pe_directories::DelayImport>,
+    pub tls: Option<crate::pe_directories::TlsDirectory>,
+    pub load_config: Option<crate::pe_directories::LoadConfig>,
 }
 
 impl PE {
@@ -2365,6 +2368,10 @@ pub fn parse_pe(file_path: &PathBuf) -> Result<PE> {
     pe.parse_export_data(&mut reader)?;
     pe.parse_debug_directory(&mut reader)?;
     pe.parse_exception_table(&mut reader)?;
+
+    pe.delay_imports = crate::pe_directories::delay_imports(&pe);
+    pe.tls = crate::pe_directories::tls_directory(&pe);
+    pe.load_config = crate::pe_directories::load_config(&pe);
 
     return Ok(pe);
 }

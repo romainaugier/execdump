@@ -6,7 +6,7 @@
 use super::ast::{mark_used, CFunction, Expr, Stmt, StmtKind, VarId};
 use super::Context;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 /// Names of the results of well known functions
 const RESULTS: &[(&str, &str)] = &[
@@ -138,7 +138,7 @@ fn generated(name: &str) -> bool {
 
 pub fn name(function: &mut CFunction, ctx: &Context) {
     let pointers = function.vars.iter().enumerate().filter(|(_, v)| super::typing::is_pointer(&v.ty)).map(|(i, _)| i).collect();
-    let mut hints = Hints { names: HashMap::new(), loop_depth: 0, pointers };
+    let mut hints = Hints { names: HashMap::default(), loop_depth: 0, pointers };
     hints.stmts(&function.body, ctx);
 
     // The names of the program (functions and globals) are looked up in place, they are too many to copy

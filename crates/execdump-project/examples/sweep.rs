@@ -14,6 +14,7 @@
  * SWEEP_SOURCE=file.c keeps the source given to it).
  * SWEEP_REPORT=file.tsv writes the counts of every function, SWEEP_BASELINE=file.tsv compares them with
  * the ones of an earlier report: the totals that changed and the functions that got worse.
+ * SWEEP_TEXT=file.c writes the C of every function, by binary and address (two of them diff the changes).
  */
 
 use anyhow::{anyhow, Context, Result};
@@ -50,6 +51,7 @@ struct Measured {
     name: String,
     quality: Quality,
     compiles: Option<bool>,
+    text: Option<String>,
 }
 
 #[derive(Default)]
@@ -100,11 +102,12 @@ fn main() {
         (Some(_), None) => Some("cc".to_string()),
         _ => None,
     };
+    let keep_text = std::env::var_os("SWEEP_TEXT").is_some();
     let mut total_report = Report::default();
 
     for path in paths.iter() {
         let start = Instant::now();
-        let report = match crash::catch(|| sweep(path, workers, compiler.as_deref())) {
+        let report = match crash::catch(|| sweep(path, workers, compiler.as_deref(), keep_text)) {
             Ok(Ok(report)) => report,
             Ok(Err(error)) => {
                 println!("{}: {:#}", path.display(), error);
@@ -155,6 +158,12 @@ fn main() {
         }
     }
 
+    if let Some(output) = std::env::var_os("SWEEP_TEXT") {
+        if let Err(error) = std::fs::write(&output, write_text(&mut total_report.measured)) {
+            println!("{}: {}", output.to_string_lossy(), error);
+        }
+    }
+
     if let Ok(output) = std::env::var("SWEEP_REPORT") {
         if let Err(error) = std::fs::write(&output, write_report(&total_report.measured)) {
             println!("{}: {}", output, error);
@@ -162,7 +171,7 @@ fn main() {
     }
 }
 
-fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Report> {
+fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>, keep_text: bool) -> Result<Report> {
     let exec = match guess_exectype(path)? {
         ExecType::PE => Exec::PE(parse_pe(path)?),
         ExecType::ELF => Exec::ELF(parse_elf(path)?),
@@ -216,7 +225,8 @@ fn sweep(path: &PathBuf, workers: usize, compiler: Option<&str>) -> Result<Repor
 
                         match result {
                             Ok(Ok((rendered, quality, globals))) => {
-                                report.measured.push(Measured { binary: binary.clone(), addr, name: name.clone(), quality, compiles: None });
+                                let text = keep_text.then(|| rendered.text.clone());
+                                report.measured.push(Measured { binary: binary.clone(), addr, name: name.clone(), quality, compiles: None, text });
 
                                 if compiler.is_some() {
                                     texts.lock().unwrap().push((report.measured.len() - 1, rendered, globals));
@@ -415,6 +425,17 @@ fn write_report(measured: &[Measured]) -> String {
     return out;
 }
 
+fn write_text(measured: &mut [Measured]) -> String {
+    measured.sort_by(|a, b| (a.binary.as_str(), a.addr).cmp(&(b.binary.as_str(), b.addr)));
+    let mut out = String::new();
+
+    for m in measured.iter() {
+        out.push_str(&format!("// {} {:#x} {}\n{}\n\n", m.binary, m.addr, m.name, m.text.as_deref().unwrap_or("")));
+    }
+
+    return out;
+}
+
 fn read_report(text: &str) -> Vec<Measured> {
     let mut measured = Vec::new();
 
@@ -440,7 +461,7 @@ fn read_report(text: &str) -> Vec<Measured> {
             _ => None,
         };
 
-        measured.push(Measured { binary: binary.to_string(), addr, name: name.to_string(), quality, compiles });
+        measured.push(Measured { binary: binary.to_string(), addr, name: name.to_string(), quality, compiles, text: None });
     }
 
     return measured;

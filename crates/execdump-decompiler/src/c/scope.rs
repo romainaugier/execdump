@@ -7,7 +7,7 @@
 
 use super::ast::{CFunction, Expr, Stmt, StmtKind, VarId};
 
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap as HashMap};
 
 /// Identity of a statement list: its address while the function is borrowed
 pub type ListId = usize;
@@ -155,11 +155,11 @@ fn exposed(stmts: &[Stmt], var: VarId, mut written: bool) -> (bool, bool) {
 /// The local variables to declare at the start of each list (the body of the function holds the ones
 /// that cannot go deeper)
 pub fn declarations(function: &CFunction, locals: &[VarId]) -> HashMap<ListId, Vec<VarId>> {
-    let mut walk = Walk { common: HashMap::new(), lists: HashMap::new(), path: Vec::new() };
+    let mut walk = Walk { common: HashMap::default(), lists: HashMap::default(), path: Vec::new() };
     walk.list(&function.body);
 
     let body = list_id(&function.body);
-    let mut declared: HashMap<ListId, Vec<VarId>> = HashMap::new();
+    let mut declared: HashMap<ListId, Vec<VarId>> = HashMap::default();
 
     for &var in locals {
         let mut path = walk.common.get(&var).cloned().unwrap_or_default();

@@ -24,7 +24,7 @@ use anyhow::{bail, Context, Result};
 
 use serde::Deserialize;
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 const SYSTEM: &str = "You are a reverse engineer improving the output of a decompiler. You are given the C code of one \
 function, decompiled from a binary. Suggest a descriptive name for the function and for its parameters and local variables \

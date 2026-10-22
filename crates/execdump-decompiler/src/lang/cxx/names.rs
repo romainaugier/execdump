@@ -7,7 +7,7 @@ use crate::types::{CType, DataModel, FuncType, Param, Prototype};
 
 use execdump_core::demangle::symbol::{Builtin, Member, Name, NamePart, Structor, Symbol, SymbolKind, TemplateArg, Type};
 
-use std::collections::HashSet;
+use rustc_hash::{FxHashSet as HashSet};
 
 /// Inline namespaces of the standard libraries, dropped from the identifiers
 const INLINE_NAMESPACES: &[&str] = &["__1", "__cxx11", "__ndk1"];
@@ -172,7 +172,7 @@ pub fn identifier(name: &Name) -> String {
 
 /// Classes seen in the symbols of a program: types of parameters, vtables, typeinfos and method scopes
 pub fn known_classes<'a>(symbols: impl Iterator<Item = &'a Symbol>) -> HashSet<String> {
-    let mut classes = HashSet::new();
+    let mut classes = HashSet::default();
 
     fn collect_type(ty: &Type, classes: &mut HashSet<String>) {
         match ty {
