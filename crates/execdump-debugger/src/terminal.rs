@@ -27,7 +27,7 @@ impl Terminal {
         let (mut master, mut slave) = (-1, -1);
 
         // SAFETY: openpty writes two descriptors, the name, termios and window size are not asked for
-        let status = unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null(), std::ptr::null()) };
+        let status = unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
 
         if status != 0 {
             bail!("cannot open a pseudo-terminal: {}", std::io::Error::last_os_error());
