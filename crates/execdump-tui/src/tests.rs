@@ -150,6 +150,7 @@ fn navigate_views() {
 }
 
 #[test]
+#[cfg(all(target_family="unix", target_arch="x86_64"))]
 fn imports_open_in_their_library() {
     // ls calls getenv, exported by the C library
     let path = PathBuf::from("/bin/ls");
