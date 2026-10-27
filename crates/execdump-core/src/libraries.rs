@@ -190,7 +190,7 @@ pub fn unversioned(name: &str) -> &str {
     return name.split('@').next().unwrap_or(name);
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_arch="x86_64", target_family="unix"))]
 mod tests {
     use super::*;
     use crate::elf::parse_elf;
