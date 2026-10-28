@@ -2,9 +2,11 @@
 #
 # Fetch static LLVM 18 libraries for execdump.
 #
-#   linux-x86_64, linux-arm64, macos-arm64, windows-x86_64   prebuilt release tarballs (any host)
-#   macos-x86_64                                             built from source (macOS host)
-#   windows-arm64                                            built from source (Windows host, MSVC arm64 env)
+#   linux-x86_64, linux-arm64, macos-arm64   prebuilt release tarballs (any host)
+#   macos-x86_64                             built from source (macOS host)
+#   windows-x86_64, windows-arm64            built from source (Windows host, MSVC x64/arm64 env)
+#
+#   The Windows release tarball cannot be linked by llvm-sys: llvm-config asks for libxml2s.lib, which is not shipped.
 #
 #   For linux: install libtinfo.5 (dnf install ncurses-compat-libs)
 #
@@ -16,14 +18,14 @@
 #
 # Environment:
 #   LLVM_VERSION            default 18.1.8
-#   LLVM_TARGETS            backends for source builds (default: all, same as the release tarballs)
-#   LLVM_MSVC_RUNTIME       CMAKE_MSVC_RUNTIME_LIBRARY for windows-arm64 (default: MultiThreadedDLL, /MD like the x64 release)
-#   LLVM_NATIVE_TOOL_DIR    dir with host llvm-tblgen etc. when cross-compiling windows-arm64 from x64
+#   LLVM_TARGETS            backends for source builds (default: X86;AArch64, the ones execdump initializes)
+#   LLVM_MSVC_RUNTIME       CMAKE_MSVC_RUNTIME_LIBRARY for windows targets (default: MultiThreadedDLL, /MD like rustc)
+#   LLVM_NATIVE_TOOL_DIR    dir with host llvm-tblgen etc. when cross-compiling a windows target
 
 set -euo pipefail
 
 LLVM_VERSION="${LLVM_VERSION:-18.1.8}"
-LLVM_TARGETS="${LLVM_TARGETS:-all}"
+LLVM_TARGETS="${LLVM_TARGETS:-X86;AArch64}"
 LLVM_MSVC_RUNTIME="${LLVM_MSVC_RUNTIME:-MultiThreadedDLL}"
 RELEASE_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}"
 
@@ -37,7 +39,7 @@ die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
 usage() {
-    sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -81,7 +83,6 @@ prebuilt_archive() {
         linux-x86_64)   echo "clang+llvm-${LLVM_VERSION}-x86_64-linux-gnu-ubuntu-18.04.tar.xz" ;;
         linux-arm64)    echo "clang+llvm-${LLVM_VERSION}-aarch64-linux-gnu.tar.xz" ;;
         macos-arm64)    echo "clang+llvm-${LLVM_VERSION}-arm64-apple-macos11.tar.xz" ;;
-        windows-x86_64) echo "clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz" ;;
         *) echo "" ;;
     esac
 }
@@ -102,11 +103,8 @@ extract_libs() {
     local target="$1" archive="$2" dst="$3" root
     root="$(basename "$archive" .tar.xz)"
 
-    local members=("$root/include/llvm" "$root/include/llvm-c" "$root/lib/cmake/llvm")
-    case "$target" in
-        windows-*) members+=("$root/lib/LLVM[A-Z]*.lib" "$root/lib/Polly*.lib" "$root/bin/llvm-config.exe") ;;
-        *)         members+=("$root/lib/libLLVM*.a" "$root/lib/libPolly*.a" "$root/bin/llvm-config") ;;
-    esac
+    local members=("$root/include/llvm" "$root/include/llvm-c" "$root/lib/cmake/llvm"
+                   "$root/lib/libLLVM*.a" "$root/lib/libPolly*.a" "$root/bin/llvm-config")
 
     local wildcards=()
     tar --version 2>/dev/null | grep -q 'GNU tar' && wildcards=(--wildcards)
@@ -215,29 +213,35 @@ build_macos_x86_64() {
         -DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-apple-darwin
 }
 
-build_windows_arm64() {
-    [[ "$(host_os)" == windows ]] || die "windows-arm64 has no official static build and must be built on a Windows host"
-    command -v cl >/dev/null || die "cl.exe not found, run from a VS Developer shell (vcvarsall arm64 or x64_arm64)"
-    [[ "${VSCMD_ARG_TGT_ARCH:-}" == arm64 ]] || die "MSVC environment targets '${VSCMD_ARG_TGT_ARCH:-?}', expected arm64"
+build_windows() {
+    local target="$1" arch processor triple
+    case "$target" in
+        windows-x86_64) arch=x64;   processor=AMD64; triple=x86_64-pc-windows-msvc ;;
+        windows-arm64)  arch=arm64; processor=ARM64; triple=aarch64-pc-windows-msvc ;;
+    esac
+
+    [[ "$(host_os)" == windows ]] || die "$target has no linkable static build and must be built on a Windows host"
+    command -v cl >/dev/null || die "cl.exe not found, run from a VS Developer shell (vcvarsall $arch)"
+    [[ "${VSCMD_ARG_TGT_ARCH:-}" == "$arch" ]] || die "MSVC environment targets '${VSCMD_ARG_TGT_ARCH:-?}', expected $arch"
 
     local cross=()
-    if [[ "${VSCMD_ARG_HOST_ARCH:-arm64}" != arm64 ]]; then
+    if [[ "${VSCMD_ARG_HOST_ARCH:-$arch}" != "$arch" ]]; then
         [[ -n "${LLVM_NATIVE_TOOL_DIR:-}" ]] \
-            || die "cross-compiling from ${VSCMD_ARG_HOST_ARCH}: set LLVM_NATIVE_TOOL_DIR to a dir with host llvm-tblgen.exe, or build on an arm64 machine"
+            || die "cross-compiling from ${VSCMD_ARG_HOST_ARCH}: set LLVM_NATIVE_TOOL_DIR to a dir with host llvm-tblgen.exe, or build on a $arch machine"
         cross=(
             -DCMAKE_SYSTEM_NAME=Windows
-            -DCMAKE_SYSTEM_PROCESSOR=ARM64
+            -DCMAKE_SYSTEM_PROCESSOR="$processor"
             -DLLVM_NATIVE_TOOL_DIR="$(native_path "$LLVM_NATIVE_TOOL_DIR")"
         )
     fi
 
-    build_from_source windows-arm64 \
+    build_from_source "$target" \
         -DCMAKE_C_COMPILER=cl \
         -DCMAKE_CXX_COMPILER=cl \
         -DCMAKE_MSVC_RUNTIME_LIBRARY="$LLVM_MSVC_RUNTIME" \
         -DLLVM_ENABLE_DIA_SDK=OFF \
-        -DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc \
-        -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-pc-windows-msvc \
+        -DLLVM_HOST_TRIPLE="$triple" \
+        -DLLVM_DEFAULT_TARGET_TRIPLE="$triple" \
         ${cross[@]+"${cross[@]}"}
 }
 
@@ -249,9 +253,9 @@ fetch_target() {
     fi
     log "$target"
     case "$target" in
-        macos-x86_64)  build_macos_x86_64 ;;
-        windows-arm64) build_windows_arm64 ;;
-        *)             fetch_prebuilt "$target" ;;
+        macos-x86_64) build_macos_x86_64 ;;
+        windows-*)    build_windows "$target" ;;
+        *)            fetch_prebuilt "$target" ;;
     esac
     touch "$OUT_DIR/$target/.llvm-$LLVM_VERSION"
 }
