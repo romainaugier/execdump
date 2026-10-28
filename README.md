@@ -14,9 +14,11 @@ The decompiler lifts the code to LLVM IR and links LLVM 18 statically: building 
 
 - Debian/Ubuntu: `apt install llvm-18-dev libpolly-18-dev libzstd-dev zlib1g-dev`
 - macOS: `brew install llvm@18 zstd`, then `export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)`
-- Windows: a static LLVM build such as [llvm-package-windows](https://github.com/vovkos/llvm-package-windows), then set `LLVM_SYS_181_PREFIX`
+- Windows: build it with `get_llvm.sh` (see below) from Git Bash started in a VS developer environment (`vcvarsall x64` or `vcvarsall arm64`), with `cmake` and `ninja` on the `PATH`. No prebuilt package links: [llvm-package-windows](https://github.com/vovkos/llvm-package-windows) has no AArch64 backend and no arm64 build, and the official release asks for a `libxml2s.lib` it does not ship
 
-If you don't want to use a package manager and instead install only what is needed, you can use the `get_llvm.sh` script, and then set `LLVM_SYS_181_PREFIX` to `/third_party/llvm/\<os\>_\<arch\>` (where the necessary llvm components have been installed).
+If you don't want to use a package manager and instead install only what is needed, you can use the `get_llvm.sh` script, and then set `LLVM_SYS_181_PREFIX` to `third_party/llvm/<os>-<arch>` (where the necessary llvm components have been installed). Linux and macOS arm64 use the release tarballs, macOS x86_64 and Windows are built from source with the X86 and AArch64 backends only.
+
+The CI builds the Windows LLVM once per target with `get_llvm.sh` and keeps it in the Actions cache (`.github/actions/llvm-windows`), keyed on the target and `get_llvm.sh`: changing the script rebuilds it (about an hour on the runners).
 
 ```
 cargo build --release

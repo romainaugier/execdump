@@ -1,0 +1,39 @@
+name: LLVM 18 (Windows)
+description: Static LLVM 18 built from source by get_llvm.sh, cached per target, exported as LLVM_SYS_181_PREFIX
+
+inputs:
+  target:
+    description: get_llvm.sh target, windows-x86_64 or windows-arm64
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore LLVM
+      id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: third_party/llvm/${{ inputs.target }}
+        key: llvm-18.1.8-${{ inputs.target }}-${{ hashFiles('get_llvm.sh') }}
+
+    # Built from a VS developer environment: get_llvm.sh needs cl, cmake and ninja for the target arch
+    - name: Build LLVM
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: cmd
+      run: |
+        for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VSINSTALL=%%i"
+        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" ${{ inputs.target == 'windows-arm64' && 'arm64' || 'x64' }}
+        if errorlevel 1 exit /b 1
+        "%ProgramFiles%\Git\bin\bash.exe" ./get_llvm.sh ${{ inputs.target }}
+
+    # Saved right away so a later build or test failure does not throw the LLVM build away
+    - name: Save LLVM
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: third_party/llvm/${{ inputs.target }}
+        key: ${{ steps.restore.outputs.cache-primary-key }}
+
+    - name: Export LLVM prefix
+      shell: bash
+      run: echo "LLVM_SYS_181_PREFIX=$(cygpath -m "$PWD/third_party/llvm/${{ inputs.target }}")" >> "$GITHUB_ENV"

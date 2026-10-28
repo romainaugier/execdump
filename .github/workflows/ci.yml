@@ -30,9 +30,11 @@ jobs:
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            llvm: windows-x86_64
           - name: windows-arm64
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
+            llvm: windows-arm64
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
@@ -61,14 +63,12 @@ jobs:
           echo "LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)" >> "$GITHUB_ENV"
           echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
 
-      # The official Windows installer has neither llvm-config nor the static libraries
+      # No prebuilt package is linkable on Windows (missing AArch64 target, x64 only, or libxml2s.lib required)
       - name: Install LLVM 18 (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          curl -sSL -o llvm.7z https://github.com/vovkos/llvm-package-windows/releases/download/llvm-18.1.8/llvm-18.1.8-windows-amd64-msvc17-msvcrt.7z
-          7z x llvm.7z -o"$RUNNER_TEMP" > /dev/null
-          echo "LLVM_SYS_181_PREFIX=$(cygpath -m "$RUNNER_TEMP"/llvm-18.1.8-windows-amd64-msvc17-msvcrt)" >> "$GITHUB_ENV"
+        uses: ./.github/actions/llvm-windows
+        with:
+          target: ${{ matrix.llvm }}
 
       - uses: Swatinem/rust-cache@v2
         with:
