@@ -71,6 +71,10 @@ fn session(kind: Kind) {
 }
 
 fn session_on(kind: Kind, pie: bool) {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+
     let Some((kind, debugger)) = find(Some(kind), None) else {
         eprintln!("{} is not installed, skipped", kind.name());
         return;
