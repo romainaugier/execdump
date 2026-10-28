@@ -1,36 +1,36 @@
-_RINvMNtCs1WztaLyfR2E_7inkwell7builderNtB3_7Builder16build_int_to_ptrNtNtNtB5_6values9int_value8IntValueECs5DRV6yAd14J_19execdump_decompiler	<inkwell::builder::Builder>::build_int_to_ptr::<inkwell::values::int_value::IntValue>
+_RINvMNtCs1WztaLyfR2E_7inkwell7builderNtB3_7Builder16build_int_to_ptrNtNtNtB5_6values9int_value8IntValueECs5DRV6yAd14J_19daedale_decompiler	<inkwell::builder::Builder>::build_int_to_ptr::<inkwell::values::int_value::IntValue>
 _RINvMNtCs1wQTQaEylLk_6rustls12common_stateNtB3_11CommonState16send_fatal_alertNtNtB5_5error14PeerMisbehavedEB5_	<rustls::common_state::CommonState>::send_fatal_alert::<rustls::error::PeerMisbehaved>
 _RINvMNtCs7cMPnhEfzsh_7reqwest5errorNtB3_5Error3newBx_EB5_	<reqwest::error::Error>::new::<reqwest::error::Error>
 _RINvMNtCscI6d9CVNmLh_4core3stre12strip_prefixcECs4Q55PWArtAq_3url	<str>::strip_prefix::<char>
 _RINvMNtCscI6d9CVNmLh_4core3stre4findNCNvMNtNtCs9KeADrciNZy_6chrono6format8strftimeNtBD_13StrftimeItems15parse_next_item0EBH_	<str>::find::<<chrono::format::strftime::StrftimeItems>::parse_next_item::{closure#0}>
-_RINvMNtCscI6d9CVNmLh_4core3stre8containsReECs5DRV6yAd14J_19execdump_decompiler	<str>::contains::<&str>
-_RINvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7aarch642Op3getjEBB_	<[execdump_decompiler::lift::aarch64::Op]>::get::<usize>
+_RINvMNtCscI6d9CVNmLh_4core3stre8containsReECs5DRV6yAd14J_19daedale_decompiler	<str>::contains::<&str>
+_RINvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7aarch642Op3getjEBB_	<[daedale_decompiler::lift::aarch64::Op]>::get::<usize>
 _RINvMNtCscI6d9CVNmLh_4core5sliceSh5splitNCNvMs_NtNtNtCsbmo0FHMV5Xy_5hyper5proto2h14roleNtBJ_6Client13obs_fold_lines_0EBP_	<[u8]>::split::<<hyper::proto::h1::role::Client>::obs_fold_line::{closure#1}>
-_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionNtNtCs5DRV6yAd14J_19execdump_decompiler5types5CTypeE6filterNCNvNtBM_1c11return_types_0EBM_	<core::option::Option<execdump_decompiler::types::CType>>::filter::<execdump_decompiler::c::return_type::{closure#1}>
+_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionNtNtCs5DRV6yAd14J_19daedale_decompiler5types5CTypeE6filterNCNvNtBM_1c11return_types_0EBM_	<core::option::Option<daedale_decompiler::types::CType>>::filter::<daedale_decompiler::c::return_type::{closure#1}>
 _RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionNtNtNtNtCsbmo0FHMV5Xy_5hyper5proto2h16encode7EncoderE3mapBI_NCNvMs_NtBM_4roleNtB1N_6Client10set_length0EBQ_	<core::option::Option<hyper::proto::h1::encode::Encoder>>::map::<hyper::proto::h1::encode::Encoder, <hyper::proto::h1::role::Client>::set_length::{closure#0}>
 _RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionRNtNtNtCsgczF5crJ4sT_3std3ffi6os_str5OsStrE3mapNtCs1XxbI5W5puR_8clap_lex9ParsedArgNvMs1_B1v_B1t_3newEB1v_	<core::option::Option<&std::ffi::os_str::OsStr>>::map::<clap_lex::ParsedArg, <clap_lex::ParsedArg>::new>
 _RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionRhE3mapBv_NcNtBv_4Some0ECsgLg2E8rH6Za_12clap_builder	<core::option::Option<&u8>>::map::<core::option::Option<&u8>, core::option::Option<&u8>::Some>
 _RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionjE14unwrap_or_elseNCNvMNtNtCs4WrJ2ea1NkX_12ratatui_core6buffer6bufferNtB15_6Buffer8index_of0EB19_	<core::option::Option<usize>>::unwrap_or_else::<<ratatui_core::buffer::buffer::Buffer>::index_of::{closure#0}>
-_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionjE6map_orjNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler6typedb5parse8sanitizes_0EB10_	<core::option::Option<usize>>::map_or::<usize, execdump_decompiler::typedb::parse::sanitize::{closure#1}>
-_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionyE3mapNtNtNtCs5DRV6yAd14J_19execdump_decompiler8analysis4insn8RegValueNcNtBO_5Const0EBU_	<core::option::Option<u64>>::map::<execdump_decompiler::analysis::insn::RegValue, execdump_decompiler::analysis::insn::RegValue::Const>
+_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionjE6map_orjNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler6typedb5parse8sanitizes_0EB10_	<core::option::Option<usize>>::map_or::<usize, daedale_decompiler::typedb::parse::sanitize::{closure#1}>
+_RINvMNtCscI6d9CVNmLh_4core6optionINtB3_6OptionyE3mapNtNtNtCs5DRV6yAd14J_19daedale_decompiler8analysis4insn8RegValueNcNtBO_5Const0EBU_	<core::option::Option<u64>>::map::<daedale_decompiler::analysis::insn::RegValue, daedale_decompiler::analysis::insn::RegValue::Const>
 _RINvMNtCscI6d9CVNmLh_4core6resultINtB3_6ResultlNtNtNtCsgczF5crJ4sT_3std2io5error5ErrorE3mapuNCINvNtCs8koXhOioeIC_7socket23sys10setsockoptmE0EB1z_	<core::result::Result<i32, std::io::error::Error>>::map::<(), socket2::sys::setsockopt<u32>::{closure#0}>
 _RINvMNtNtCs3wpE2xUYJ1V_14regex_automata3dfa8remapperNtB3_8Remapper5remapNtNtB5_7onepass3DFAEB7_	<regex_automata::dfa::remapper::Remapper>::remap::<regex_automata::dfa::onepass::DFA>
 _RINvMNtNtCsasIVapJg4Ba_16rustls_pki_types11server_name6parserNtB3_6Parser15read_atomicallyuNCNvB2_15read_given_char0EB7_	<rustls_pki_types::server_name::parser::Parser>::read_atomically::<(), <rustls_pki_types::server_name::parser::Parser>::read_given_char::{closure#0}>
 _RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument11new_displayNtNtNtCsgczF5crJ4sT_3std2io5error5ErrorECs8fjfrfXcbBw_7ratatui	<core::fmt::rt::Argument>::new_display::<std::io::error::Error>
 _RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument11new_displayRtECsdYsl3qRwY1p_4toml	<core::fmt::rt::Argument>::new_display::<&u16>
-_RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument13new_lower_hexjECslUhSaoMDPHK_13execdump_core	<core::fmt::rt::Argument>::new_lower_hex::<usize>
-_RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument9new_debugNtNtCslUhSaoMDPHK_13execdump_core5macho10SymbolTypeEBZ_	<core::fmt::rt::Argument>::new_debug::<execdump_core::macho::SymbolType>
+_RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument13new_lower_hexjECslUhSaoMDPHK_13daedale_core	<core::fmt::rt::Argument>::new_lower_hex::<usize>
+_RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument9new_debugNtNtCslUhSaoMDPHK_13daedale_core5macho10SymbolTypeEBZ_	<core::fmt::rt::Argument>::new_debug::<daedale_core::macho::SymbolType>
 _RINvMNtNtCscI6d9CVNmLh_4core3fmt2rtNtB3_8Argument9new_debugRNtNtNtCs4pOvFVUq0Vr_14regex_automata4util4look4LookEB12_	<core::fmt::rt::Argument>::new_debug::<&regex_automata::util::look::Look>
 _RINvMNtNtCscWJlcMzi19H_12regex_syntax3ast7visitorNtB3_11HeapVisitor6inductNtNtNtB7_3hir9translate11TranslatorIEB7_	<regex_syntax::ast::visitor::HeapVisitor>::induct::<regex_syntax::hir::translate::TranslatorI>
-_RINvMNtNtCsgLg2E8rH6Za_12clap_builder4util9any_valueNtB3_8AnyValue13downcast_intobECs3c2gDx2JVYI_8execdump	<clap_builder::util::any_value::AnyValue>::downcast_into::<bool>
+_RINvMNtNtCsgLg2E8rH6Za_12clap_builder4util9any_valueNtB3_8AnyValue13downcast_intobECs3c2gDx2JVYI_8daedale	<clap_builder::util::any_value::AnyValue>::downcast_into::<bool>
 _RINvMNtNtNtCs4pOvFVUq0Vr_14regex_automata4util9prefilter6memmemNtB3_6Memmem3newNtNtNtCscWJlcMzi19H_12regex_syntax3hir7literal7LiteralEB9_	<regex_automata::util::prefilter::memmem::Memmem>::new::<regex_syntax::hir::literal::Literal>
-_RINvMs0_CsfDOcEdXGwyf_12execdump_tuiNtB6_3App13with_functionNCNvB2_11run_commandsc_0EB6_	<execdump_tui::App>::with_function::<<execdump_tui::App>::run_command::{closure#14}>
+_RINvMs0_CsfDOcEdXGwyf_12daedale_tuiNtB6_3App13with_functionNCNvB2_11run_commandsc_0EB6_	<daedale_tui::App>::with_function::<<daedale_tui::App>::run_command::{closure#14}>
 _RINvMs0_NtNtCs7fllHZsMb0X_4http6header3mapNtB6_9HeaderMap10try_insertRNtNtB8_4name10HeaderNameECs7cMPnhEfzsh_7reqwest	<http::header::map::HeaderMap>::try_insert::<&http::header::name::HeaderName>
 _RINvMs0_NtNtCsgLg2E8rH6Za_12clap_builder4util9any_valueNtB6_10AnyValueId2ofNtNtNtCsgczF5crJ4sT_3std3ffi6os_str8OsStringEBa_	<clap_builder::util::any_value::AnyValueId>::of::<std::ffi::os_str::OsString>
-_RINvMs1_NtCs1EAQJhbGAzg_13toml_datetime3serNtB6_18DatetimeSerializer15serialize_fieldeECsfDOcEdXGwyf_12execdump_tui	<toml_datetime::ser::DatetimeSerializer>::serialize_field::<str>
+_RINvMs1_NtCs1EAQJhbGAzg_13toml_datetime3serNtB6_18DatetimeSerializer15serialize_fieldeECsfDOcEdXGwyf_12daedale_tui	<toml_datetime::ser::DatetimeSerializer>::serialize_field::<str>
 _RINvMs1_NtNtCscI6d9CVNmLh_4core3ptr8non_nullINtB6_7NonNullhE4castTNtNtCsTAmH6ypzh9_7kasuari3row6SymbolNtNtB16_8variable8VariableEEB16_	<core::ptr::non_null::NonNull<u8>>::cast::<(kasuari::row::Symbol, kasuari::variable::Variable)>
 _RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj10_Kj1_ECssrCvUZVUPr_12tracing_core	<core::fmt::Arguments>::new::<16, 1>
-_RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj18_Kj2_ECslUhSaoMDPHK_13execdump_core	<core::fmt::Arguments>::new::<24, 2>
+_RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj18_Kj2_ECslUhSaoMDPHK_13daedale_core	<core::fmt::Arguments>::new::<24, 2>
 _RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj22_Kj2_ECsjftnr0xLvZK_10mime_guess	<core::fmt::Arguments>::new::<34, 2>
 _RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj2b_Kj1_ECs1wQTQaEylLk_6rustls	<core::fmt::Arguments>::new::<43, 1>
 _RINvMs2_NtCscI6d9CVNmLh_4core3fmtNtB6_9Arguments3newKj39_Kj1_ECsaGa943HH00r_4git2	<core::fmt::Arguments>::new::<57, 1>
@@ -49,21 +49,21 @@ _RINvMs_NtCs6kYQucLLe3Q_15signal_hook_mio4v1_0NtB5_11SignalsInfo3newAlj1_lECshHR
 _RINvMs_NtNtCs7cMPnhEfzsh_7reqwest10async_impl7requestNtB5_14RequestBuilder16header_sensitiveReRNtNtCs40k4W9msRzi_5alloc6string6StringECsdqijrRiej1g_3llm	<reqwest::async_impl::request::RequestBuilder>::header_sensitive::<&str, &alloc::string::String>
 _RINvMs_NtNtCslgq7c4DYF9G_7reqwest10async_impl7requestNtB5_14RequestBuilder4jsonNtNtNtCshbHma4O2AXc_3llm8backends3xai14XAIChatRequestEB1l_	<reqwest::async_impl::request::RequestBuilder>::json::<llm::backends::xai::XAIChatRequest>
 _RINvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB6_13RawTableInner13drop_elementsTNtNtCs40k4W9msRzi_5alloc6string6StringB1a_EECsdqijrRiej1g_3llm	<hashbrown::raw::RawTableInner>::drop_elements::<(alloc::string::String, alloc::string::String)>
-_RINvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB6_13RawTableInner17new_uninitializedNtNtCs40k4W9msRzi_5alloc5alloc6GlobalECslUhSaoMDPHK_13execdump_core	<hashbrown::raw::RawTableInner>::new_uninitialized::<alloc::alloc::Global>
-_RINvMsi_NtCsfKiFC1ztrmh_9hashbrown3rawINtB6_12RawIterRangeTyNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7TrackerEE9next_implKb0_EB10_	<hashbrown::raw::RawIterRange<(u64, execdump_decompiler::lift::Tracker)>>::next_impl::<false>
+_RINvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB6_13RawTableInner17new_uninitializedNtNtCs40k4W9msRzi_5alloc5alloc6GlobalECslUhSaoMDPHK_13daedale_core	<hashbrown::raw::RawTableInner>::new_uninitialized::<alloc::alloc::Global>
+_RINvMsi_NtCsfKiFC1ztrmh_9hashbrown3rawINtB6_12RawIterRangeTyNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7TrackerEE9next_implKb0_EB10_	<hashbrown::raw::RawIterRange<(u64, daedale_decompiler::lift::Tracker)>>::next_impl::<false>
 _RINvMsj_NtCs40k4W9msRzi_5alloc3vecINtB6_3VechE14extend_trustedINtNtCscI6d9CVNmLh_4core6option8IntoIterhEECsdqijrRiej1g_3llm	<alloc::vec::Vec<u8>>::extend_trusted::<core::option::IntoIter<u8>>
 _RINvNtCs2bFDqL9nllC_9crossterm5event13poll_internalNtNtB2_6filter20CursorPositionFilterEB4_	crossterm::event::poll_internal::<crossterm::event::filter::CursorPositionFilter>
 _RINvNtCs40k4W9msRzi_5alloc3vec9from_elemhECskQp7oO5Fp7v_12aho_corasick	alloc::vec::from_elem::<u8>
 _RINvNtCs8koXhOioeIC_7socket23sys10setsockoptlEB4_	socket2::sys::setsockopt::<i32>
 _RINvNtCsaGa943HH00r_4git24call7convertmmEB4_	git2::call::convert::<u32, u32>
-_RINvNtCscI6d9CVNmLh_4core3cmp21default_chaining_implNtNtCslp0Ck2LHuWu_16execdump_project7service8PriorityBO_NvMB2_NtB2_8Ordering5is_leEBS_	core::cmp::default_chaining_impl::<execdump_project::service::Priority, execdump_project::service::Priority, <core::cmp::Ordering>::is_le>
+_RINvNtCscI6d9CVNmLh_4core3cmp21default_chaining_implNtNtCslp0Ck2LHuWu_16daedale_project7service8PriorityBO_NvMB2_NtB2_8Ordering5is_leEBS_	core::cmp::default_chaining_impl::<daedale_project::service::Priority, daedale_project::service::Priority, <core::cmp::Ordering>::is_le>
 _RINvNtCscI6d9CVNmLh_4core3mem4dropINtNtNtCscJZUg2pyjiG_5tokio4sync7oneshot8ReceiverNtNtCsbmo0FHMV5Xy_5hyper5error5ErrorEECs7cMPnhEfzsh_7reqwest	core::mem::drop::<tokio::sync::oneshot::Receiver<hyper::error::Error>>
 _RINvNtCscI6d9CVNmLh_4core3mem4takeQShECs1wQTQaEylLk_6rustls	core::mem::take::<&mut [u8]>
 _RINvNtCscI6d9CVNmLh_4core3ptr10swap_chunkKj2_ECsTAmH6ypzh9_7kasuari	core::ptr::swap_chunk::<2>
 _RINvNtCscI6d9CVNmLh_4core3ptr5writeNtCsaLzXVI09wWW_14icu_normalizer17CharacterAndClassEBz_	core::ptr::write::<icu_normalizer::CharacterAndClass>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_4cell10UnsafeCellINtNtB4_6option6OptionNtNtCs1WztaLyfR2E_7inkwell16execution_engine15ExecutionEngineEEEB1q_	core::ptr::drop_glue::<core::cell::UnsafeCell<core::option::Option<inkwell::execution_engine::ExecutionEngine>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_4cell6RefMutNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson10range_trie9RangeTrieEEB13_	core::ptr::drop_glue::<core::cell::RefMut<regex_automata::nfa::thompson::range_trie::RangeTrie>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_6option6OptionINtNtCs40k4W9msRzi_5alloc3vec3VecNtCsfDOcEdXGwyf_12execdump_tui8ResourceEEEB1w_	core::ptr::drop_glue::<core::option::Option<alloc::vec::Vec<execdump_tui::Resource>>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_6option6OptionINtNtCs40k4W9msRzi_5alloc3vec3VecNtCsfDOcEdXGwyf_12daedale_tui8ResourceEEEB1w_	core::ptr::drop_glue::<core::option::Option<alloc::vec::Vec<daedale_tui::Resource>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_6option6OptionINtNtCs40k4W9msRzi_5alloc5boxed3BoxNtNtCsTAmH6ypzh9_7kasuari3row3RowEEEB1A_	core::ptr::drop_glue::<core::option::Option<alloc::boxed::Box<kasuari::row::Row>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_6option6OptionNtNtCs40k4W9msRzi_5alloc6string6StringEECshbHma4O2AXc_3llm.llvm.8324751566821445824	core::ptr::drop_glue::<core::option::Option<alloc::string::String>> (.llvm.8324751566821445824)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtB4_6option6OptionNtNtCsgGCgxbnbytj_12clap_builder5error7MessageEEB11_	core::ptr::drop_glue::<core::option::Option<clap_builder::error::Message>>
@@ -77,10 +77,10 @@ _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs1wQTQaEylLk_6rustls12common_state
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecIBC_jEEECsa1F4it94aAK_6rustls	core::ptr::drop_glue::<alloc::vec::Vec<alloc::vec::Vec<usize>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtB1d_3ast18GenericAssociationEEEB1d_	core::ptr::drop_glue::<alloc::vec::Vec<lang_c::span::Node<lang_c::ast::GenericAssociation>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtBG_6string6StringEECseD7bwMwBkoP_12regex_syntax	core::ptr::drop_glue::<alloc::vec::Vec<alloc::string::String>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtCs9gee9duVEzI_19execdump_decompiler5types5ParamEECs8hMsTSjfmUR_16execdump_project	core::ptr::drop_glue::<alloc::vec::Vec<execdump_decompiler::types::Param>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtCseH0mWYnU2OD_13execdump_core5macho11LoadCommandEEB1c_	core::ptr::drop_glue::<alloc::vec::Vec<execdump_core::macho::LoadCommand>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtCs9gee9duVEzI_19daedale_decompiler5types5ParamEECs8hMsTSjfmUR_16daedale_project	core::ptr::drop_glue::<alloc::vec::Vec<daedale_decompiler::types::Param>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtCseH0mWYnU2OD_13daedale_core5macho11LoadCommandEEB1c_	core::ptr::drop_glue::<alloc::vec::Vec<daedale_core::macho::LoadCommand>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCs1wQTQaEylLk_6rustls4msgs5enums13ExtensionTypeEEB1e_	core::ptr::drop_glue::<alloc::vec::Vec<rustls::msgs::enums::ExtensionType>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCs9gee9duVEzI_19execdump_decompiler8analysis4insn7DecodedEEB1e_	core::ptr::drop_glue::<alloc::vec::Vec<execdump_decompiler::analysis::insn::Decoded>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCs9gee9duVEzI_19daedale_decompiler8analysis4insn7DecodedEEB1e_	core::ptr::drop_glue::<alloc::vec::Vec<daedale_decompiler::analysis::insn::Decoded>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCsdqijrRiej1g_3llm9providers17openai_compatible16OpenAIChatChoiceEEB1e_	core::ptr::drop_glue::<alloc::vec::Vec<llm::providers::openai_compatible::OpenAIChatChoice>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCskQp7oO5Fp7v_12aho_corasick3nfa13noncontiguous5StateEEB1e_	core::ptr::drop_glue::<alloc::vec::Vec<aho_corasick::nfa::noncontiguous::State>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc3vec3VecRNtNtNtCs4WrJ2ea1NkX_12ratatui_core4text4line4LineEECsdVZ58MxQ2zx_15ratatui_widgets	core::ptr::drop_glue::<alloc::vec::Vec<&ratatui_core::text::line::Line>>
@@ -94,62 +94,62 @@ _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc5boxed3BoxDNtNt
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc5boxed3BoxNtCsgD5qpeYRr8y_3url3UrlEECshbHma4O2AXc_3llm	core::ptr::drop_glue::<alloc::boxed::Box<url::Url>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc5boxed3BoxNtNtCsimBfNselR9E_16parking_lot_core11parking_lot9HashTableEEB1e_	core::ptr::drop_glue::<alloc::boxed::Box<parking_lot_core::parking_lot::HashTable>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc5boxed3BoxNtNtNtCsgczF5crJ4sT_3std2io5error6CustomEECsg7KiFt1rSOb_8anstream	core::ptr::drop_glue::<alloc::boxed::Box<std::io::error::Custom>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecINtNtB4_6option6OptionyEEECs5DRV6yAd14J_19execdump_decompiler	core::ptr::drop_glue::<alloc::raw_vec::RawVec<core::option::Option<u64>>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecINtNtB4_6option6OptionyEEECs5DRV6yAd14J_19daedale_decompiler	core::ptr::drop_glue::<alloc::raw_vec::RawVec<core::option::Option<u64>>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtCs1WztaLyfR2E_7inkwell11basic_block10BasicBlockEEB1j_	core::ptr::drop_glue::<alloc::raw_vec::RawVec<inkwell::basic_block::BasicBlock>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtCslUhSaoMDPHK_13execdump_core2pe22ImportLookupTableEntryEEB1j_	core::ptr::drop_glue::<alloc::raw_vec::RawVec<execdump_core::pe::ImportLookupTableEntry>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast4ExprEEB1l_	core::ptr::drop_glue::<alloc::raw_vec::RawVec<execdump_decompiler::c::ast::Expr>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtCslUhSaoMDPHK_13daedale_core2pe22ImportLookupTableEntryEEB1j_	core::ptr::drop_glue::<alloc::raw_vec::RawVec<daedale_core::pe::ImportLookupTableEntry>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast4ExprEEB1l_	core::ptr::drop_glue::<alloc::raw_vec::RawVec<daedale_decompiler::c::ast::Expr>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecNtNtNtCsfkJhO7nUixW_10serde_core7private7content7ContentEECs1Y3NcVyI4UI_5serde	core::ptr::drop_glue::<alloc::raw_vec::RawVec<serde_core::private::content::Content>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecRNtNtCscWJlcMzi19H_12regex_syntax3hir3HirEECs4pOvFVUq0Vr_14regex_automata	core::ptr::drop_glue::<alloc::raw_vec::RawVec<&regex_syntax::hir::Hir>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecTyjEEECs5DRV6yAd14J_19execdump_decompiler	core::ptr::drop_glue::<alloc::raw_vec::RawVec<(u64, usize)>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs40k4W9msRzi_5alloc7raw_vec6RawVecTyjEEECs5DRV6yAd14J_19daedale_decompiler	core::ptr::drop_glue::<alloc::raw_vec::RawVec<(u64, usize)>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCs8KLdXyu20yy_15futures_channel7oneshot8ReceiverNtNtB4_7convert10InfallibleEECs7cMPnhEfzsh_7reqwest	core::ptr::drop_glue::<futures_channel::oneshot::Receiver<core::convert::Infallible>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCscoDABAJturn_6lang_c4span4NodeNtNtBG_3ast17DerivedDeclaratorEEBG_.llvm.4735873484154558747	core::ptr::drop_glue::<lang_c::span::Node<lang_c::ast::DerivedDeclarator>> (.llvm.4735873484154558747)
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCsfKiFC1ztrmh_9hashbrown3map8IntoIterNtNtCs40k4W9msRzi_5alloc6string6StringuEECs5DRV6yAd14J_19execdump_decompiler	core::ptr::drop_glue::<hashbrown::map::IntoIter<alloc::string::String, ()>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCsfKiFC1ztrmh_9hashbrown3map8IntoIterNtNtCs40k4W9msRzi_5alloc6string6StringuEECs5DRV6yAd14J_19daedale_decompiler	core::ptr::drop_glue::<hashbrown::map::IntoIter<alloc::string::String, ()>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBG_3ast13GnuAsmOperandEEBG_	core::ptr::drop_glue::<lang_c::span::Node<lang_c::ast::GnuAsmOperand>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtCsieDaWI6pf9Q_20signal_hook_registry9half_lock8HalfLockNtBG_10SignalDataEEBG_	core::ptr::drop_glue::<signal_hook_registry::half_lock::HalfLock<signal_hook_registry::SignalData>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtB4_5array4iter8IntoIterjKj2_EECs3n23fIQzK4V_5ipnet	core::ptr::drop_glue::<core::array::iter::IntoIter<usize, 2>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtCs40k4W9msRzi_5alloc3vec9into_iter8IntoIterNtNtBI_6string6StringEECsdqijrRiej1g_3llm	core::ptr::drop_glue::<alloc::vec::into_iter::IntoIter<alloc::string::String>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtCs4pOvFVUq0Vr_14regex_automata4meta8strategy3PreNtNtNtNtBI_4util9prefilter6memchr7Memchr3EEBI_	core::ptr::drop_glue::<regex_automata::meta::strategy::Pre<regex_automata::util::prefilter::memchr::Memchr3>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtCsd2Vx9JYD0g7_4toml2de5error8TomlSinkINtNtB4_6option6OptionNtBE_5ErrorEEEBI_.llvm.11729500842259739199	core::ptr::drop_glue::<toml::de::error::TomlSink<core::option::Option<toml::de::error::Error>>> (.llvm.11729500842259739199)
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtCsgczF5crJ4sT_3std6thread11join_handle10JoinHandleuEECs8hMsTSjfmUR_16execdump_project	core::ptr::drop_glue::<std::thread::join_handle::JoinHandle<()>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtCsgczF5crJ4sT_3std6thread11join_handle10JoinHandleuEECs8hMsTSjfmUR_16daedale_project	core::ptr::drop_glue::<std::thread::join_handle::JoinHandle<()>>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtCscJZUg2pyjiG_5tokio4loom3std11parking_lot5MutexNtNtNtBK_7runtime4time10InnerStateEEBK_	core::ptr::drop_glue::<tokio::loom::std::parking_lot::Mutex<tokio::runtime::time::InnerState>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtCsgczF5crJ4sT_3std4sync6poison5mutex10MutexGuardNtNtNtBI_4mpmc5waker5WakerEECs8hMsTSjfmUR_16execdump_project	core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<std::sync::mpmc::waker::Waker>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtNtB4_5slice4sort6stable5merge10MergeStatejEECs5DRV6yAd14J_19execdump_decompiler	core::ptr::drop_glue::<core::slice::sort::stable::merge::MergeState<usize>>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNCNCNvMNtNtCs5DRV6yAd14J_19execdump_decompiler1c9structureNtBI_10Structurer7guardeds_0s1_0EBM_	core::ptr::drop_glue::<<execdump_decompiler::c::structure::Structurer>::guarded::{closure#1}::{closure#3}>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtCsgczF5crJ4sT_3std4sync6poison5mutex10MutexGuardNtNtNtBI_4mpmc5waker5WakerEECs8hMsTSjfmUR_16daedale_project	core::ptr::drop_glue::<std::sync::poison::mutex::MutexGuard<std::sync::mpmc::waker::Waker>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueINtNtNtNtNtB4_5slice4sort6stable5merge10MergeStatejEECs5DRV6yAd14J_19daedale_decompiler	core::ptr::drop_glue::<core::slice::sort::stable::merge::MergeState<usize>>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNCNCNvMNtNtCs5DRV6yAd14J_19daedale_decompiler1c9structureNtBI_10Structurer7guardeds_0s1_0EBM_	core::ptr::drop_glue::<<daedale_decompiler::c::structure::Structurer>::guarded::{closure#1}::{closure#3}>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNCNvMs3_NtNtCshbHma4O2AXc_3llm8backends6openaiNtBJ_6OpenAI22chat_with_hosted_tools0EBN_	core::ptr::drop_glue::<<llm::backends::openai::OpenAI>::chat_with_hosted_tools::{closure#0}>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNCNvXsf_NtNtCshbHma4O2AXc_3llm8backends6openaiNtBJ_6OpenAINtNtBN_3stt20SpeechToTextProvider15transcribe_file0EBN_	core::ptr::drop_glue::<<llm::backends::openai::OpenAI as llm::stt::SpeechToTextProvider>::transcribe_file::{closure#0}>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNCNvYNtNtNtCsdqijrRiej1g_3llm13resilient_llm7wrapper12ResilientLLMNtNtNtBM_4chat6traits12ChatProvider4chat0EBM_	core::ptr::drop_glue::<<llm::resilient_llm::wrapper::ResilientLLM as llm::chat::traits::ChatProvider>::chat::{closure#0}>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtCsadtEA1PXqHv_12execdump_tui4ViewEBD_.llvm.14435609966509177826	core::ptr::drop_glue::<execdump_tui::View> (.llvm.14435609966509177826)
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtCsadtEA1PXqHv_12daedale_tui4ViewEBD_.llvm.14435609966509177826	core::ptr::drop_glue::<daedale_tui::View> (.llvm.14435609966509177826)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs1WztaLyfR2E_7inkwell11data_layout10DataLayoutEBF_	core::ptr::drop_glue::<inkwell::data_layout::DataLayout>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs2ItF8tKQzZS_6webpki5error48UnsupportedSignatureAlgorithmForPublicKeyContextEBF_.llvm.9236775543310785729	core::ptr::drop_glue::<webpki::error::UnsupportedSignatureAlgorithmForPublicKeyContext> (.llvm.9236775543310785729)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs40k4W9msRzi_5alloc6string6StringECsgD5qpeYRr8y_3url	core::ptr::drop_glue::<alloc::string::String>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs5DRV6yAd14J_19execdump_decompiler6typedb9AggregateEBF_	core::ptr::drop_glue::<execdump_decompiler::typedb::Aggregate>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs5DRV6yAd14J_19daedale_decompiler6typedb9AggregateEBF_	core::ptr::drop_glue::<daedale_decompiler::typedb::Aggregate>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs7cMPnhEfzsh_7reqwest7connect16ConnectorBuilderEBF_	core::ptr::drop_glue::<reqwest::connect::ConnectorBuilder>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs8hMsTSjfmUR_16execdump_project7project8ProposalEBF_	core::ptr::drop_glue::<execdump_project::project::Proposal>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs9gee9duVEzI_19execdump_decompiler5types5ParamEBF_.llvm.14605153799202880091	core::ptr::drop_glue::<execdump_decompiler::types::Param> (.llvm.14605153799202880091)
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs8hMsTSjfmUR_16daedale_project7project8ProposalEBF_	core::ptr::drop_glue::<daedale_project::project::Proposal>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCs9gee9duVEzI_19daedale_decompiler5types5ParamEBF_.llvm.14605153799202880091	core::ptr::drop_glue::<daedale_decompiler::types::Param> (.llvm.14605153799202880091)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCsaGa943HH00r_4git24blob4BlobEBF_	core::ptr::drop_glue::<git2::blob::Blob>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCscWJlcMzi19H_12regex_syntax3ast7CommentEBF_	core::ptr::drop_glue::<regex_syntax::ast::Comment>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCscoDABAJturn_6lang_c3ast18SpecifierQualifierEBF_.llvm.4735873484154558747	core::ptr::drop_glue::<lang_c::ast::SpecifierQualifier> (.llvm.4735873484154558747)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCseD7bwMwBkoP_12regex_syntax3ast12ClassSetItemECs3wpE2xUYJ1V_14regex_automata	core::ptr::drop_glue::<regex_syntax::ast::ClassSetItem>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCseH0mWYnU2OD_13execdump_core4dump11DumpRawDataECs67IJIvVi8Yx_8execdump.llvm.659450235483945087	core::ptr::drop_glue::<execdump_core::dump::DumpRawData> (.llvm.659450235483945087)
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCsgGCgxbnbytj_12clap_builder5error5ErrorECs67IJIvVi8Yx_8execdump.llvm.17976714912249248842	core::ptr::drop_glue::<clap_builder::error::Error> (.llvm.17976714912249248842)
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCseH0mWYnU2OD_13daedale_core4dump11DumpRawDataECs67IJIvVi8Yx_8daedale.llvm.659450235483945087	core::ptr::drop_glue::<daedale_core::dump::DumpRawData> (.llvm.659450235483945087)
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCsgGCgxbnbytj_12clap_builder5error5ErrorECs67IJIvVi8Yx_8daedale.llvm.17976714912249248842	core::ptr::drop_glue::<clap_builder::error::Error> (.llvm.17976714912249248842)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCshxJnpmSp82F_6lang_c3ast14InitDeclaratorEBF_	core::ptr::drop_glue::<lang_c::ast::InitDeclarator>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCsiVHNuMzTYSy_16rustls_pki_types11server_name10ServerNameECsa1F4it94aAK_6rustls.llvm.9165385149214186590	core::ptr::drop_glue::<rustls_pki_types::server_name::ServerName> (.llvm.9165385149214186590)
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCslUhSaoMDPHK_13execdump_core2pe20ImportDirectoryTableEBF_	core::ptr::drop_glue::<execdump_core::pe::ImportDirectoryTable>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCslUhSaoMDPHK_13daedale_core2pe20ImportDirectoryTableEBF_	core::ptr::drop_glue::<daedale_core::pe::ImportDirectoryTable>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtCslgq7c4DYF9G_7reqwest7connect16ConnectorServiceEBF_	core::ptr::drop_glue::<reqwest::connect::ConnectorService>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs1wQTQaEylLk_6rustls4msgs9handshake12ProtocolNameEBH_	core::ptr::drop_glue::<rustls::msgs::handshake::ProtocolName>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs1wQTQaEylLk_6rustls5tls1312key_schedule31KeyScheduleClientBeforeFinishedEBH_	core::ptr::drop_glue::<rustls::tls13::key_schedule::KeyScheduleClientBeforeFinished>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs3wpE2xUYJ1V_14regex_automata4meta5regex6ConfigECsjgLkauuIxEx_5regex.llvm.4276381097729590871	core::ptr::drop_glue::<regex_automata::meta::regex::Config> (.llvm.4276381097729590871)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs40k4W9msRzi_5alloc3vec15set_len_on_drop12SetLenOnDropECskQp7oO5Fp7v_12aho_corasick	core::ptr::drop_glue::<alloc::vec::set_len_on_drop::SetLenOnDrop>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs4pOvFVUq0Vr_14regex_automata6hybrid5error14BuildErrorKindEBH_	core::ptr::drop_glue::<regex_automata::hybrid::error::BuildErrorKind>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs5OZEacqcADO_5tokio7runtime6handle6HandleECs67IJIvVi8Yx_8execdump	core::ptr::drop_glue::<tokio::runtime::handle::Handle>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs5OZEacqcADO_5tokio7runtime6handle6HandleECs67IJIvVi8Yx_8daedale	core::ptr::drop_glue::<tokio::runtime::handle::Handle>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs7cMPnhEfzsh_7reqwest10async_impl8response8ResponseECsdqijrRiej1g_3llm	core::ptr::drop_glue::<reqwest::async_impl::response::Response>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs9gee9duVEzI_19execdump_decompiler1c5build6SBlockEBH_	core::ptr::drop_glue::<execdump_decompiler::c::build::SBlock>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCs9gee9duVEzI_19daedale_decompiler1c5build6SBlockEBH_	core::ptr::drop_glue::<daedale_decompiler::c::build::SBlock>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsa1F4it94aAK_6rustls4msgs9handshake16HandshakePayloadEBH_	core::ptr::drop_glue::<rustls::msgs::handshake::HandshakePayload>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsaJwUeSWIQzl_4ring2io6writer6WriterEBH_.llvm.1135283025738606071	core::ptr::drop_glue::<ring::io::writer::Writer> (.llvm.1135283025738606071)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCscWJlcMzi19H_12regex_syntax3ast5parse10GroupStateEBH_	core::ptr::drop_glue::<regex_syntax::ast::parse::GroupState>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsdqijrRiej1g_3llm8backends3xai9XAIConfigEBH_	core::ptr::drop_glue::<llm::backends::xai::XAIConfig>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsdqijrRiej1g_3llm8backends8deepseek20DeepSeekChatResponseEBH_	core::ptr::drop_glue::<llm::backends::deepseek::DeepSeekChatResponse>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCseH0mWYnU2OD_13execdump_core8demangle4msvc5IdentEBH_.llvm.10188775266510568833	core::ptr::drop_glue::<execdump_core::demangle::msvc::Ident> (.llvm.10188775266510568833)
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCseH0mWYnU2OD_13daedale_core8demangle4msvc5IdentEBH_.llvm.10188775266510568833	core::ptr::drop_glue::<daedale_core::demangle::msvc::Ident> (.llvm.10188775266510568833)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsgGCgxbnbytj_12clap_builder7builder7command7CommandEBH_.llvm.3328736519173414846	core::ptr::drop_glue::<clap_builder::builder::command::Command> (.llvm.3328736519173414846)
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsgczF5crJ4sT_3std2io5error5ErrorECsasIVapJg4Ba_16rustls_pki_types	core::ptr::drop_glue::<std::io::error::Error>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtCsgczF5crJ4sT_3std6thread9spawnhook15ChildSpawnHooksECs5OZEacqcADO_5tokio	core::ptr::drop_glue::<std::thread::spawnhook::ChildSpawnHooks>
@@ -165,14 +165,14 @@ _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNtNtNtNtCsdqijrRiej1g_3llm8backends6op
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueNtNvNtNtCsgczF5crJ4sT_3std3sys12thread_local20abort_on_dtor_unwind15DtorUnwindGuardECs4WrJ2ea1NkX_12ratatui_core	core::ptr::drop_glue::<std::sys::thread_local::abort_on_dtor_unwind::DtorUnwindGuard>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueSINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBH_3ast10EnumeratorEEBH_	core::ptr::drop_glue::<[lang_c::span::Node<lang_c::ast::Enumerator>]>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueSNtNtCscWJlcMzi19H_12regex_syntax3ast12ClassSetItemEBG_	core::ptr::drop_glue::<[regex_syntax::ast::ClassSetItem]>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueSNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast4StmtEBI_	core::ptr::drop_glue::<[execdump_decompiler::c::ast::Stmt]>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueSNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast4StmtEBI_	core::ptr::drop_glue::<[daedale_decompiler::c::ast::Stmt]>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueSNtNtNtCsgLg2E8rH6Za_12clap_builder7builder7command7CommandEBI_	core::ptr::drop_glue::<[clap_builder::builder::command::Command]>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueTINtNtCs40k4W9msRzi_5alloc6borrow3CoweENtNtNtCslgq7c4DYF9G_7reqwest10async_impl9multipart4PartEEB1k_	core::ptr::drop_glue::<(alloc::borrow::Cow<str>, reqwest::async_impl::multipart::Part)>
 _RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueTNtNtNtCs4WrJ2ea1NkX_12ratatui_core6layout4rect4RectNtNtBG_6layout6LayoutEEBI_	core::ptr::drop_glue::<(ratatui_core::layout::rect::Rect, ratatui_core::layout::layout::Layout)>
-_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueTyNtNtCslUhSaoMDPHK_13execdump_core7program6SymbolEEBH_	core::ptr::drop_glue::<(u64, execdump_core::program::Symbol)>
+_RINvNtCscI6d9CVNmLh_4core3ptr9drop_glueTyNtNtCslUhSaoMDPHK_13daedale_core7program6SymbolEEBH_	core::ptr::drop_glue::<(u64, daedale_core::program::Symbol)>
 _RINvNtCscI6d9CVNmLh_4core9panicking13assert_failedPNtNtCssrCvUZVUPr_12tracing_core8callsite15DefaultCallsiteOBN_EBR_	core::panicking::assert_failed::<*const tracing_core::callsite::DefaultCallsite, *mut tracing_core::callsite::DefaultCallsite>
-_RINvNtCsd2Vx9JYD0g7_4toml2de8from_strNtNtCs8hMsTSjfmUR_16execdump_project11annotations11GlobalNotesEBD_	toml::de::from_str::<execdump_project::annotations::GlobalNotes>
-_RINvNtCsdYsl3qRwY1p_4toml3ser9to_stringNtNtCslp0Ck2LHuWu_16execdump_project11annotations13FunctionNotesEBF_	toml::ser::to_string::<execdump_project::annotations::FunctionNotes>
+_RINvNtCsd2Vx9JYD0g7_4toml2de8from_strNtNtCs8hMsTSjfmUR_16daedale_project11annotations11GlobalNotesEBD_	toml::de::from_str::<daedale_project::annotations::GlobalNotes>
+_RINvNtCsdYsl3qRwY1p_4toml3ser9to_stringNtNtCslp0Ck2LHuWu_16daedale_project11annotations13FunctionNotesEBF_	toml::ser::to_string::<daedale_project::annotations::FunctionNotes>
 _RINvNtCsgczF5crJ4sT_3std2io17default_write_fmtNtNtNtNtB4_3sys5stdio4unix6StderrECsaGa943HH00r_4git2	std::io::default_write_fmt::<std::sys::stdio::unix::Stderr>
 _RINvNtCsk6hyM9KQup5_10serde_json2de10from_traitNtNtB4_4read7StrReadNtNtNtCshbHma4O2AXc_3llm8backends9anthropic23AnthropicStreamResponseEB19_	serde_json::de::from_trait::<serde_json::read::StrRead, llm::backends::anthropic::AnthropicStreamResponse>
 _RINvNtCslgNNO3csm7k_10serde_json2de10from_traitNtNtB4_4read9SliceReadNtNtNtCsdqijrRiej1g_3llm8backends6google23GoogleEmbeddingResponseEB1b_	serde_json::de::from_trait::<serde_json::read::SliceRead, llm::backends::google::GoogleEmbeddingResponse>
@@ -186,90 +186,90 @@ _RINvNtNtCscJZUg2pyjiG_5tokio4sync7oneshot7channeluEB6_	tokio::sync::oneshot::ch
 _RINvNtNtCsduXJbRkUHPt_4ring10arithmetic3ffi15bn_mul_mont_ffiTNtNtNtB6_3cpu5intel3AdxNtBZ_4Bmi2EKj8_Kj4_TQSyRB1F_B1H_EEB6_	ring::arithmetic::ffi::bn_mul_mont_ffi::<(ring::cpu::intel::Adx, ring::cpu::intel::Bmi2), 8, 4, (&mut [u64], &[u64], &[u64])>
 _RINvNtNtCsduXJbRkUHPt_4ring4aead7aes_gcm11seal_finishNtNtNtB4_3aes2vp3KeyNtNtNtB4_3gcm8fallback3KeyEB6_	ring::aead::aes_gcm::seal_finish::<ring::aead::aes::vp::Key, ring::aead::gcm::fallback::Key>
 _RINvNtNtCsgczF5crJ4sT_3std3sys9backtrace26___rust_end_short_backtraceNCNvNtB6_9panicking13panic_handler0zEB6_	std::sys::backtrace::__rust_end_short_backtrace::<std::panicking::panic_handler::{closure#0}, !>
-_RINvNtNtNtCs40k4W9msRzi_5alloc11collections5btree4node12slice_insertNtNtNtCs5DRV6yAd14J_19execdump_decompiler8analysis8function10BasicBlockEB1a_	alloc::collections::btree::node::slice_insert::<execdump_decompiler::analysis::function::BasicBlock>
-_RINvNtNtNtCs40k4W9msRzi_5alloc11collections5btree4node9slice_shlINtNtB8_3vec3VecyEECslp0Ck2LHuWu_16execdump_project	alloc::collections::btree::node::slice_shl::<alloc::vec::Vec<u64>>
+_RINvNtNtNtCs40k4W9msRzi_5alloc11collections5btree4node12slice_insertNtNtNtCs5DRV6yAd14J_19daedale_decompiler8analysis8function10BasicBlockEB1a_	alloc::collections::btree::node::slice_insert::<daedale_decompiler::analysis::function::BasicBlock>
+_RINvNtNtNtCs40k4W9msRzi_5alloc11collections5btree4node9slice_shlINtNtB8_3vec3VecyEECslp0Ck2LHuWu_16daedale_project	alloc::collections::btree::node::slice_shl::<alloc::vec::Vec<u64>>
 _RINvNtNtNtCscI6d9CVNmLh_4core9core_arch3x863avx25__mm256_permute2f128_si256Kl21_ECskQp7oO5Fp7v_12aho_corasick	core::core_arch::x86::avx::_mm256_permute2f128_si256::<33>
 _RINvNtNtNtCsgczF5crJ4sT_3std2io5error14repr_bitpacked11decode_reprRNtB4_6CustomNCNvMs0_B2_NtB2_4Repr4data0ECslgNNO3csm7k_10serde_json	std::io::error::repr_bitpacked::decode_repr::<&std::io::error::Custom, <std::io::error::repr_bitpacked::Repr>::data::{closure#0}>
 _RINvNtNtNtNtCscI6d9CVNmLh_4core5slice4sort6shared9smallsort18small_sort_generalTmjENvYB1f_NtNtBa_3cmp10PartialOrd2ltECs1wQTQaEylLk_6rustls	core::slice::sort::shared::smallsort::small_sort_general::<(u32, usize), <(u32, usize) as core::cmp::PartialOrd>::lt>
-_RINvNtNtNtNtCscI6d9CVNmLh_4core5slice4sort6stable9quicksort9quicksortyNvYyNtNtBa_3cmp10PartialOrd2ltECs5DRV6yAd14J_19execdump_decompiler	core::slice::sort::stable::quicksort::quicksort::<u64, <u64 as core::cmp::PartialOrd>::lt>
+_RINvNtNtNtNtCscI6d9CVNmLh_4core5slice4sort6stable9quicksort9quicksortyNvYyNtNtBa_3cmp10PartialOrd2ltECs5DRV6yAd14J_19daedale_decompiler	core::slice::sort::stable::quicksort::quicksort::<u64, <u64 as core::cmp::PartialOrd>::lt>
 _RINvNvMNtCscI6d9CVNmLh_4core5sliceSp7reverse7revswapNtNtCscWJlcMzi19H_12regex_syntax3hir15ClassBytesRangeEBS_	<[_]>::reverse::revswap::<regex_syntax::hir::ClassBytesRange>
-_RINvNvMs2_NtCs40k4W9msRzi_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECseH0mWYnU2OD_13execdump_core	<alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+_RINvNvMs2_NtCs40k4W9msRzi_5alloc7raw_vecINtB8_11RawVecInnerpE7reserve21do_reserve_and_handleNtNtBa_5alloc6GlobalECseH0mWYnU2OD_13daedale_core	<alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
 _RINvXNtNtNtNtCsgczF5crJ4sT_3std3sys12thread_local6native4lazyzNtB3_14DestroyedState13register_dtorINtNtCscI6d9CVNmLh_4core4cell4CellTyyEEECs7fllHZsMb0X_4http	<! as std::sys::thread_local::native::lazy::DestroyedState>::register_dtor::<core::cell::Cell<(u64, u64)>>
-_RINvXNvMNtCs40k4W9msRzi_5alloc5sliceSp9to_vec_inTNtNtB8_6string6StringxENtB3_10ConvertVec6to_vecNtNtB8_5alloc6GlobalECs5DRV6yAd14J_19execdump_decompiler	<(alloc::string::String, i64) as <[_]>::to_vec_in::ConvertVec>::to_vec::<alloc::alloc::Global>
+_RINvXNvMNtCs40k4W9msRzi_5alloc5sliceSp9to_vec_inTNtNtB8_6string6StringxENtB3_10ConvertVec6to_vecNtNtB8_5alloc6GlobalECs5DRV6yAd14J_19daedale_decompiler	<(alloc::string::String, i64) as <[_]>::to_vec_in::ConvertVec>::to_vec::<alloc::alloc::Global>
 _RINvXs4_NtNtCsfkJhO7nUixW_10serde_core2de5implsNtB6_13StringVisitorNtB8_7Visitor9visit_strNtNtNtCsdYsl3qRwY1p_4toml2de5error5ErrorEB1w_	<serde_core::de::impls::StringVisitor as serde_core::de::Visitor>::visit_str::<toml::de::error::Error>
 _RINvXs_NvMNtCs40k4W9msRzi_5alloc5sliceSp9to_vec_inNtNtNtCs1wQTQaEylLk_6rustls4msgs5enums11CompressionNtB5_10ConvertVec6to_vecNtNtBa_5alloc6GlobalEBS_	<rustls::msgs::enums::Compression as <[_]>::to_vec_in::ConvertVec>::to_vec::<alloc::alloc::Global>
 _RINvXsg_NtNtCscI6d9CVNmLh_4core4hash5implsiNtB8_4Hash4hashNtNtCscxwaO04FXd8_9hashbrown6hasher13DefaultHasherECsTAmH6ypzh9_7kasuari	<isize as core::hash::Hash>::hash::<hashbrown::hasher::DefaultHasher>
 _RINvYINtNtNtCscI6d9CVNmLh_4core3ops5range5RangetEINtB6_11RangeBoundstE8containstECs1wQTQaEylLk_6rustls	<core::ops::range::Range<u16> as core::ops::range::RangeBounds<u16>>::contains::<u16>
 _RINvYINtNtNtNtCscI6d9CVNmLh_4core4iter8adapters3rev3RevINtNtNtBc_5slice4iter4ItercEENtNtNtBa_6traits8iterator8Iterator6copiedcECs4NgJ8KamjkS_4idna	<core::iter::adapters::rev::Rev<core::slice::iter::Iter<char>> as core::iter::traits::iterator::Iterator>::copied::<char>
 _RINvYNtNtNtCs52ylLKyFTQX_6base646engine15general_purpose14GeneralPurposeNtB7_6Engine6encodeRShECsdqijrRiej1g_3llm	<base64::engine::general_purpose::GeneralPurpose as base64::engine::Engine>::encode::<&[u8]>
-_RINvYNtNtNtCsgczF5crJ4sT_3std4hash6random11RandomStateNtNtCscI6d9CVNmLh_4core4hash11BuildHasher8hash_oneRyECs8hMsTSjfmUR_16execdump_project	<std::hash::random::RandomState as core::hash::BuildHasher>::hash_one::<&u64>
+_RINvYNtNtNtCsgczF5crJ4sT_3std4hash6random11RandomStateNtNtCscI6d9CVNmLh_4core4hash11BuildHasher8hash_oneRyECs8hMsTSjfmUR_16daedale_project	<std::hash::random::RandomState as core::hash::BuildHasher>::hash_one::<&u64>
 _RNCINvMNtCscI6d9CVNmLh_4core5sliceSTReRSTccEE20binary_search_by_keyBy_NCNvNtCscWJlcMzi19H_12regex_syntax7unicode12property_set0E0B1c_	<[(&str, &[(char, char)])]>::binary_search_by_key::<&str, regex_syntax::unicode::property_set::{closure#0}>::{closure#0}
 _RNCINvMNtNtNtCs4pOvFVUq0Vr_14regex_automata4util9prefilter5teddyNtB5_5Teddy3newRShE0Bb_	<regex_automata::util::prefilter::teddy::Teddy>::new::<&[u8]>::{closure#0}
 _RNCINvMs2_NtNtNtCs4pOvFVUq0Vr_14regex_automata4util9prefilter6memchrNtB8_7Memchr33newRShE0Be_	<regex_automata::util::prefilter::memchr::Memchr3>::new::<&[u8]>::{closure#0}
 _RNCINvMs5_NtNtCscJZUg2pyjiG_5tokio4sync5watchINtB8_6SenderuE16send_if_modifiedNCINvB4_11send_modifyNCNvB4_12send_replace0E0E0Bc_	<tokio::sync::watch::Sender<()>>::send_if_modified::<<tokio::sync::watch::Sender<()>>::send_modify<<tokio::sync::watch::Sender<()>>::send_replace::{closure#0}>::{closure#0}>::{closure#0}
 _RNCINvMs_NtCsjwn8bqtLkoi_5regex8buildersNtB7_7Builder3newARej1_BU_E0B9_	<regex::builders::Builder>::new::<[&str; 1], &str>::{closure#0}
 _RNCINvNtCs8koXhOioeIC_7socket23sys10setsockoptlE0B6_	socket2::sys::setsockopt::<i32>::{closure#0}
-_RNCINvNtCsfKiFC1ztrmh_9hashbrown3map14equivalent_keyNtNtCs40k4W9msRzi_5alloc6string6StringBO_xE0Cs5DRV6yAd14J_19execdump_decompiler	hashbrown::map::equivalent_key::<alloc::string::String, alloc::string::String, i64>::{closure#0}
-_RNCINvNtCshHRB4Z1YrKw_9crossterm7command18write_command_ansiNtNtB6_5style9SetColorsNtNtNtCsgczF5crJ4sT_3std2io5stdio6StdoutE0CsfDOcEdXGwyf_12execdump_tui	crossterm::command::write_command_ansi::<crossterm::style::SetColors, std::io::stdio::Stdout>::{closure#0}
+_RNCINvNtCsfKiFC1ztrmh_9hashbrown3map14equivalent_keyNtNtCs40k4W9msRzi_5alloc6string6StringBO_xE0Cs5DRV6yAd14J_19daedale_decompiler	hashbrown::map::equivalent_key::<alloc::string::String, alloc::string::String, i64>::{closure#0}
+_RNCINvNtCshHRB4Z1YrKw_9crossterm7command18write_command_ansiNtNtB6_5style9SetColorsNtNtNtCsgczF5crJ4sT_3std2io5stdio6StdoutE0CsfDOcEdXGwyf_12daedale_tui	crossterm::command::write_command_ansi::<crossterm::style::SetColors, std::io::stdio::Stdout>::{closure#0}
 _RNCINvNtNtCsduXJbRkUHPt_4ring10arithmetic3ffi15bn_mul_mont_ffiTNtNtNtB8_3cpu5intel3AdxNtB11_4Bmi2EKj8_Kj4_QSyEs_0B8_	ring::arithmetic::ffi::bn_mul_mont_ffi::<(ring::cpu::intel::Adx, ring::cpu::intel::Bmi2), 8, 4, &mut [u64]>::{closure#1}
-_RNCINvNtNtNtNtCscI6d9CVNmLh_4core5slice4sort6stable9quicksort9quicksortTyyENvYB17_NtNtBc_3cmp10PartialOrd2ltE0Cs5DRV6yAd14J_19execdump_decompiler	core::slice::sort::stable::quicksort::quicksort::<(u64, u64), <(u64, u64) as core::cmp::PartialOrd>::lt>::{closure#0}
+_RNCINvNtNtNtNtCscI6d9CVNmLh_4core5slice4sort6stable9quicksort9quicksortTyyENvYB17_NtNtBc_3cmp10PartialOrd2ltE0Cs5DRV6yAd14J_19daedale_decompiler	core::slice::sort::stable::quicksort::quicksort::<(u64, u64), <(u64, u64) as core::cmp::PartialOrd>::lt>::{closure#0}
 _RNCINvNvNtNtNtNtCscI6d9CVNmLh_4core4iter6traits8iterator8Iterator8find_map5checkmcQNvNtBe_4char8from_u32E0CscWJlcMzi19H_12regex_syntax	core::iter::traits::iterator::Iterator::find_map::check::<u32, char, &mut core::char::from_u32>::{closure#0}
-_RNCNCINvNtNtCsgczF5crJ4sT_3std6thread9lifecycle15spawn_uncheckedNCNvMs1_NtCslp0Ck2LHuWu_16execdump_project7projectNtB18_7Project11llm_moduless_0uE00B1a_	std::thread::lifecycle::spawn_unchecked::<<execdump_project::project::Project>::llm_modules::{closure#1}, ()>::{closure#0}::{closure#0}
-_RNCNCNvMNtCslp0Ck2LHuWu_16execdump_project5storeNtB6_5Store9signatures_0s_0B8_	<execdump_project::store::Store>::signature::{closure#1}::{closure#1}
-_RNCNCNvMs0_CsfDOcEdXGwyf_12execdump_tuiNtB9_3App3new00B9_	<execdump_tui::App>::new::{closure#0}::{closure#0}
-_RNCNCNvMs_NtCsfDOcEdXGwyf_12execdump_tui11source_viewNtB8_10SourceView7comment00Ba_	<execdump_tui::source_view::SourceView>::comment::{closure#0}::{closure#0}
-_RNCNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler4lift3x866memory00B9_	execdump_decompiler::lift::x86::memory::{closure#0}::{closure#0}
+_RNCNCINvNtNtCsgczF5crJ4sT_3std6thread9lifecycle15spawn_uncheckedNCNvMs1_NtCslp0Ck2LHuWu_16daedale_project7projectNtB18_7Project11llm_moduless_0uE00B1a_	std::thread::lifecycle::spawn_unchecked::<<daedale_project::project::Project>::llm_modules::{closure#1}, ()>::{closure#0}::{closure#0}
+_RNCNCNvMNtCslp0Ck2LHuWu_16daedale_project5storeNtB6_5Store9signatures_0s_0B8_	<daedale_project::store::Store>::signature::{closure#1}::{closure#1}
+_RNCNCNvMs0_CsfDOcEdXGwyf_12daedale_tuiNtB9_3App3new00B9_	<daedale_tui::App>::new::{closure#0}::{closure#0}
+_RNCNCNvMs_NtCsfDOcEdXGwyf_12daedale_tui11source_viewNtB8_10SourceView7comment00Ba_	<daedale_tui::source_view::SourceView>::comment::{closure#0}::{closure#0}
+_RNCNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler4lift3x866memory00B9_	daedale_decompiler::lift::x86::memory::{closure#0}::{closure#0}
 _RNCNCNvXsh_NtNtCsdqijrRiej1g_3llm8backends6openaiNtB9_6OpenAINtNtBd_9embedding17EmbeddingProvider5embed00Bd_	<llm::backends::openai::OpenAI as llm::embedding::EmbeddingProvider>::embed::{closure#0}::{closure#0}
-_RNCNvCsfDOcEdXGwyf_12execdump_tui14explorer_itemss4_0B3_	execdump_tui::explorer_items::{closure#6}
+_RNCNvCsfDOcEdXGwyf_12daedale_tui14explorer_itemss4_0B3_	daedale_tui::explorer_items::{closure#6}
 _RNCNvMNtCs426LfM5aveL_9untrusted8no_panicNtB4_5Slice8subslice0CsduXJbRkUHPt_4ring	<untrusted::no_panic::Slice>::subslice::{closure#0}
-_RNCNvMNtCslp0Ck2LHuWu_16execdump_project5cacheNtB4_4Meta6encodes1_0B6_	<execdump_project::cache::Meta>::encode::{closure#3}
-_RNCNvMNtNtCs5DRV6yAd14J_19execdump_decompiler1c5buildNtB4_7Builder14division_idiom0B8_	<execdump_decompiler::c::build::Builder>::division_idiom::{closure#0}
-_RNCNvMNtNtCs5DRV6yAd14J_19execdump_decompiler1c9structureNtB4_10Structurer7guarded0B8_	<execdump_decompiler::c::structure::Structurer>::guarded::{closure#0}
-_RNCNvMNtNtCs5DRV6yAd14J_19execdump_decompiler6typedb5parseNtB4_9Converter8evaluate0B8_	<execdump_decompiler::typedb::parse::Converter>::evaluate::{closure#0}
+_RNCNvMNtCslp0Ck2LHuWu_16daedale_project5cacheNtB4_4Meta6encodes1_0B6_	<daedale_project::cache::Meta>::encode::{closure#3}
+_RNCNvMNtNtCs5DRV6yAd14J_19daedale_decompiler1c5buildNtB4_7Builder14division_idiom0B8_	<daedale_decompiler::c::build::Builder>::division_idiom::{closure#0}
+_RNCNvMNtNtCs5DRV6yAd14J_19daedale_decompiler1c9structureNtB4_10Structurer7guarded0B8_	<daedale_decompiler::c::structure::Structurer>::guarded::{closure#0}
+_RNCNvMNtNtCs5DRV6yAd14J_19daedale_decompiler6typedb5parseNtB4_9Converter8evaluate0B8_	<daedale_decompiler::typedb::parse::Converter>::evaluate::{closure#0}
 _RNCNvMNtNtCscWJlcMzi19H_12regex_syntax3hir7literalNtB4_9Extractor5union0B8_	<regex_syntax::hir::literal::Extractor>::union::{closure#0}
 _RNCNvMNtNtCsgLg2E8rH6Za_12clap_builder6parser9validatorNtB4_9Validator8validate0B8_	<clap_builder::parser::validator::Validator>::validate::{closure#0}
 _RNCNvMNtNtNtCscJZUg2pyjiG_5tokio7runtime9scheduler14current_threadNtB4_13CurrentThread8shutdown0Ba_	<tokio::runtime::scheduler::current_thread::CurrentThread>::shutdown::{closure#0}
-_RNCNvMs0_CsfDOcEdXGwyf_12execdump_tuiNtB7_3App11run_commands3_0B7_	<execdump_tui::App>::run_command::{closure#5}
-_RNCNvMs0_CsfDOcEdXGwyf_12execdump_tuiNtB7_3App13strings_table0B7_	<execdump_tui::App>::strings_table::{closure#0}
-_RNCNvMs0_NtCs5DRV6yAd14J_19execdump_decompiler3llmNtB7_9Assistant8for_tasks_0B9_	<execdump_decompiler::llm::Assistant>::for_task::{closure#1}
-_RNCNvMs0_NtCslp0Ck2LHuWu_16execdump_project5cacheNtB7_5Cache10line_counts_0B9_	<execdump_project::cache::Cache>::line_count::{closure#1}
+_RNCNvMs0_CsfDOcEdXGwyf_12daedale_tuiNtB7_3App11run_commands3_0B7_	<daedale_tui::App>::run_command::{closure#5}
+_RNCNvMs0_CsfDOcEdXGwyf_12daedale_tuiNtB7_3App13strings_table0B7_	<daedale_tui::App>::strings_table::{closure#0}
+_RNCNvMs0_NtCs5DRV6yAd14J_19daedale_decompiler3llmNtB7_9Assistant8for_tasks_0B9_	<daedale_decompiler::llm::Assistant>::for_task::{closure#1}
+_RNCNvMs0_NtCslp0Ck2LHuWu_16daedale_project5cacheNtB7_5Cache10line_counts_0B9_	<daedale_project::cache::Cache>::line_count::{closure#1}
 _RNCNvMs0_NtNtNtNtCscJZUg2pyjiG_5tokio7runtime9scheduler12multi_thread6workerNtB7_4Core15next_local_task0Bf_	<tokio::runtime::scheduler::multi_thread::worker::Core>::next_local_task::{closure#0}
-_RNCNvMs1_NtCslp0Ck2LHuWu_16execdump_project7projectNtB7_7Project11llm_moduless_0B9_	<execdump_project::project::Project>::llm_modules::{closure#1}
+_RNCNvMs1_NtCslp0Ck2LHuWu_16daedale_project7projectNtB7_7Project11llm_moduless_0B9_	<daedale_project::project::Project>::llm_modules::{closure#1}
 _RNCNvMs1_NtNtCscJZUg2pyjiG_5tokio6signal8registryINtB7_8RegistryNtNtB9_4unix9OsStorageE17register_listener0Bb_	<tokio::signal::registry::Registry<tokio::signal::unix::OsStorage>>::register_listener::{closure#0}
 _RNCNvMs1_NtNtNtNtCscJZUg2pyjiG_5tokio7runtime9scheduler12multi_thread4parkNtB7_5Inner12park_condvar0Bf_	<tokio::runtime::scheduler::multi_thread::park::Inner>::park_condvar::{closure#0}
-_RNCNvMs2_NtCs5DRV6yAd14J_19execdump_decompiler4liftNtB7_6Lifter22drop_unread_tail_flags0B9_	<execdump_decompiler::lift::Lifter>::drop_unread_tail_flags::{closure#0}
-_RNCNvMs2_NtCs5DRV6yAd14J_19execdump_decompiler4liftNtB7_6Lifter9set_flagsse_0B9_	<execdump_decompiler::lift::Lifter>::set_flags::{closure#16}
+_RNCNvMs2_NtCs5DRV6yAd14J_19daedale_decompiler4liftNtB7_6Lifter22drop_unread_tail_flags0B9_	<daedale_decompiler::lift::Lifter>::drop_unread_tail_flags::{closure#0}
+_RNCNvMs2_NtCs5DRV6yAd14J_19daedale_decompiler4liftNtB7_6Lifter9set_flagsse_0B9_	<daedale_decompiler::lift::Lifter>::set_flags::{closure#16}
 _RNCNvMs2_NtNtCscWJlcMzi19H_12regex_syntax3ast5parseINtB7_7ParserIQNtB7_6ParserE16add_capture_name0Bb_	<regex_syntax::ast::parse::ParserI<&mut regex_syntax::ast::parse::Parser>>::add_capture_name::{closure#0}
 _RNCNvMs2_NtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson8compilerNtB7_8Compiler9c_exactly0Bd_	<regex_automata::nfa::thompson::compiler::Compiler>::c_exactly::{closure#0}
 _RNCNvMs3_NtNtCsgLg2E8rH6Za_12clap_builder7builder7commandNtB7_7Command15__render_version0Bb_	<clap_builder::builder::command::Command>::_render_version::{closure#0}
 _RNCNvMs5_NtNtCsd3LqYXMFFHi_6webpki3crl5typesNtB7_24IssuingDistributionPoint8from_der0Bb_	<webpki::crl::types::IssuingDistributionPoint>::from_der::{closure#0}
 _RNCNvMs6_NtNtCs1wQTQaEylLk_6rustls6crypto6cipherNtB7_5Nonce12new_from_seq0Bb_	<rustls::crypto::cipher::Nonce>::new_from_seq::{closure#0}
 _RNCNvMs9_NtNtNtCsgczF5crJ4sT_3std4sync6poison5mutexINtB7_10MutexGuardNtNtNtCsbmo0FHMV5Xy_5hyper4body4chan5StateE3new0B1b_	<std::sync::poison::mutex::MutexGuard<hyper::body::chan::State>>::new::{closure#0}
-_RNCNvMs_NtCs5DRV6yAd14J_19execdump_decompiler10decompilerNtB6_10Decompiler3new0B8_	<execdump_decompiler::decompiler::Decompiler>::new::{closure#0}
-_RNCNvMs_NtCsfDOcEdXGwyf_12execdump_tui11source_viewNtB6_10SourceView13jump_conflicts_0B8_	<execdump_tui::source_view::SourceView>::jump_conflict::{closure#1}
+_RNCNvMs_NtCs5DRV6yAd14J_19daedale_decompiler10decompilerNtB6_10Decompiler3new0B8_	<daedale_decompiler::decompiler::Decompiler>::new::{closure#0}
+_RNCNvMs_NtCsfDOcEdXGwyf_12daedale_tui11source_viewNtB6_10SourceView13jump_conflicts_0B8_	<daedale_tui::source_view::SourceView>::jump_conflict::{closure#1}
 _RNCNvMs_NtNtCs7cMPnhEfzsh_7reqwest10async_impl9multipartNtB6_4Form11into_stream0Ba_	<reqwest::async_impl::multipart::Form>::into_stream::{closure#0}
 _RNCNvMs_NtNtCskQp7oO5Fp7v_12aho_corasick3nfa13noncontiguousNtB6_3NFA11alloc_match0Ba_	<aho_corasick::nfa::noncontiguous::NFA>::alloc_match::{closure#0}
 _RNCNvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB7_13RawTableInner15rehash_in_place0CshxJnpmSp82F_6lang_c	<hashbrown::raw::RawTableInner>::rehash_in_place::{closure#0}
 _RNCNvMsp_NtNtCscI6d9CVNmLh_4core3str4iterINtB7_20MatchIndicesInternalReE4next0CsgLg2E8rH6Za_12clap_builder	<core::str::iter::MatchIndicesInternal<&str>>::next::{closure#0}
 _RNCNvNtCs4Q55PWArtAq_3url4host16parse_ipv4numbers0_0B5_	url::host::parse_ipv4number::{closure#2}
-_RNCNvNtCs5DRV6yAd14J_19execdump_decompiler4lift8capstone0B5_	execdump_decompiler::lift::capstone::{closure#0}
+_RNCNvNtCs5DRV6yAd14J_19daedale_decompiler4lift8capstone0B5_	daedale_decompiler::lift::capstone::{closure#0}
 _RNCNvNtCsd3LqYXMFFHi_6webpki11signed_data18verify_signed_data0B5_	webpki::signed_data::verify_signed_data::{closure#0}
-_RNCNvNtCsfDOcEdXGwyf_12execdump_tui6layout13assign_trackss2_0B5_	execdump_tui::layout::assign_tracks::{closure#4}
-_RNCNvNtCslp0Ck2LHuWu_16execdump_project11annotations12valid_module0B5_	execdump_project::annotations::valid_module::{closure#0}
+_RNCNvNtCsfDOcEdXGwyf_12daedale_tui6layout13assign_trackss2_0B5_	daedale_tui::layout::assign_tracks::{closure#4}
+_RNCNvNtCslp0Ck2LHuWu_16daedale_project11annotations12valid_module0B5_	daedale_project::annotations::valid_module::{closure#0}
 _RNCNvNtNtCs1wQTQaEylLk_6rustls6client2hs27emit_client_hello_for_retrys4_0B7_	rustls::client::hs::emit_client_hello_for_retry::{closure#6}
 _RNCNvNtNtCs4pOvFVUq0Vr_14regex_automata6hybrid6search7eoi_rev0B7_	regex_automata::hybrid::search::eoi_rev::{closure#0}
-_RNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler1c9structure16merge_conditionss_0B7_	execdump_decompiler::c::structure::merge_conditions::{closure#1}
-_RNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler4lift3x864liftsp_0B7_	execdump_decompiler::lift::x86::lift::{closure#27}
-_RNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7aarch6415register_access0B7_	execdump_decompiler::lift::aarch64::register_access::{closure#0}
-_RNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7aarch644liftsd_0B7_	execdump_decompiler::lift::aarch64::lift::{closure#15}
-_RNCNvNtNtCs9gee9duVEzI_19execdump_decompiler1c5build5builds4_0B7_	execdump_decompiler::c::build::build::{closure#6}
+_RNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler1c9structure16merge_conditionss_0B7_	daedale_decompiler::c::structure::merge_conditions::{closure#1}
+_RNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler4lift3x864liftsp_0B7_	daedale_decompiler::lift::x86::lift::{closure#27}
+_RNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7aarch6415register_access0B7_	daedale_decompiler::lift::aarch64::register_access::{closure#0}
+_RNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7aarch644liftsd_0B7_	daedale_decompiler::lift::aarch64::lift::{closure#15}
+_RNCNvNtNtCs9gee9duVEzI_19daedale_decompiler1c5build5builds4_0B7_	daedale_decompiler::c::build::build::{closure#6}
 _RNCNvNtNtCsdg2E0CmAnsZ_11toml_parser6parser8document13on_array_open0B7_	toml_parser::parser::document::on_array_open::{closure#0}
 _RNCNvNtNtCsgLg2E8rH6Za_12clap_builder7builder13debug_asserts10assert_apps4_0B7_	clap_builder::builder::debug_asserts::assert_app::{closure#6}
 _RNCNvNtNtNtCsdqijrRiej1g_3llm7builder5build7helpers16optional_api_key0B9_	llm::builder::build::helpers::optional_api_key::{closure#0}
 _RNCNvNtNtNtNtCshHRB4Z1YrKw_9crossterm5event3sys4unix5parse11parse_events_0Bb_	crossterm::event::sys::unix::parse::parse_event::{closure#1}
 _RNCNvXNtNtCs1wQTQaEylLk_6rustls6crypto4ringNtB4_4RingNtB6_12SecureRandom4fill0B8_	<rustls::crypto::ring::Ring as rustls::crypto::SecureRandom>::fill::{closure#0}
 _RNCNvXs0_NtNtCs4pOvFVUq0Vr_14regex_automata4meta8strategyINtB7_3PreNtNtNtNtBb_4util9prefilter12aho_corasick11AhoCorasickENtB7_8Strategy6searchs_0Bb_	<regex_automata::meta::strategy::Pre<regex_automata::util::prefilter::aho_corasick::AhoCorasick> as regex_automata::meta::strategy::Strategy>::search::{closure#1}
-_RNCNvXs1_NtCs3c2gDx2JVYI_8execdump4argsNtB7_4ArgsNtNtCsgLg2E8rH6Za_12clap_builder6derive4Args12augment_args0B9_	<execdump::args::Args as clap_builder::derive::Args>::augment_args::{closure#0}
+_RNCNvXs1_NtCs3c2gDx2JVYI_8daedale4argsNtB7_4ArgsNtNtCsgLg2E8rH6Za_12clap_builder6derive4Args12augment_args0B9_	<daedale::args::Args as clap_builder::derive::Args>::augment_args::{closure#0}
 _RNCNvXs1_NtNtNtCsgczF5crJ4sT_3std2io5error14repr_bitpackedNtB7_4ReprNtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4drop0CsaGa943HH00r_4git2	<std::io::error::repr_bitpacked::Repr as core::ops::drop::Drop>::drop::{closure#0}
 _RNCNvXs5_NtNtCs1wQTQaEylLk_6rustls6client5tls12NtB7_16ExpectServerDoneINtNtBb_12common_state5StateNtNtB9_11client_conn20ClientConnectionDataE6handle0Bb_	<rustls::client::tls12::ExpectServerDone as rustls::common_state::State<rustls::client::client_conn::ClientConnectionData>>::handle::{closure#0}
 _RNCNvXsF_NtCse9565iEWUFB_5bytes5bytesNtB7_5BytesINtNtCscI6d9CVNmLh_4core7convert4FromINtNtCs40k4W9msRzi_5alloc5boxed3BoxShEE4from0B9_	<bytes::bytes::Bytes as core::convert::From<alloc::boxed::Box<[u8]>>>::from::{closure#0}
@@ -289,13 +289,13 @@ _RNvMNtCs1mKOsRm1Wga_7inkwell11basic_blockNtB2_10BasicBlock16get_instructions	<i
 _RNvMNtCs1wQTQaEylLk_6rustls12common_stateNtB2_11CommonState17send_close_notify	<rustls::common_state::CommonState>::send_close_notify
 _RNvMNtCs1wQTQaEylLk_6rustls8compressNtB2_16CompressionCache3new	<rustls::compress::CompressionCache>::new
 _RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBH_3ast14InitDeclaratorEE3newBH_	<alloc::vec::Vec<lang_c::span::Node<lang_c::ast::InitDeclarator>>>::new
-_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecNtNtCsaGa943HH00r_4git26commit6CommitE3newCslp0Ck2LHuWu_16execdump_project	<alloc::vec::Vec<git2::commit::Commit>>::new
-_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast3VarE3newBI_	<alloc::vec::Vec<execdump_decompiler::c::ast::Var>>::new
+_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecNtNtCsaGa943HH00r_4git26commit6CommitE3newCslp0Ck2LHuWu_16daedale_project	<alloc::vec::Vec<git2::commit::Commit>>::new
+_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast3VarE3newBI_	<alloc::vec::Vec<daedale_decompiler::c::ast::Var>>::new
 _RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecNtNtNtCskQp7oO5Fp7v_12aho_corasick4util10primitives7StateIDE3newBI_	<alloc::vec::Vec<aho_corasick::util::primitives::StateID>>::new
-_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecTjNtNtCslp0Ck2LHuWu_16execdump_project5store5TokenEE3newBI_	<alloc::vec::Vec<(usize, execdump_project::store::Token)>>::new
+_RNvMNtCs40k4W9msRzi_5alloc3vecINtB2_3VecTjNtNtCslp0Ck2LHuWu_16daedale_project5store5TokenEE3newBI_	<alloc::vec::Vec<(usize, daedale_project::store::Token)>>::new
 _RNvMNtCs40k4W9msRzi_5alloc5allocNtB2_6Global18alloc_impl_runtimeCs945LnvxVZUd_3mio	<alloc::alloc::Global>::alloc_impl_runtime
 _RNvMNtCs40k4W9msRzi_5alloc5sliceSRDNtNtCs1wQTQaEylLk_6rustls8compress14CertCompressorEL_6to_vecBB_	<[&dyn rustls::compress::CertCompressor]>::to_vec
-_RNvMNtCs40k4W9msRzi_5alloc6stringNtB2_6String3newCsfDOcEdXGwyf_12execdump_tui	<alloc::string::String>::new
+_RNvMNtCs40k4W9msRzi_5alloc6stringNtB2_6String3newCsfDOcEdXGwyf_12daedale_tui	<alloc::string::String>::new
 _RNvMNtCs40k4W9msRzi_5alloc6stringNtB2_6String8is_emptyCsgLg2E8rH6Za_12clap_builder	<alloc::string::String>::is_empty
 _RNvMNtCs4j8ju0A4eoB_4git26branchNtB2_6Branch4name	<git2::branch::Branch>::name
 _RNvMNtCs6jb4KdjraBi_7anstyle5colorNtB2_5Color9render_fgB4_	<anstyle::color::Color>::render_fg
@@ -306,30 +306,30 @@ _RNvMNtCsbmo0FHMV5Xy_5hyper5errorNtB2_5Error22new_user_dispatch_gone	<hyper::err
 _RNvMNtCscI6d9CVNmLh_4core3stre3lenCs4WrJ2ea1NkX_12ratatui_core	<str>::len
 _RNvMNtCscI6d9CVNmLh_4core3stre5charsCsjftnr0xLvZK_10mime_guess	<str>::chars
 _RNvMNtCscI6d9CVNmLh_4core4timeNtB2_8Duration3newCsePSvpdEU5V9_10hyper_util	<core::time::Duration>::new
-_RNvMNtCscI6d9CVNmLh_4core5sliceSINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBz_3ast17DerivedDeclaratorE4iterCs5DRV6yAd14J_19execdump_decompiler	<[lang_c::span::Node<lang_c::ast::DerivedDeclarator>]>::iter
+_RNvMNtCscI6d9CVNmLh_4core5sliceSINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBz_3ast17DerivedDeclaratorE4iterCs5DRV6yAd14J_19daedale_decompiler	<[lang_c::span::Node<lang_c::ast::DerivedDeclarator>]>::iter
 _RNvMNtCscI6d9CVNmLh_4core5sliceSNtCslCSfi6V07GA_8httparse6Header4iterCsbmo0FHMV5Xy_5hyper	<[httparse::Header]>::iter
 _RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtCscWJlcMzi19H_12regex_syntax3hir17ClassUnicodeRange4iterBy_	<[regex_syntax::hir::ClassUnicodeRange]>::iter
-_RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtCslUhSaoMDPHK_13execdump_core7program12FunctionSeed22split_at_mut_uncheckedBy_	<[execdump_core::program::FunctionSeed]>::split_at_mut_unchecked
-_RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c5build6SBlock4iterBA_	<[execdump_decompiler::c::build::SBlock]>::iter
+_RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtCslUhSaoMDPHK_13daedale_core7program12FunctionSeed22split_at_mut_uncheckedBy_	<[daedale_core::program::FunctionSeed]>::split_at_mut_unchecked
+_RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c5build6SBlock4iterBA_	<[daedale_decompiler::c::build::SBlock]>::iter
 _RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtCsdqijrRiej1g_3llm8backends9anthropic19AnthropicModelEntry4iterBA_	<[llm::backends::anthropic::AnthropicModelEntry]>::iter
 _RNvMNtCscI6d9CVNmLh_4core5sliceSNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson12literal_trie10Transition4iterBC_	<[regex_automata::nfa::thompson::literal_trie::Transition]>::iter
 _RNvMNtCscI6d9CVNmLh_4core5sliceSRe4lastCs4Q55PWArtAq_3url	<[&str]>::last
-_RNvMNtCscI6d9CVNmLh_4core5sliceSTllE4lastCsfDOcEdXGwyf_12execdump_tui	<[(i32, i32)]>::last
+_RNvMNtCscI6d9CVNmLh_4core5sliceSTllE4lastCsfDOcEdXGwyf_12daedale_tui	<[(i32, i32)]>::last
 _RNvMNtCscI6d9CVNmLh_4core5sliceSh12as_ptr_rangeCs1wQTQaEylLk_6rustls	<[u8]>::as_ptr_range
 _RNvMNtCscI6d9CVNmLh_4core5sliceSh5firstCslgNNO3csm7k_10serde_json	<[u8]>::first
-_RNvMNtCscI6d9CVNmLh_4core5sliceSt8containsCs5DRV6yAd14J_19execdump_decompiler	<[u16]>::contains
+_RNvMNtCscI6d9CVNmLh_4core5sliceSt8containsCs5DRV6yAd14J_19daedale_decompiler	<[u16]>::contains
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionINtNtB4_6result6ResultNtNtNtCsdqijrRiej1g_3llm4chat6stream14StreamResponseNtNtB19_5error8LLMErrorEE7is_someB19_	<core::option::Option<core::result::Result<llm::chat::stream::StreamResponse, llm::error::LLMError>>>::is_some
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionINtNtCs40k4W9msRzi_5alloc3vec3VechEE7is_someCs1wQTQaEylLk_6rustls	<core::option::Option<alloc::vec::Vec<u8>>>::is_some
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNCNCNvNtNtCsdqijrRiej1g_3llm9providers17openai_compatible25create_openai_tool_stream00E10as_pin_mutBR_	<core::option::Option<llm::providers::openai_compatible::create_openai_tool_stream::{closure#0}::{closure#0}>>::as_pin_mut
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtCs40k4W9msRzi_5alloc6string6StringE7is_someCsgLg2E8rH6Za_12clap_builder	<core::option::Option<alloc::string::String>>::is_some
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtCse9565iEWUFB_5bytes9bytes_mut8BytesMutE4takeCs7cMPnhEfzsh_7reqwest	<core::option::Option<bytes::bytes_mut::BytesMut>>::take
-_RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtNtCs1WztaLyfR2E_7inkwell6values9int_value8IntValueE2orCs5DRV6yAd14J_19execdump_decompiler	<core::option::Option<inkwell::values::int_value::IntValue>>::or
+_RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtNtCs1WztaLyfR2E_7inkwell6values9int_value8IntValueE2orCs5DRV6yAd14J_19daedale_decompiler	<core::option::Option<inkwell::values::int_value::IntValue>>::or
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtNtCs4pOvFVUq0Vr_14regex_automata4util6search9HalfMatchE7is_someBN_	<core::option::Option<regex_automata::util::search::HalfMatch>>::is_some
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtNtCsdYsl3qRwY1p_4toml2de5error5ErrorE7is_noneBN_	<core::option::Option<toml::de::error::Error>>::is_none
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionNtNtNtCsgLg2E8rH6Za_12clap_builder7builder6action9ArgActionE6as_refBN_	<core::option::Option<clap_builder::builder::action::ArgAction>>::as_ref
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionQNtNtNtCs4pOvFVUq0Vr_14regex_automata6hybrid3dfa14SearchProgressE6expectBO_	<core::option::Option<&mut regex_automata::hybrid::dfa::SearchProgress>>::expect
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionRNtNtNtCsgLg2E8rH6Za_12clap_builder7builder7command7CommandE6expectBO_	<core::option::Option<&clap_builder::builder::command::Command>>::expect
-_RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionTNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast4ExprINtNtCs40k4W9msRzi_5alloc3vec3VecTnjEEjEE7is_someBO_	<core::option::Option<(execdump_decompiler::c::ast::Expr, alloc::vec::Vec<(i128, usize)>, usize)>>::is_some
+_RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionTNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast4ExprINtNtCs40k4W9msRzi_5alloc3vec3VecTnjEEjEE7is_someBO_	<core::option::Option<(daedale_decompiler::c::ast::Expr, alloc::vec::Vec<(i128, usize)>, usize)>>::is_some
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionjE17unwrap_or_defaultCs1wQTQaEylLk_6rustls	<core::option::Option<usize>>::unwrap_or_default
 _RNvMNtCscI6d9CVNmLh_4core6optionINtB2_6OptionuE7is_noneCsasIVapJg4Ba_16rustls_pki_types	<core::option::Option<()>>::is_none
 _RNvMNtCscI6d9CVNmLh_4core6resultINtB2_6ResultNtNtNtB4_5alloc6layout6LayoutNtBJ_11LayoutErrorE6expectCsg0tgsEvl74A_11compact_str	<core::result::Result<core::alloc::layout::Layout, core::alloc::layout::LayoutError>>::expect
@@ -337,26 +337,26 @@ _RNvMNtCscI6d9CVNmLh_4core6resultINtB2_6ResulthhE6is_errCs5j4ko3RvOtI_11parking_
 _RNvMNtCscI6d9CVNmLh_4core6resultINtB2_6ResultuNtNtNtCs1wQTQaEylLk_6rustls6crypto5tls1317OutputLengthErrorE6expectBO_	<core::result::Result<(), rustls::crypto::tls13::OutputLengthError>>::expect
 _RNvMNtCsd3LqYXMFFHi_6webpki4certNtB2_4Cert23subject_public_key_info	<webpki::cert::Cert>::subject_public_key_info
 _RNvMNtCse9565iEWUFB_5bytes5bytesNtB2_5Bytes8as_sliceCsdqijrRiej1g_3llm	<bytes::bytes::Bytes>::as_slice
-_RNvMNtCsfKiFC1ztrmh_9hashbrown11rustc_entryINtNtB4_3map7HashMapyyNtCs7IUSEhzOF6i_10rustc_hash13FxBuildHasherE11rustc_entryCs5DRV6yAd14J_19execdump_decompiler	<hashbrown::map::HashMap<u64, u64, rustc_hash::FxBuildHasher>>::rustc_entry
+_RNvMNtCsfKiFC1ztrmh_9hashbrown11rustc_entryINtNtB4_3map7HashMapyyNtCs7IUSEhzOF6i_10rustc_hash13FxBuildHasherE11rustc_entryCs5DRV6yAd14J_19daedale_decompiler	<hashbrown::map::HashMap<u64, u64, rustc_hash::FxBuildHasher>>::rustc_entry
 _RNvMNtCsgLg2E8rH6Za_12clap_builder5errorNtB2_5Error16set_colored_helpB4_	<clap_builder::error::Error>::set_colored_help
 _RNvMNtCshxJnpmSp82F_6lang_c3envNtB2_3Env9with_core	<lang_c::env::Env>::with_core
-_RNvMNtCslgNNO3csm7k_10serde_json3mapINtB2_3MapNtNtCs40k4W9msRzi_5alloc6string6StringNtNtB4_5value5ValueE3newCs5DRV6yAd14J_19execdump_decompiler	<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>::new
+_RNvMNtCslgNNO3csm7k_10serde_json3mapINtB2_3MapNtNtCs40k4W9msRzi_5alloc6string6StringNtNtB4_5value5ValueE3newCs5DRV6yAd14J_19daedale_decompiler	<serde_json::map::Map<alloc::string::String, serde_json::value::Value>>::new
 _RNvMNtNtCs1WztaLyfR2E_7inkwell5types9void_typeNtB2_8VoidType3new	<inkwell::types::void_type::VoidType>::new
 _RNvMNtNtCs1mKOsRm1Wga_7inkwell5types10float_typeNtB2_9FloatType13get_bit_width	<inkwell::types::float_type::FloatType>::get_bit_width
 _RNvMNtNtCs1wQTQaEylLk_6rustls6client11client_connNtB2_12ClientConfig15crypto_provider	<rustls::client::client_conn::ClientConfig>::crypto_provider
 _RNvMNtNtCs3wpE2xUYJ1V_14regex_automata4meta8strategyINtB2_3PreNtNtNtNtB6_4util9prefilter7byteset7ByteSetE3newB6_	<regex_automata::meta::strategy::Pre<regex_automata::util::prefilter::byteset::ByteSet>>::new
 _RNvMNtNtCs4pOvFVUq0Vr_14regex_automata4meta8strategyINtB2_3PreNtNtNtNtB6_4util9prefilter6memchr6MemchrE3newB6_	<regex_automata::meta::strategy::Pre<regex_automata::util::prefilter::memchr::Memchr>>::new
 _RNvMNtNtCs4pOvFVUq0Vr_14regex_automata4util8alphabetNtB2_4Unit7is_byte	<regex_automata::util::alphabet::Unit>::is_byte
-_RNvMNtNtCs5DRV6yAd14J_19execdump_decompiler1c5buildNtB2_7Builder4stmt	<execdump_decompiler::c::build::Builder>::stmt
+_RNvMNtNtCs5DRV6yAd14J_19daedale_decompiler1c5buildNtB2_7Builder4stmt	<daedale_decompiler::c::build::Builder>::stmt
 _RNvMNtNtCs5OZEacqcADO_5tokio2fs4fileNtB2_4File8from_std	<tokio::fs::file::File>::from_std
 _RNvMNtNtCs7cMPnhEfzsh_7reqwest10async_impl7requestNtB2_7Request8body_mutB6_	<reqwest::async_impl::request::Request>::body_mut
 _RNvMNtNtCs93PxaurfhPx_10tokio_util2io13reader_streamINtB2_12ReaderStreamNtNtNtCscJZUg2pyjiG_5tokio2fs4file4FileE3newCsdqijrRiej1g_3llm	<tokio_util::io::reader_stream::ReaderStream<tokio::fs::file::File>>::new
-_RNvMNtNtCs9KeADrciNZy_6chrono5naive7isoweekNtB2_7IsoWeek4yearCslUhSaoMDPHK_13execdump_core	<chrono::naive::isoweek::IsoWeek>::year
-_RNvMNtNtCs9gee9duVEzI_19execdump_decompiler1c5buildNtB2_7Builder5deref	<execdump_decompiler::c::build::Builder>::deref
+_RNvMNtNtCs9KeADrciNZy_6chrono5naive7isoweekNtB2_7IsoWeek4yearCslUhSaoMDPHK_13daedale_core	<chrono::naive::isoweek::IsoWeek>::year
+_RNvMNtNtCs9gee9duVEzI_19daedale_decompiler1c5buildNtB2_7Builder5deref	<daedale_decompiler::c::build::Builder>::deref
 _RNvMNtNtCsayLkB1OTdrc_12ratatui_core6buffer4cellNtB2_4Cell10set_symbol	<ratatui_core::buffer::cell::Cell>::set_symbol
 _RNvMNtNtCscI6d9CVNmLh_4core2io5errorNtB2_9ErrorKind9from_primCssrCvUZVUPr_12tracing_core	<core::io::error::ErrorKind>::from_prim
 _RNvMNtNtCscI6d9CVNmLh_4core3ptr9const_ptrPh7is_nullCse9565iEWUFB_5bytes	<*const u8>::is_null
-_RNvMNtNtCscI6d9CVNmLh_4core4char7methodsc13is_whitespaceCsfDOcEdXGwyf_12execdump_tui	<char>::is_whitespace
+_RNvMNtNtCscI6d9CVNmLh_4core4char7methodsc13is_whitespaceCsfDOcEdXGwyf_12daedale_tui	<char>::is_whitespace
 _RNvMNtNtCscI6d9CVNmLh_4core4char7methodsc8to_digitCsgLg2E8rH6Za_12clap_builder	<char>::to_digit
 _RNvMNtNtCscJZUg2pyjiG_5tokio2io5readyNtB2_5Ready9satisfies	<tokio::io::ready::Ready>::satisfies
 _RNvMNtNtCscJZUg2pyjiG_5tokio4util4randNtB2_7RngSeed9from_pair	<tokio::util::rand::RngSeed>::from_pair
@@ -366,7 +366,7 @@ _RNvMNtNtCsduXJbRkUHPt_4ring6digest12finish_errorNtB2_11FinishError33pending_not
 _RNvMNtNtCsgLg2E8rH6Za_12clap_builder4util2idNtB2_2Id15from_static_ref	<clap_builder::util::id::Id>::from_static_ref
 _RNvMNtNtCsgLg2E8rH6Za_12clap_builder6parser6parserNtB2_6Parser3new	<clap_builder::parser::parser::Parser>::new
 _RNvMNtNtCsgLg2E8rH6Za_12clap_builder7builder5rangeNtB2_10ValueRange8is_fixed	<clap_builder::builder::range::ValueRange>::is_fixed
-_RNvMNtNtCsgczF5crJ4sT_3std6thread7builderNtB2_7Builder3newCslp0Ck2LHuWu_16execdump_project	<std::thread::builder::Builder>::new
+_RNvMNtNtCsgczF5crJ4sT_3std6thread7builderNtB2_7Builder3newCslp0Ck2LHuWu_16daedale_project	<std::thread::builder::Builder>::new
 _RNvMNtNtCskQp7oO5Fp7v_12aho_corasick6packed7patternNtB2_8Patterns5reset	<aho_corasick::packed::pattern::Patterns>::reset
 _RNvMNtNtNtCs4PY1t2qPbZD_6memchr4arch3all9rabinkarpNtB2_6Finder3newCskQp7oO5Fp7v_12aho_corasick	<memchr::arch::all::rabinkarp::Finder>::new
 _RNvMNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson5errorNtB2_10BuildError4word	<regex_automata::nfa::thompson::error::BuildError>::word
@@ -377,21 +377,21 @@ _RNvMNtNtNtCscJZUg2pyjiG_5tokio7runtime4time5wheelNtB2_5Wheel20next_expiration_t
 _RNvMNtNtNtCsce7Tiq8xUP9_6rustix7backend2io5errnoNtB2_5Errno12raw_os_errorCshHRB4Z1YrKw_9crossterm	<rustix::backend::io::errno::Errno>::raw_os_error
 _RNvMNtNtNtCsdYsl3qRwY1p_4toml3ser5value5arrayNtB2_19SerializeValueArray3seq	<toml::ser::value::array::SerializeValueArray>::seq
 _RNvMNtNtNtCsfKiFC1ztrmh_9hashbrown7control5group4sse2NtB2_5Group44convert_special_to_empty_and_full_to_deletedCs7fllHZsMb0X_4http	<hashbrown::control::group::sse2::Group>::convert_special_to_empty_and_full_to_deleted
-_RNvMNtNtNtCsgczF5crJ4sT_3std11collections4hash3mapINtB2_7HashMapyNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7TrackerE3newB15_	<std::collections::hash::map::HashMap<u64, execdump_decompiler::lift::Tracker>>::new
+_RNvMNtNtNtCsgczF5crJ4sT_3std11collections4hash3mapINtB2_7HashMapyNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7TrackerE3newB15_	<std::collections::hash::map::HashMap<u64, daedale_decompiler::lift::Tracker>>::new
 _RNvMNtNtNtNtCs4PY1t2qPbZD_6memchr4arch6x86_644avx210packedpairNtB2_6Finder4pairCskQp7oO5Fp7v_12aho_corasick	<memchr::arch::x86_64::avx2::packedpair::Finder>::pair
 _RNvMNtNtNtNtCscJZUg2pyjiG_5tokio7runtime4time5wheel5levelNtB2_5Level18next_occupied_slot	<tokio::runtime::time::wheel::level::Level>::next_occupied_slot
 _RNvMNtNtNtNtCsgczF5crJ4sT_3std3sys4sync5mutex5futexNtB2_5Mutex14lock_contended	<std::sys::sync::mutex::futex::Mutex>::lock_contended
 _RNvMNvNtCs8ZDyYQBYTaX_14http_body_util6streams0_1__INtB4_14BodyDataStreamNtNtNtCs7cMPnhEfzsh_7reqwest10async_impl4body4BodyE7projectB1f_	<http_body_util::stream::BodyDataStream<reqwest::async_impl::body::Body>>::project
-_RNvMs0_CsadtEA1PXqHv_12execdump_tuiNtB5_3App15resolve_address	<execdump_tui::App>::resolve_address
-_RNvMs0_CsfDOcEdXGwyf_12execdump_tuiNtB5_3App13region_disasm	<execdump_tui::App>::region_disasm
+_RNvMs0_CsadtEA1PXqHv_12daedale_tuiNtB5_3App15resolve_address	<daedale_tui::App>::resolve_address
+_RNvMs0_CsfDOcEdXGwyf_12daedale_tuiNtB5_3App13region_disasm	<daedale_tui::App>::region_disasm
 _RNvMs0_NtCs1wQTQaEylLk_6rustls4connINtB5_16ConnectionCommonNtNtNtB7_6client11client_conn20ClientConnectionDataE6writerCs7cMPnhEfzsh_7reqwest	<rustls::conn::ConnectionCommon<rustls::client::client_conn::ClientConnectionData>>::writer
 _RNvMs0_NtCs8iozIJOV3y1_8capstone8capstoneNtB5_8Capstone12error_result	<capstone::capstone::Capstone>::error_result
 _RNvMs0_NtCscI6d9CVNmLh_4core3numl10rem_euclidCs9KeADrciNZy_6chrono	<i32>::rem_euclid
-_RNvMs0_NtCsfDOcEdXGwyf_12execdump_tui10graph_viewNtB5_9GraphView3cfg	<execdump_tui::graph_view::GraphView>::cfg
-_RNvMs0_NtCslUhSaoMDPHK_13execdump_core2peNtB5_10COFFHeader4dump	<execdump_core::pe::COFFHeader>::dump
+_RNvMs0_NtCsfDOcEdXGwyf_12daedale_tui10graph_viewNtB5_9GraphView3cfg	<daedale_tui::graph_view::GraphView>::cfg
+_RNvMs0_NtCslUhSaoMDPHK_13daedale_core2peNtB5_10COFFHeader4dump	<daedale_core::pe::COFFHeader>::dump
 _RNvMs0_NtNtCs1WztaLyfR2E_7inkwell5types8int_typeNtB5_7IntType29const_int_arbitrary_precision	<inkwell::types::int_type::IntType>::const_int_arbitrary_precision
 _RNvMs0_NtNtCs40k4W9msRzi_5alloc3vec9into_iterINtB5_8IntoIterNtNtCscWJlcMzi19H_12regex_syntax3hir17ClassUnicodeRangeE16as_raw_mut_sliceB10_	<alloc::vec::into_iter::IntoIter<regex_syntax::hir::ClassUnicodeRange>>::as_raw_mut_slice
-_RNvMs0_NtNtCs40k4W9msRzi_5alloc3vec9into_iterINtB5_8IntoIterTnjEE32forget_allocation_drop_remainingCs5DRV6yAd14J_19execdump_decompiler	<alloc::vec::into_iter::IntoIter<(i128, usize)>>::forget_allocation_drop_remaining
+_RNvMs0_NtNtCs40k4W9msRzi_5alloc3vec9into_iterINtB5_8IntoIterTnjEE32forget_allocation_drop_remainingCs5DRV6yAd14J_19daedale_decompiler	<alloc::vec::into_iter::IntoIter<(i128, usize)>>::forget_allocation_drop_remaining
 _RNvMs0_NtNtCs4pOvFVUq0Vr_14regex_automata6hybrid5regexNtB5_5Regex11is_anchored	<regex_automata::hybrid::regex::Regex>::is_anchored
 _RNvMs0_NtNtCs7fllHZsMb0X_4http6header3mapNtB5_9HeaderMap8is_emptyCs7cMPnhEfzsh_7reqwest	<http::header::map::HeaderMap>::is_empty
 _RNvMs0_NtNtCscJZUg2pyjiG_5tokio2io8blockingNtB5_3Buf13with_capacity	<tokio::io::blocking::Buf>::with_capacity
@@ -401,36 +401,36 @@ _RNvMs0_NtNtNtCscJZUg2pyjiG_5tokio4sync4task12atomic_wakerNtB5_11AtomicWaker4wak
 _RNvMs0_NtNtNtCsgczF5crJ4sT_3std4sync4mpmc5wakerNtB5_9SyncWaker10disconnect.llvm.1574750268908436765	<std::sync::mpmc::waker::SyncWaker>::disconnect (.llvm.1574750268908436765)
 _RNvMs10_NtNtCs4pOvFVUq0Vr_14regex_automata4util10primitivesNtB6_9PatternID23from_ne_bytes_uncheckedBa_	<regex_automata::util::primitives::PatternID>::from_ne_bytes_unchecked
 _RNvMs14_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB6_6AtomicmE5storeCsduXJbRkUHPt_4ring	<core::sync::atomic::Atomic<u32>>::store
-_RNvMs1A_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB6_8BTreeMapyNtNtCslp0Ck2LHuWu_16execdump_project11annotations13FunctionNotesE8is_emptyB1d_	<alloc::collections::btree::map::BTreeMap<u64, execdump_project::annotations::FunctionNotes>>::is_empty
+_RNvMs1A_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB6_8BTreeMapyNtNtCslp0Ck2LHuWu_16daedale_project11annotations13FunctionNotesE8is_emptyB1d_	<alloc::collections::btree::map::BTreeMap<u64, daedale_project::annotations::FunctionNotes>>::is_empty
 _RNvMs1P_NtNtCscI6d9CVNmLh_4core9core_arch3x86INtNtB8_4simd4SimdaKj10_E8as_m128iCs1wQTQaEylLk_6rustls	<core::core_arch::simd::Simd<i8, 16>>::as_m128i
 _RNvMs1_CsaLzXVI09wWW_14icu_normalizerINtB5_13DecompositionNtCsiHTmrEApJe7_9utf8_iter9Utf8CharsE20push_decomposition32Cs4NgJ8KamjkS_4idna	<icu_normalizer::Decomposition<utf8_iter::Utf8Chars>>::push_decomposition32
 _RNvMs1_NtCs7cMPnhEfzsh_7reqwest3tlsNtB5_25CertificateRevocationList13as_rustls_crl	<reqwest::tls::CertificateRevocationList>::as_rustls_crl
 _RNvMs1_NtCsaGa943HH00r_4git25patchNtB5_5Patch12line_in_hunk	<git2::patch::Patch>::line_in_hunk
-_RNvMs1_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionRNtNtCs5DRV6yAd14J_19execdump_decompiler5types5CTypeE6clonedBP_	<core::option::Option<&execdump_decompiler::types::CType>>::cloned
+_RNvMs1_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionRNtNtCs5DRV6yAd14J_19daedale_decompiler5types5CTypeE6clonedBP_	<core::option::Option<&daedale_decompiler::types::CType>>::cloned
 _RNvMs1_NtCsduXJbRkUHPt_4ring6digestNtB5_6Digest12compute_from	<ring::digest::Digest>::compute_from
-_RNvMs1_NtCsfKiFC1ztrmh_9hashbrown3mapINtB5_7HashMapybNtNtNtCsgczF5crJ4sT_3std4hash6random11RandomStateE6insertCs5DRV6yAd14J_19execdump_decompiler	<hashbrown::map::HashMap<u64, bool, std::hash::random::RandomState>>::insert
+_RNvMs1_NtCsfKiFC1ztrmh_9hashbrown3mapINtB5_7HashMapybNtNtNtCsgczF5crJ4sT_3std4hash6random11RandomStateE6insertCs5DRV6yAd14J_19daedale_decompiler	<hashbrown::map::HashMap<u64, bool, std::hash::random::RandomState>>::insert
 _RNvMs1_NtCshxJnpmSp82F_6lang_c4spanINtB5_4NodeNtNtB7_3ast16LabeledStatementE3newB7_	<lang_c::span::Node<lang_c::ast::LabeledStatement>>::new
-_RNvMs1_NtCslUhSaoMDPHK_13execdump_core6readerNtB5_8BEReader8read_i64B7_	<execdump_core::reader::BEReader>::read_i64
+_RNvMs1_NtCslUhSaoMDPHK_13daedale_core6readerNtB5_8BEReader8read_i64B7_	<daedale_core::reader::BEReader>::read_i64
 _RNvMs1_NtNtCs1WztaLyfR2E_7inkwell6values5enumsNtB5_22BasicMetadataValueEnum3new	<inkwell::values::enums::BasicMetadataValueEnum>::new
 _RNvMs1_NtNtCs4pOvFVUq0Vr_14regex_automata6hybrid3dfaNtB5_5Cache16search_total_len	<regex_automata::hybrid::dfa::Cache>::search_total_len
 _RNvMs1_NtNtCscI6d9CVNmLh_4core3net7ip_addrNtB5_8Ipv4Addr6octetsCs8koXhOioeIC_7socket2	<core::net::ip_addr::Ipv4Addr>::octets
 _RNvMs1_NtNtCscWJlcMzi19H_12regex_syntax3hir9translateNtB5_8HirFrame12unwrap_group	<regex_syntax::hir::translate::HirFrame>::unwrap_group
 _RNvMs1_NtNtCsgGCgxbnbytj_12clap_builder6output13help_templateNtB5_12HelpTemplate10write_args	<clap_builder::output::help_template::HelpTemplate>::write_args
-_RNvMs1_NtNtCslUhSaoMDPHK_13execdump_core8demangle7itaniumNtB5_6Parser17parse_nested_name	<execdump_core::demangle::itanium::Parser>::parse_nested_name
+_RNvMs1_NtNtCslUhSaoMDPHK_13daedale_core8demangle7itaniumNtB5_6Parser17parse_nested_name	<daedale_core::demangle::itanium::Parser>::parse_nested_name
 _RNvMs1_NtNtNtCs3wpE2xUYJ1V_14regex_automata3nfa8thompson8compilerNtB5_8Compiler9configure	<regex_automata::nfa::thompson::compiler::Compiler>::configure
 _RNvMs1_NtNtNtCsduXJbRkUHPt_4ring10arithmetic6bigint11boxed_limbsINtB5_10BoxedLimbsNtNtNtBb_3rsa7keypair1PE30from_be_bytes_padded_less_thanBb_	<ring::arithmetic::bigint::boxed_limbs::BoxedLimbs<ring::rsa::keypair::P>>::from_be_bytes_padded_less_than
-_RNvMs1_NtNtNtCsgczF5crJ4sT_3std4sync4mpmc4listINtB5_7ChannelNtNtCs8hMsTSjfmUR_16execdump_project7project8AssistedE20disconnect_receiversB10_	<std::sync::mpmc::list::Channel<execdump_project::project::Assisted>>::disconnect_receivers
+_RNvMs1_NtNtNtCsgczF5crJ4sT_3std4sync4mpmc4listINtB5_7ChannelNtNtCs8hMsTSjfmUR_16daedale_project7project8AssistedE20disconnect_receiversB10_	<std::sync::mpmc::list::Channel<daedale_project::project::Assisted>>::disconnect_receivers
 _RNvMs1_NtNtNtNtCscJZUg2pyjiG_5tokio7runtime9scheduler12multi_thread5queueINtB5_5StealINtNtCs40k4W9msRzi_5alloc4sync3ArcNtNtB7_6handle6HandleEE10steal_intoBd_	<tokio::runtime::scheduler::multi_thread::queue::Steal<alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>>>::steal_into
 _RNvMs1k_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB6_6AtomicjE16compare_exchangeCs3CTvswSYvzA_12futures_core	<core::sync::atomic::Atomic<usize>>::compare_exchange
 _RNvMs1k_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB6_6AtomicjE9fetch_addCs945LnvxVZUd_3mio	<core::sync::atomic::Atomic<usize>>::fetch_add
-_RNvMs2_NtCs1WztaLyfR2E_7inkwell7contextNtB5_7Context21custom_width_int_typeCs5DRV6yAd14J_19execdump_decompiler	<inkwell::context::Context>::custom_width_int_type
+_RNvMs2_NtCs1WztaLyfR2E_7inkwell7contextNtB5_7Context21custom_width_int_typeCs5DRV6yAd14J_19daedale_decompiler	<inkwell::context::Context>::custom_width_int_type
 _RNvMs2_NtCs4NgJ8KamjkS_4idna5uts46NtB5_5Uts4611check_label	<idna::uts46::Uts46>::check_label
 _RNvMs2_NtCs7cMPnhEfzsh_7reqwest5proxyNtB5_7Matcher6system	<reqwest::proxy::Matcher>::system
 _RNvMs2_NtCscI6d9CVNmLh_4core3fmtNtB5_9Arguments17from_str_nonconstCscWJlcMzi19H_12regex_syntax	<core::fmt::Arguments>::from_str_nonconst
-_RNvMs2_NtCseH0mWYnU2OD_13execdump_core7programNtB5_7Program13read_c_string	<execdump_core::program::Program>::read_c_string
-_RNvMs2_NtCslUhSaoMDPHK_13execdump_core7programNtB5_7Program13is_executable	<execdump_core::program::Program>::is_executable
+_RNvMs2_NtCseH0mWYnU2OD_13daedale_core7programNtB5_7Program13read_c_string	<daedale_core::program::Program>::read_c_string
+_RNvMs2_NtCslUhSaoMDPHK_13daedale_core7programNtB5_7Program13is_executable	<daedale_core::program::Program>::is_executable
 _RNvMs2_NtNtCs3wpE2xUYJ1V_14regex_automata4util4lookNtB5_11LookMatcher14add_to_byteset	<regex_automata::util::look::LookMatcher>::add_to_byteset
-_RNvMs2_NtNtCs5DRV6yAd14J_19execdump_decompiler8analysis8functionNtB5_8Recovery17is_other_function	<execdump_decompiler::analysis::function::Recovery>::is_other_function
+_RNvMs2_NtNtCs5DRV6yAd14J_19daedale_decompiler8analysis8functionNtB5_8Recovery17is_other_function	<daedale_decompiler::analysis::function::Recovery>::is_other_function
 _RNvMs2_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB5_6AtomicbE5storeCsl99cPGFmRqD_4want	<core::sync::atomic::Atomic<bool>>::store
 _RNvMs2_NtNtCscWJlcMzi19H_12regex_syntax3hir7literalNtB5_3Seq13max_cross_lenB9_	<regex_syntax::hir::literal::Seq>::max_cross_len
 _RNvMs2_NtNtCseD7bwMwBkoP_12regex_syntax3ast5parseINtB5_7ParserIQNtB5_6ParserE9pop_classB9_	<regex_syntax::ast::parse::ParserI<&mut regex_syntax::ast::parse::Parser>>::pop_class
@@ -439,18 +439,18 @@ _RNvMs2_NtNtCsgLg2E8rH6Za_12clap_builder7builder7commandNtB5_7Command30get_visib
 _RNvMs2_NtNtNtCs1wQTQaEylLk_6rustls4msgs7message8outboundNtB5_15PrefixedPayload13with_capacity	<rustls::msgs::message::outbound::PrefixedPayload>::with_capacity
 _RNvMs2_NtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson9backtrackNtB5_18BoundedBacktracker20try_search_slots_imp	<regex_automata::nfa::thompson::backtrack::BoundedBacktracker>::try_search_slots_imp
 _RNvMs2_NtNtNtCsgczF5crJ4sT_3std11collections4hash3mapINtB5_7HashMapjNtNtNtCsdqijrRiej1g_3llm9providers17openai_compatible18OpenAIToolUseStateE5entryB1a_	<std::collections::hash::map::HashMap<usize, llm::providers::openai_compatible::OpenAIToolUseState>>::entry
-_RNvMs2n_NtCslUhSaoMDPHK_13execdump_core3elfNtB6_16SymbolVisibility9from_reprB8_	<execdump_core::elf::SymbolVisibility>::from_repr
+_RNvMs2n_NtCslUhSaoMDPHK_13daedale_core3elfNtB6_16SymbolVisibility9from_reprB8_	<daedale_core::elf::SymbolVisibility>::from_repr
 _RNvMs3_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecjE11extend_withCs4pOvFVUq0Vr_14regex_automata	<alloc::vec::Vec<usize>>::extend_with
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecINtNtCscoDABAJturn_6lang_c4span4NodeNtNtBR_3ast18SpecifierQualifierEE8grow_oneBR_	<alloc::raw_vec::RawVec<lang_c::span::Node<lang_c::ast::SpecifierQualifier>>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCs1wQTQaEylLk_6rustls5enums31CertificateCompressionAlgorithmE8grow_oneBQ_	<alloc::raw_vec::RawVec<rustls::enums::CertificateCompressionAlgorithm>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCscWJlcMzi19H_12regex_syntax4utf811ScalarRangeE8grow_oneBQ_	<alloc::raw_vec::RawVec<regex_syntax::utf8::ScalarRange>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCsiVHNuMzTYSy_16rustls_pki_types11server_name10ServerNameE8grow_oneCsa1F4it94aAK_6rustls	<alloc::raw_vec::RawVec<rustls_pki_types::server_name::ServerName>>::grow_one
-_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast3VarE8grow_oneBS_	<alloc::raw_vec::RawVec<execdump_decompiler::c::ast::Var>>::grow_one
+_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast3VarE8grow_oneBS_	<alloc::raw_vec::RawVec<daedale_decompiler::c::ast::Var>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtCscWJlcMzi19H_12regex_syntax3ast5parse10ClassStateE8grow_oneBS_	<alloc::raw_vec::RawVec<regex_syntax::ast::parse::ClassState>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtCsgLg2E8rH6Za_12clap_builder7builder9arg_group8ArgGroupE8grow_oneBS_	<alloc::raw_vec::RawVec<clap_builder::builder::arg_group::ArgGroup>>::grow_one
 _RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson12literal_trie10TransitionE8grow_oneBU_	<alloc::raw_vec::RawVec<regex_automata::nfa::thompson::literal_trie::Transition>>::grow_one
-_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecTNtNtB7_6string6StringNtNtCsadtEA1PXqHv_12execdump_tui5views6TargetEE8grow_oneB1c_	<alloc::raw_vec::RawVec<(alloc::string::String, execdump_tui::views::Target)>>::grow_one
-_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecTllEE8grow_oneCsadtEA1PXqHv_12execdump_tui	<alloc::raw_vec::RawVec<(i32, i32)>>::grow_one
+_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecTNtNtB7_6string6StringNtNtCsadtEA1PXqHv_12daedale_tui5views6TargetEE8grow_oneB1c_	<alloc::raw_vec::RawVec<(alloc::string::String, daedale_tui::views::Target)>>::grow_one
+_RNvMs3_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecTllEE8grow_oneCsadtEA1PXqHv_12daedale_tui	<alloc::raw_vec::RawVec<(i32, i32)>>::grow_one
 _RNvMs3_NtCs4Q55PWArtAq_3url6parserNtB5_5Input8is_emptyB7_	<url::parser::Input>::is_empty
 _RNvMs3_NtCsk6hyM9KQup5_10serde_json2deINtB5_12DeserializerNtNtB7_4read7StrReadE11parse_identCshbHma4O2AXc_3llm	<serde_json::de::Deserializer<serde_json::read::StrRead>>::parse_ident
 _RNvMs3_NtCslgNNO3csm7k_10serde_json2deINtB5_12DeserializerNtNtB7_4read7StrReadE14parse_exponentB7_	<serde_json::de::Deserializer<serde_json::read::StrRead>>::parse_exponent
@@ -460,22 +460,22 @@ _RNvMs3_NtNtCs5OZEacqcADO_5tokio7runtime9schedulerNtB5_7Context21expect_current_
 _RNvMs3_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB5_6AtomicOuE4loadCs4PY1t2qPbZD_6memchr	<core::sync::atomic::Atomic<*mut ()>>::load
 _RNvMs3_NtNtCscWJlcMzi19H_12regex_syntax3hir9translateNtB5_11TranslatorI15pop_concat_expr	<regex_syntax::hir::translate::TranslatorI>::pop_concat_expr
 _RNvMs3_NtNtCsgGCgxbnbytj_12clap_builder7builder3argNtB5_3Arg18stylize_arg_suffix	<clap_builder::builder::arg::Arg>::stylize_arg_suffix
-_RNvMs3_NtNtCsgczF5crJ4sT_3std4sync4mpscINtB5_6SenderNtNtCslp0Ck2LHuWu_16execdump_project7service5EventE4sendBS_	<std::sync::mpsc::Sender<execdump_project::service::Event>>::send
+_RNvMs3_NtNtCsgczF5crJ4sT_3std4sync4mpscINtB5_6SenderNtNtCslp0Ck2LHuWu_16daedale_project7service5EventE4sendBS_	<std::sync::mpsc::Sender<daedale_project::service::Event>>::send
 _RNvMs3r_NtNtCs1wQTQaEylLk_6rustls4msgs9handshakeNtB6_27HelloRetryRequestExtensions19read_extension_body	<rustls::msgs::handshake::HelloRetryRequestExtensions>::read_extension_body
 _RNvMs4_NtCs40k4W9msRzi_5alloc7raw_vecNtB5_11RawVecInner14grow_amortizedCs4S2CklLuWJC_4mime	<alloc::raw_vec::RawVecInner>::grow_amortized
 _RNvMs4_NtCs8ZDyYQBYTaX_14http_body_util6streamINtB5_14BodyDataStreamNtNtNtCs7cMPnhEfzsh_7reqwest10async_impl4body4BodyE3newB1a_	<http_body_util::stream::BodyDataStream<reqwest::async_impl::body::Body>>::new
 _RNvMs4_NtCscI6d9CVNmLh_4core3fmtNtB5_9Arguments23as_statically_known_strCse9565iEWUFB_5bytes	<core::fmt::Arguments>::as_statically_known_str
-_RNvMs4_NtCscI6d9CVNmLh_4core3numh16is_ascii_graphicCs5DRV6yAd14J_19execdump_decompiler	<u8>::is_ascii_graphic
+_RNvMs4_NtCscI6d9CVNmLh_4core3numh16is_ascii_graphicCs5DRV6yAd14J_19daedale_decompiler	<u8>::is_ascii_graphic
 _RNvMs4_NtCscxwaO04FXd8_9hashbrown3rawINtB5_6BucketTNtNtCsTAmH6ypzh9_7kasuari8variable8VariableNtNtBR_6solver8EditInfoEE4dropBR_	<hashbrown::raw::Bucket<(kasuari::variable::Variable, kasuari::solver::EditInfo)>>::drop
 _RNvMs4_NtNtCs4WrJ2ea1NkX_12ratatui_core6layout6layoutNtB5_7Element12has_max_size	<ratatui_core::layout::layout::Element>::has_max_size
 _RNvMs4_NtNtCsayLkB1OTdrc_12ratatui_core6layout6layoutNtB5_7Element8is_empty	<ratatui_core::layout::layout::Element>::is_empty
 _RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterNtCsdQK0EcqYxby_12capstone_sys9cs_x86_opE3newCs8iozIJOV3y1_8capstone	<core::slice::iter::Iter<capstone_sys::cs_x86_op>>::new
-_RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterNtNtCslUhSaoMDPHK_13execdump_core3elf14ELFSymbolTableE3newBS_	<core::slice::iter::Iter<execdump_core::elf::ELFSymbolTable>>::new
+_RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterNtNtCslUhSaoMDPHK_13daedale_core3elf14ELFSymbolTableE3newBS_	<core::slice::iter::Iter<daedale_core::elf::ELFSymbolTable>>::new
 _RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterNtNtNtCsdqijrRiej1g_3llm4chat4tool4ToolE3newBU_	<core::slice::iter::Iter<llm::chat::tool::Tool>>::new
 _RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterRNtNtNtCs4WrJ2ea1NkX_12ratatui_core4text4line4LineE3newCsdVZ58MxQ2zx_15ratatui_widgets	<core::slice::iter::Iter<&ratatui_core::text::line::Line>>::new
 _RNvMs4_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_4IterhE3newCsaGa943HH00r_4git2	<core::slice::iter::Iter<u8>>::new
 _RNvMs4_NtNtCslgq7c4DYF9G_7reqwest10async_impl6clientNtB5_6Client15execute_request	<reqwest::async_impl::client::Client>::execute_request
-_RNvMs4_NtNtNtNtCs40k4W9msRzi_5alloc11collections5btree3map5entryINtB5_11VacantEntryjmE12insert_entryCs5DRV6yAd14J_19execdump_decompiler	<alloc::collections::btree::map::entry::VacantEntry<usize, u32>>::insert_entry
+_RNvMs4_NtNtNtNtCs40k4W9msRzi_5alloc11collections5btree3map5entryINtB5_11VacantEntryjmE12insert_entryCs5DRV6yAd14J_19daedale_decompiler	<alloc::collections::btree::map::entry::VacantEntry<usize, u32>>::insert_entry
 _RNvMs5_NtCscWJlcMzi19H_12regex_syntax5errorNtB5_5Spans3add	<regex_syntax::error::Spans>::add
 _RNvMs5_NtNtCscI6d9CVNmLh_4core3ops5rangeINtB5_14RangeInclusivehE3newCskQp7oO5Fp7v_12aho_corasick	<core::ops::range::RangeInclusive<u8>>::new
 _RNvMs5_NtNtCsgLg2E8rH6Za_12clap_builder7builder7commandNtB5_7Command16find_long_subcmd	<clap_builder::builder::command::Command>::find_long_subcmd
@@ -483,67 +483,67 @@ _RNvMs5_NtNtNtCsbmo0FHMV5Xy_5hyper6client4conn5http1NtB5_7Builder3newCs7cMPnhEfz
 _RNvMs6_NtCs1WztaLyfR2E_7inkwell7targetsNtB5_6Target3new	<inkwell::targets::Target>::new
 _RNvMs6_NtCscI6d9CVNmLh_4core3numm11checked_subCscWJlcMzi19H_12regex_syntax	<u32>::checked_sub
 _RNvMs6_NtCscxwaO04FXd8_9hashbrown3rawINtB5_8RawTableTNtNtCsTAmH6ypzh9_7kasuari3row6SymboldEE6new_inBT_	<hashbrown::raw::RawTable<(kasuari::row::Symbol, f64)>>::new_in
-_RNvMs6_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTONtCsb0ZpR2rN7rG_8llvm_sys9LLVMValuejEE22insert_tagged_at_indexCs5DRV6yAd14J_19execdump_decompiler	<hashbrown::raw::RawTable<(*mut llvm_sys::LLVMValue, usize)>>::insert_tagged_at_index
-_RNvMs6_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTybEE22insert_tagged_at_indexCs5DRV6yAd14J_19execdump_decompiler	<hashbrown::raw::RawTable<(u64, bool)>>::insert_tagged_at_index
+_RNvMs6_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTONtCsb0ZpR2rN7rG_8llvm_sys9LLVMValuejEE22insert_tagged_at_indexCs5DRV6yAd14J_19daedale_decompiler	<hashbrown::raw::RawTable<(*mut llvm_sys::LLVMValue, usize)>>::insert_tagged_at_index
+_RNvMs6_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTybEE22insert_tagged_at_indexCs5DRV6yAd14J_19daedale_decompiler	<hashbrown::raw::RawTable<(u64, bool)>>::insert_tagged_at_index
 _RNvMs6_NtNtCs3wpE2xUYJ1V_14regex_automata4meta8wrappersNtB5_12OnePassCache5reset	<regex_automata::meta::wrappers::OnePassCache>::reset
 _RNvMs6_NtNtCscI6d9CVNmLh_4core4task4wakeNtB5_5Waker11wake_by_refCs7cMPnhEfzsh_7reqwest	<core::task::wake::Waker>::wake_by_ref
 _RNvMs6_NtNtNtCs4pOvFVUq0Vr_14regex_automata4util11determinize5stateNtB5_4Repr9look_need	<regex_automata::util::determinize::state::Repr>::look_need
-_RNvMs7_NtCs40k4W9msRzi_5alloc2rcINtB5_2RcINtNtB7_3vec3VecmEE3newCsfDOcEdXGwyf_12execdump_tui	<alloc::rc::Rc<alloc::vec::Vec<u32>>>::new
+_RNvMs7_NtCs40k4W9msRzi_5alloc2rcINtB5_2RcINtNtB7_3vec3VecmEE3newCsfDOcEdXGwyf_12daedale_tui	<alloc::rc::Rc<alloc::vec::Vec<u32>>>::new
 _RNvMs7_NtCscI6d9CVNmLh_4core4cellINtB5_4CellNtNtCsjX1Vte1kdzx_16parking_lot_core11parking_lot9ParkTokenE3newBK_	<core::cell::Cell<parking_lot_core::parking_lot::ParkToken>>::new
-_RNvMs7_NtCslUhSaoMDPHK_13execdump_core5machoNtB5_11MachOSymbol14type_as_string	<execdump_core::macho::MachOSymbol>::type_as_string
+_RNvMs7_NtCslUhSaoMDPHK_13daedale_core5machoNtB5_11MachOSymbol14type_as_string	<daedale_core::macho::MachOSymbol>::type_as_string
 _RNvMs7_NtNtCscJZUg2pyjiG_5tokio4util11linked_listINtB5_8PointersNtNtNtNtB9_7runtime4task4core6HeaderE3newB9_	<tokio::util::linked_list::Pointers<tokio::runtime::task::core::Header>>::new
 _RNvMs8_NtCs4Q55PWArtAq_3url6parserNtB5_6Parser14parse_relative	<url::parser::Parser>::parse_relative
 _RNvMs8_NtCscWJlcMzi19H_12regex_syntax3astNtB5_4Span11is_one_line	<regex_syntax::ast::Span>::is_one_line
 _RNvMs8_NtNtCs1wQTQaEylLk_6rustls4msgs4baseNtB5_10PayloadU163newB9_	<rustls::msgs::base::PayloadU16>::new
 _RNvMs8_NtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson6pikevmNtB5_9SlotTable3new	<regex_automata::nfa::thompson::pikevm::SlotTable>::new
 _RNvMs9_NtCscI6d9CVNmLh_4core3numj11checked_addCsdqijrRiej1g_3llm	<usize>::checked_add
-_RNvMs9_NtCseH0mWYnU2OD_13execdump_core2peNtB5_14OptionalHeader4dump	<execdump_core::pe::OptionalHeader>::dump
+_RNvMs9_NtCseH0mWYnU2OD_13daedale_core2peNtB5_14OptionalHeader4dump	<daedale_core::pe::OptionalHeader>::dump
 _RNvMs9_NtNtCskQp7oO5Fp7v_12aho_corasick3nfa13noncontiguousNtB5_9QueuedSet5inert	<aho_corasick::nfa::noncontiguous::QueuedSet>::inert
 _RNvMsF_CsasIVapJg4Ba_16rustls_pki_typesNtB5_14CertificateDer10into_owned	<rustls_pki_types::CertificateDer>::into_owned
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBK_3ast10EnumeratorEE4pushBK_	<alloc::vec::Vec<lang_c::span::Node<lang_c::ast::Enumerator>>>::push
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtCsasIVapJg4Ba_16rustls_pki_types14CertificateDerE8push_mutCs1wQTQaEylLk_6rustls	<alloc::vec::Vec<rustls_pki_types::CertificateDer>>::push_mut
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCscWJlcMzi19H_12regex_syntax3ast3AstE4pushBJ_	<alloc::vec::Vec<regex_syntax::ast::Ast>>::push
-_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13execdump_core2pe23ExportAddressTableEntryE8push_mutBJ_	<alloc::vec::Vec<execdump_core::pe::ExportAddressTableEntry>>::push_mut
+_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13daedale_core2pe23ExportAddressTableEntryE8push_mutBJ_	<alloc::vec::Vec<daedale_core::pe::ExportAddressTableEntry>>::push_mut
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs1wQTQaEylLk_6rustls4msgs9handshake13KeyShareEntryE4pushBL_	<alloc::vec::Vec<rustls::msgs::handshake::KeyShareEntry>>::push
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCscWJlcMzi19H_12regex_syntax3ast5parse10GroupStateE8push_mutBL_	<alloc::vec::Vec<regex_syntax::ast::parse::GroupState>>::push_mut
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCsgLg2E8rH6Za_12clap_builder4util9any_value8AnyValueE8push_mutBL_	<alloc::vec::Vec<clap_builder::util::any_value::AnyValue>>::push_mut
 _RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson7builder5StateE8push_mutBN_	<alloc::vec::Vec<regex_automata::nfa::thompson::builder::State>>::push_mut
-_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTNtNtCs5DRV6yAd14J_19execdump_decompiler6typedb8PlatformNtNtBK_5types9DataModelNtBI_6TypeDbEE8push_mutBK_	<alloc::vec::Vec<(execdump_decompiler::typedb::Platform, execdump_decompiler::types::DataModel, execdump_decompiler::typedb::TypeDb)>>::push_mut
-_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTyyEE4pushCs5DRV6yAd14J_19execdump_decompiler	<alloc::vec::Vec<(u64, u64)>>::push
+_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTNtNtCs5DRV6yAd14J_19daedale_decompiler6typedb8PlatformNtNtBK_5types9DataModelNtBI_6TypeDbEE8push_mutBK_	<alloc::vec::Vec<(daedale_decompiler::typedb::Platform, daedale_decompiler::types::DataModel, daedale_decompiler::typedb::TypeDb)>>::push_mut
+_RNvMsF_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTyyEE4pushCs5DRV6yAd14J_19daedale_decompiler	<alloc::vec::Vec<(u64, u64)>>::push
 _RNvMsL_NtCse9565iEWUFB_5bytes5bytesNtB5_6Shared11init_to_raw	<bytes::bytes::Shared>::init_to_raw
 _RNvMsQ_NtNtCs1wQTQaEylLk_6rustls4msgs9handshakeNtB5_18ClientHelloPayload14payload_encode	<rustls::msgs::handshake::ClientHelloPayload>::payload_encode
-_RNvMs_CsfDOcEdXGwyf_12execdump_tuiNtB4_4View5title	<execdump_tui::View>::title
+_RNvMs_CsfDOcEdXGwyf_12daedale_tuiNtB4_4View5title	<daedale_tui::View>::title
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecIBv_INtNtCscI6d9CVNmLh_4core6option6OptionINtNtB6_4sync3ArceEEEE3lenCs4pOvFVUq0Vr_14regex_automata	<alloc::vec::Vec<alloc::vec::Vec<core::option::Option<alloc::sync::Arc<str>>>>>::len
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBJ_3ast11DeclarationEE3lenBJ_	<alloc::vec::Vec<lang_c::span::Node<lang_c::ast::Declaration>>>::len
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtB6_6string6StringE10insert_mutCsdYsl3qRwY1p_4toml	<alloc::vec::Vec<alloc::string::String>>::insert_mut
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtCscWJlcMzi19H_12regex_syntax3hir15ClassBytesRangeE7reserveBI_	<alloc::vec::Vec<regex_syntax::hir::ClassBytesRange>>::reserve
-_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCs1WztaLyfR2E_7inkwell6values9ptr_value12PointerValueE7reserveCs5DRV6yAd14J_19execdump_decompiler	<alloc::vec::Vec<inkwell::values::ptr_value::PointerValue>>::reserve
-_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast4StmtE6insertBK_	<alloc::vec::Vec<execdump_decompiler::c::ast::Stmt>>::insert
+_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCs1WztaLyfR2E_7inkwell6values9ptr_value12PointerValueE7reserveCs5DRV6yAd14J_19daedale_decompiler	<alloc::vec::Vec<inkwell::values::ptr_value::PointerValue>>::reserve
+_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast4StmtE6insertBK_	<alloc::vec::Vec<daedale_decompiler::c::ast::Stmt>>::insert
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCsdqijrRiej1g_3llm8backends3xai14XAIChatMessageE10insert_mutBK_	<alloc::vec::Vec<llm::backends::xai::XAIChatMessage>>::insert_mut
-_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCslUhSaoMDPHK_13execdump_core8demangle6symbol4TypeE7reserveBK_	<alloc::vec::Vec<execdump_core::demangle::symbol::Type>>::reserve
+_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtCslUhSaoMDPHK_13daedale_core8demangle6symbol4TypeE7reserveBK_	<alloc::vec::Vec<daedale_core::demangle::symbol::Type>>::reserve
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecNtNtNtNtCsgLg2E8rH6Za_12clap_builder6parser7matches11matched_arg10MatchedArgE6removeBM_	<alloc::vec::Vec<clap_builder::parser::matches::matched_arg::MatchedArg>>::remove
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecReE7reserveCs4Q55PWArtAq_3url	<alloc::vec::Vec<&str>>::reserve
-_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecTllEE3popCsfDOcEdXGwyf_12execdump_tui	<alloc::vec::Vec<(i32, i32)>>::pop
+_RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecTllEE3popCsfDOcEdXGwyf_12daedale_tui	<alloc::vec::Vec<(i32, i32)>>::pop
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VechE3lenCse9565iEWUFB_5bytes	<alloc::vec::Vec<u8>>::len
 _RNvMs_NtCs40k4W9msRzi_5alloc3vecINtB4_3VecyE7reserveCsduXJbRkUHPt_4ring	<alloc::vec::Vec<u64>>::reserve
-_RNvMs_NtCs40k4W9msRzi_5alloc5boxedINtB4_3BoxNtNtCs5DRV6yAd14J_19execdump_decompiler5types5CTypeE13new_uninit_inBK_	<alloc::boxed::Box<execdump_decompiler::types::CType>>::new_uninit_in
+_RNvMs_NtCs40k4W9msRzi_5alloc5boxedINtB4_3BoxNtNtCs5DRV6yAd14J_19daedale_decompiler5types5CTypeE13new_uninit_inBK_	<alloc::boxed::Box<daedale_decompiler::types::CType>>::new_uninit_in
 _RNvMs_NtCs4j8ju0A4eoB_4git24repoNtB4_10Repository11find_commit	<git2::repo::Repository>::find_commit
 _RNvMs_NtCs5j4ko3RvOtI_11parking_lot7condvarNtB4_7Condvar15notify_all_slow	<parking_lot::condvar::Condvar>::notify_all_slow
-_RNvMs_NtCs8hMsTSjfmUR_16execdump_project11annotationsNtB4_13FunctionNotes9from_toml	<execdump_project::annotations::FunctionNotes>::from_toml
+_RNvMs_NtCs8hMsTSjfmUR_16daedale_project11annotationsNtB4_13FunctionNotes9from_toml	<daedale_project::annotations::FunctionNotes>::from_toml
 _RNvMs_NtCsTAmH6ypzh9_7kasuari6solverNtB4_6Solver14get_var_symbol	<kasuari::solver::Solver>::get_var_symbol
-_RNvMs_NtCsadtEA1PXqHv_12execdump_tui11source_viewNtB4_10SourceView9word_move	<execdump_tui::source_view::SourceView>::word_move
+_RNvMs_NtCsadtEA1PXqHv_12daedale_tui11source_viewNtB4_10SourceView9word_move	<daedale_tui::source_view::SourceView>::word_move
 _RNvMs_NtCse9565iEWUFB_5bytes9bytes_mutNtB4_8BytesMut17extend_from_sliceCsdqijrRiej1g_3llm	<bytes::bytes_mut::BytesMut>::extend_from_slice
-_RNvMs_NtCsfDOcEdXGwyf_12execdump_tui11source_viewNtB4_10SourceView11cursor_line	<execdump_tui::source_view::SourceView>::cursor_line
+_RNvMs_NtCsfDOcEdXGwyf_12daedale_tui11source_viewNtB4_10SourceView11cursor_line	<daedale_tui::source_view::SourceView>::cursor_line
 _RNvMs_NtCsjX1Vte1kdzx_16parking_lot_core11parking_lotNtB4_6Bucket3newB6_	<parking_lot_core::parking_lot::Bucket>::new
 _RNvMs_NtNtCs1wQTQaEylLk_6rustls4msgs5enumsNtB4_13ExtensionType12ech_compress	<rustls::msgs::enums::ExtensionType>::ech_compress
 _RNvMs_NtNtCs4pOvFVUq0Vr_14regex_automata4util4lookNtB4_7LookSet19contains_word_asciiB8_	<regex_automata::util::look::LookSet>::contains_word_ascii
 _RNvMs_NtNtCs6SNfn0C6VBe_4http6header4nameNtB4_10HeaderName10from_bytes	<http::header::name::HeaderName>::from_bytes
 _RNvMs_NtNtCsayLkB1OTdrc_12ratatui_core6layout4rectNtB4_4Rect12intersection	<ratatui_core::layout::rect::Rect>::intersection
 _RNvMs_NtNtCscWJlcMzi19H_12regex_syntax3hir9translateNtB4_17TranslatorBuilder16case_insensitive	<regex_syntax::hir::translate::TranslatorBuilder>::case_insensitive
-_RNvMs_NtNtCseH0mWYnU2OD_13execdump_core8demangle4msvcNtB4_9Demangler21demangle_pointer_type	<execdump_core::demangle::msvc::Demangler>::demangle_pointer_type
+_RNvMs_NtNtCseH0mWYnU2OD_13daedale_core8demangle4msvcNtB4_9Demangler21demangle_pointer_type	<daedale_core::demangle::msvc::Demangler>::demangle_pointer_type
 _RNvMs_NtNtCsgLg2E8rH6Za_12clap_builder6output5usageNtB4_5Usage17needs_options_tag	<clap_builder::output::usage::Usage>::needs_options_tag
 _RNvMs_NtNtCskQp7oO5Fp7v_12aho_corasick3nfa13noncontiguousNtB4_3NFA11swap_states	<aho_corasick::nfa::noncontiguous::NFA>::swap_states
-_RNvMs_NtNtCslUhSaoMDPHK_13execdump_core8demangle4msvcNtB4_9Demangler33demangle_function_identifier_code	<execdump_core::demangle::msvc::Demangler>::demangle_function_identifier_code
+_RNvMs_NtNtCslUhSaoMDPHK_13daedale_core8demangle4msvcNtB4_9Demangler33demangle_function_identifier_code	<daedale_core::demangle::msvc::Demangler>::demangle_function_identifier_code
 _RNvMs_NtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson7builderNtB4_7Builder11set_reverse	<regex_automata::nfa::thompson::builder::Builder>::set_reverse
 _RNvMs_NtNtNtCscJZUg2pyjiG_5tokio7runtime4task3rawNtB4_7RawTask14set_queue_next	<tokio::runtime::task::raw::RawTask>::set_queue_next
 _RNvMs_NtNtNtCsduXJbRkUHPt_4ring2ec10curve255193opsINtB4_4ElemNtB4_1TE4zeroBa_	<ring::ec::curve25519::ops::Elem<ring::ec::curve25519::ops::T>>::zero
@@ -551,34 +551,34 @@ _RNvMs_NtNtNtCskQp7oO5Fp7v_12aho_corasick6packed5teddy7builderNtB4_7Builder8only
 _RNvMsa_CsRhpqHII6n7_8smallvecINtB5_12SmallVecDataAcj3b_E6inlineCs4NgJ8KamjkS_4idna	<smallvec::SmallVecData<[char; 59]>>::inline
 _RNvMsa_NtCscI6d9CVNmLh_4core3fmtNtB5_9Formatter9write_fmtCs1WztaLyfR2E_7inkwell	<core::fmt::Formatter>::write_fmt
 _RNvMsa_NtCscWJlcMzi19H_12regex_syntax3hirNtB5_12ClassUnicode9intersect	<regex_syntax::hir::ClassUnicode>::intersect
-_RNvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB5_13RawTableInner15rehash_in_placeCslp0Ck2LHuWu_16execdump_project	<hashbrown::raw::RawTableInner>::rehash_in_place
-_RNvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB5_13RawTableInner5eraseCsfDOcEdXGwyf_12execdump_tui	<hashbrown::raw::RawTableInner>::erase
+_RNvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB5_13RawTableInner15rehash_in_placeCslp0Ck2LHuWu_16daedale_project	<hashbrown::raw::RawTableInner>::rehash_in_place
+_RNvMsa_NtCsfKiFC1ztrmh_9hashbrown3rawNtB5_13RawTableInner5eraseCsfDOcEdXGwyf_12daedale_tui	<hashbrown::raw::RawTableInner>::erase
 _RNvMsa_NtNtCscI6d9CVNmLh_4core5slice4iterINtB5_7IterMutNtNtNtCskQp7oO5Fp7v_12aho_corasick3nfa13noncontiguous5StateE3newBX_	<core::slice::iter::IterMut<aho_corasick::nfa::noncontiguous::State>>::new
-_RNvMsb_NtCslUhSaoMDPHK_13execdump_core3elfNtB5_18ELFProgramHeader324dump	<execdump_core::elf::ELFProgramHeader32>::dump
+_RNvMsb_NtCslUhSaoMDPHK_13daedale_core3elfNtB5_18ELFProgramHeader324dump	<daedale_core::elf::ELFProgramHeader32>::dump
 _RNvMsc_NtNtCs1wQTQaEylLk_6rustls5tls1312key_scheduleNtB5_10SecretKind8to_bytes	<rustls::tls13::key_schedule::SecretKind>::to_bytes
 _RNvMsd_CsRhpqHII6n7_8smallvecINtB5_8SmallVecANtCsaLzXVI09wWW_14icu_normalizer17CharacterAndClassj11_E3lenBJ_	<smallvec::SmallVec<[icu_normalizer::CharacterAndClass; 17]>>::len
 _RNvMsd_CsRhpqHII6n7_8smallvecINtB5_8SmallVecAcjfd_E21reserve_one_uncheckedCs4NgJ8KamjkS_4idna	<smallvec::SmallVec<[char; 253]>>::reserve_one_unchecked
 _RNvMsd_NtNtCskQp7oO5Fp7v_12aho_corasick4util9prefilterNtB5_17StartBytesBuilder12add_one_byte	<aho_corasick::util::prefilter::StartBytesBuilder>::add_one_byte
-_RNvMse_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtCslUhSaoMDPHK_13execdump_core7program7ProgramE3newCsfDOcEdXGwyf_12execdump_tui	<alloc::sync::Arc<execdump_core::program::Program>>::new
+_RNvMse_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtCslUhSaoMDPHK_13daedale_core7program7ProgramE3newCsfDOcEdXGwyf_12daedale_tui	<alloc::sync::Arc<daedale_core::program::Program>>::new
 _RNvMse_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtNtNtCs6K9LwUcmB6r_5tower5retry6budget10tps_budget9TpsBudgetE3newCs7cMPnhEfzsh_7reqwest	<alloc::sync::Arc<tower::retry::budget::tps_budget::TpsBudget>>::new
 _RNvMse_NtNtCscI6d9CVNmLh_4core3num7nonzeroINtB5_7NonZeromE3newCs1WztaLyfR2E_7inkwell	<core::num::nonzero::NonZero<u32>>::new
-_RNvMsf_NtNtCscI6d9CVNmLh_4core3str4iterINtB5_13SplitInternalAcj2_E9next_backCs8hMsTSjfmUR_16execdump_project	<core::str::iter::SplitInternal<[char; 2]>>::next_back
+_RNvMsf_NtNtCscI6d9CVNmLh_4core3str4iterINtB5_13SplitInternalAcj2_E9next_backCs8hMsTSjfmUR_16daedale_project	<core::str::iter::SplitInternal<[char; 2]>>::next_back
 _RNvMsf_NvNtCs4WrJ2ea1NkX_12ratatui_core5style1__NtB5_16InternalBitFlags5emptyB9_	<ratatui_core::style::_::InternalBitFlags>::empty
-_RNvMsg_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtBb_6string6StringINtNtB7_3set8BTreeSetB17_EE3newCslp0Ck2LHuWu_16execdump_project	<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>>::new
+_RNvMsg_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB5_8BTreeMapNtNtBb_6string6StringINtNtB7_3set8BTreeSetB17_EE3newCslp0Ck2LHuWu_16daedale_project	<alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::collections::btree::set::BTreeSet<alloc::string::String>>>::new
 _RNvMsi_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_12RawIterRangeTNtNtCs40k4W9msRzi_5alloc6string6StringBU_EE3newCsdqijrRiej1g_3llm	<hashbrown::raw::RawIterRange<(alloc::string::String, alloc::string::String)>>::new
 _RNvMsi_NtNtCs4pOvFVUq0Vr_14regex_automata4meta5regexNtB5_6Config9overwrite	<regex_automata::meta::regex::Config>::overwrite
-_RNvMsi_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB5_8BTreeMapyNtNtNtCs5DRV6yAd14J_19execdump_decompiler8analysis8function10BasicBlockE6insertB1e_	<alloc::collections::btree::map::BTreeMap<u64, execdump_decompiler::analysis::function::BasicBlock>>::insert
+_RNvMsi_NtNtNtCs40k4W9msRzi_5alloc11collections5btree3mapINtB5_8BTreeMapyNtNtNtCs5DRV6yAd14J_19daedale_decompiler8analysis8function10BasicBlockE6insertB1e_	<alloc::collections::btree::map::BTreeMap<u64, daedale_decompiler::analysis::function::BasicBlock>>::insert
 _RNvMsj_NtNtCs8iozIJOV3y1_8capstone4arch5m680xNtB5_20M680xOperandIterator3new	<capstone::arch::m680x::M680xOperandIterator>::new
 _RNvMsl_NtNtCsgczF5crJ4sT_3std3ffi6os_strNtB5_5OsStr12to_os_stringCsaGa943HH00r_4git2	<std::ffi::os_str::OsStr>::to_os_string
 _RNvMsn_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcDNtNtCskQp7oO5Fp7v_12aho_corasick11ahocorasick11AcAutomatonEL_E9drop_slowBL_	<alloc::sync::Arc<dyn aho_corasick::ahocorasick::AcAutomaton>>::drop_slow
-_RNvMsn_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtCs8hMsTSjfmUR_16execdump_project11annotations13FunctionNotesE9drop_slowBK_	<alloc::sync::Arc<execdump_project::annotations::FunctionNotes>>::drop_slow
+_RNvMsn_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtCs8hMsTSjfmUR_16daedale_project11annotations13FunctionNotesE9drop_slowBK_	<alloc::sync::Arc<daedale_project::annotations::FunctionNotes>>::drop_slow
 _RNvMsn_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtNtCshbHma4O2AXc_3llm8backends3xai9XAIConfigE9drop_slowBM_	<alloc::sync::Arc<llm::backends::xai::XAIConfig>>::drop_slow
-_RNvMsn_NtCscWJlcMzi19H_12regex_syntax3hirNtB5_10Properties11maximum_lenCs3c2gDx2JVYI_8execdump	<regex_syntax::hir::Properties>::maximum_len
+_RNvMsn_NtCscWJlcMzi19H_12regex_syntax3hirNtB5_10Properties11maximum_lenCs3c2gDx2JVYI_8daedale	<regex_syntax::hir::Properties>::maximum_len
 _RNvMso_NtNtNtNtCsQx7QROqyUr_12aho_corasick6packed5teddy7builder6x86_64INtB5_7FatAVX2Kj3_E13new_unchecked.llvm.9606107522073825842	<aho_corasick::packed::teddy::builder::x86_64::FatAVX2<3>>::new_unchecked (.llvm.9606107522073825842)
 _RNvMsr_NtCse9565iEWUFB_5bytes9bytes_mutNtB5_6Shared9is_unique	<bytes::bytes_mut::Shared>::is_unique
 _RNvMst_NtCscI6d9CVNmLh_4core4cellINtB5_7RefCellNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson8compiler9Utf8StateE10borrow_mutBR_	<core::cell::RefCell<regex_automata::nfa::thompson::compiler::Utf8State>>::borrow_mut
-_RNvMsw_NtCslUhSaoMDPHK_13execdump_core2peNtB5_16ExcFunctionEntry3len	<execdump_core::pe::ExcFunctionEntry>::len
-_RNvMsy_NtCslUhSaoMDPHK_13execdump_core2peNtB5_2PE3new	<execdump_core::pe::PE>::new
+_RNvMsw_NtCslUhSaoMDPHK_13daedale_core2peNtB5_16ExcFunctionEntry3len	<daedale_core::pe::ExcFunctionEntry>::len
+_RNvMsy_NtCslUhSaoMDPHK_13daedale_core2peNtB5_2PE3new	<daedale_core::pe::PE>::new
 _RNvNCNCNvMs5_NtNtNtCsizX5SLfpuPZ_10hyper_util6client6legacy4poolINtBb_9PoolInnerppE13clear_expired00s_10___CALLSITE	<hyper_util::client::legacy::pool::PoolInner<_, _>>::clear_expired::{closure#0}::{closure#0}::__CALLSITE
 _RNvNtCs1EAQJhbGAzg_13toml_datetime8datetime16s_to_nanoseconds	toml_datetime::datetime::s_to_nanoseconds
 _RNvNtCs40k4W9msRzi_5alloc2rc32rc_inner_layout_for_value_layout	alloc::rc::rc_inner_layout_for_value_layout
@@ -594,22 +594,22 @@ _RNvNtCscoDABAJturn_6lang_c6parser24___parse_float_binary_exp	lang_c::parser::__
 _RNvNtCsd3LqYXMFFHi_6webpki3der16end_of_input_err	webpki::der::end_of_input_err
 _RNvNtCsduXJbRkUHPt_4ring6digest6SHA256	ring::digest::SHA256
 _RNvNtCseD7bwMwBkoP_12regex_syntax7unicode15canonical_value	regex_syntax::unicode::canonical_value
-_RNvNtCsfDOcEdXGwyf_12execdump_tui5views9find_insn	execdump_tui::views::find_insn
+_RNvNtCsfDOcEdXGwyf_12daedale_tui5views9find_insn	daedale_tui::views::find_insn
 _RNvNtCshHRB4Z1YrKw_9crossterm8terminal15enable_raw_mode	crossterm::terminal::enable_raw_mode
 _RNvNtCshxJnpmSp82F_6lang_c6parser16___parse_alignof0	lang_c::parser::__parse_alignof0
 _RNvNtCshxJnpmSp82F_6lang_c6parser22___parse_type_qualifier	lang_c::parser::__parse_type_qualifier
 _RNvNtCshxJnpmSp82F_6lang_c6parser27___parse_declaration_typedef	lang_c::parser::__parse_declaration_typedef
 _RNvNtCshxJnpmSp82F_6lang_c6parser32___parse_storage_class_specifier0	lang_c::parser::__parse_storage_class_specifier0
 _RNvNtCsjX1Vte1kdzx_16parking_lot_core11parking_lot13get_hashtableB3_	parking_lot_core::parking_lot::get_hashtable
-_RNvNtCslUhSaoMDPHK_13execdump_core8demangle15demangle_symbol	execdump_core::demangle::demangle_symbol
+_RNvNtCslUhSaoMDPHK_13daedale_core8demangle15demangle_symbol	daedale_core::demangle::demangle_symbol
 _RNvNtNtCs1wQTQaEylLk_6rustls4msgs5codec7put_u64	rustls::msgs::codec::put_u64
 _RNvNtNtCs2lfjhq9A1rP_12tracing_core8callsite11dispatchers18LOCKED_DISPATCHERS.llvm.9462051348548629150	tracing_core::callsite::dispatchers::LOCKED_DISPATCHERS (.llvm.9462051348548629150)
 _RNvNtNtCs4pOvFVUq0Vr_14regex_automata4util11determinize15epsilon_closure	regex_automata::util::determinize::epsilon_closure
-_RNvNtNtCs5DRV6yAd14J_19execdump_decompiler1c9structure9has_label	execdump_decompiler::c::structure::has_label
-_RNvNtNtCs5DRV6yAd14J_19execdump_decompiler4lift7aarch649condition	execdump_decompiler::lift::aarch64::condition
+_RNvNtNtCs5DRV6yAd14J_19daedale_decompiler1c9structure9has_label	daedale_decompiler::c::structure::has_label
+_RNvNtNtCs5DRV6yAd14J_19daedale_decompiler4lift7aarch649condition	daedale_decompiler::lift::aarch64::condition
 _RNvNtNtCs7fllHZsMb0X_4http6header3map14probe_distanceCsbmo0FHMV5Xy_5hyper	http::header::map::probe_distance
 _RNvNtNtCs9KeADrciNZy_6chrono6format4scan6numberB5_	chrono::format::scan::number
-_RNvNtNtCs9gee9duVEzI_19execdump_decompiler4lift7aarch643get	execdump_decompiler::lift::aarch64::get
+_RNvNtNtCs9gee9duVEzI_19daedale_decompiler4lift7aarch643get	daedale_decompiler::lift::aarch64::get
 _RNvNtNtCsaJwUeSWIQzl_4ring2io3der16positive_integer	ring::io::der::positive_integer
 _RNvNtNtCscI6d9CVNmLh_4core3str7pattern13simd_containsCsdg2E0CmAnsZ_11toml_parser	core::str::pattern::simd_contains
 _RNvNtNtCscI6d9CVNmLh_4core4char7methods15encode_utf8_rawCsduXJbRkUHPt_4ring	core::char::methods::encode_utf8_raw
@@ -621,13 +621,13 @@ _RNvNtNtCsduXJbRkUHPt_4ring4aead17chacha20_poly13054seal	ring::aead::chacha20_po
 _RNvNtNtCsfAVWYmlWizY_15icu_collections10char16trie4trie10skip_value	icu_collections::char16trie::trie::skip_value
 _RNvNtNtCsgczF5crJ4sT_3std2io5stdio6stderrCsgLg2E8rH6Za_12clap_builder	std::io::stdio::stderr
 _RNvNtNtCsk7NdiBuBipI_6memchr6memmem8searcher18searcher_kind_sse2	memchr::memmem::searcher::searcher_kind_sse2
-_RNvNtNtCslUhSaoMDPHK_13execdump_core8demangle7itanium4node	execdump_core::demangle::itanium::node
+_RNvNtNtCslUhSaoMDPHK_13daedale_core8demangle7itanium4node	daedale_core::demangle::itanium::node
 _RNvNtNtNtCs5OZEacqcADO_5tokio7runtime4task7harness15can_read_output	tokio::runtime::task::harness::can_read_output
 _RNvNtNtNtCsaJwUeSWIQzl_4ring3cpu5intel12featureflags11get_or_init	ring::cpu::intel::featureflags::get_or_init
 _RNvNtNtNtCscI6d9CVNmLh_4core7unicode12unicode_data2lt17SHORT_OFFSET_RUNS	core::unicode::unicode_data::lt::SHORT_OFFSET_RUNS
 _RNvNtNtNtCscI6d9CVNmLh_4core9core_arch3x864sse213__mm_set1_epi8Cs4PY1t2qPbZD_6memchr	core::core_arch::x86::sse2::_mm_set1_epi8
 _RNvNtNtNtCscI6d9CVNmLh_4core9core_arch3x864sse214__mm_load_si128CshxJnpmSp82F_6lang_c	core::core_arch::x86::sse2::_mm_load_si128
-_RNvNtNtNtCscI6d9CVNmLh_4core9core_arch3x864sse217__mm_setzero_si128Cs5DRV6yAd14J_19execdump_decompiler	core::core_arch::x86::sse2::_mm_setzero_si128
+_RNvNtNtNtCscI6d9CVNmLh_4core9core_arch3x864sse217__mm_setzero_si128Cs5DRV6yAd14J_19daedale_decompiler	core::core_arch::x86::sse2::_mm_setzero_si128
 _RNvNtNtNtCsd2Vx9JYD0g7_4toml2de6parser5value5value	toml::de::parser::value::value
 _RNvNtNtNtCsduXJbRkUHPt_4ring2ec7suite_b3ops39scalar_parse_big_endian_fixed_consttimeB7_	ring::ec::suite_b::ops::scalar_parse_big_endian_fixed_consttime
 _RNvNtNtNtCsgLg2E8rH6Za_12clap_builder6output8textwrap4core8ch_width	clap_builder::output::textwrap::core::ch_width
@@ -643,7 +643,7 @@ _RNvNvMNtNtCscI6d9CVNmLh_4core5alloc6layoutNtB4_6Layout29from_size_alignment_unc
 _RNvNvMs1_NtNtCscI6d9CVNmLh_4core3ptr8non_nullINtB7_7NonNullpE13new_unchecked18precondition_checkCsasIVapJg4Ba_16rustls_pki_types	<core::ptr::non_null::NonNull<_>>::new_unchecked::precondition_check
 _RNvNvMs3_NtNtCskQp7oO5Fp7v_12aho_corasick4util9prefilterNtB7_13MemmemBuilder5build3imp	<aho_corasick::util::prefilter::MemmemBuilder>::build::imp
 _RNvNvMs9_NtCscI6d9CVNmLh_4core3numj13unchecked_add18precondition_checkCsaGa943HH00r_4git2	<usize>::unchecked_add::precondition_check
-_RNvNvMs9_NtCscI6d9CVNmLh_4core3numj13unchecked_sub18precondition_checkCslUhSaoMDPHK_13execdump_core	<usize>::unchecked_sub::precondition_check
+_RNvNvMs9_NtCscI6d9CVNmLh_4core3numj13unchecked_sub18precondition_checkCslUhSaoMDPHK_13daedale_core	<usize>::unchecked_sub::precondition_check
 _RNvNvMs_NtCs40k4W9msRzi_5alloc3vecINtB6_3VecppE7set_len18precondition_checkCscJZUg2pyjiG_5tokio	<alloc::vec::Vec<_, _>>::set_len::precondition_check
 _RNvNvNCNCNCNvMs_NtNtNtCsePSvpdEU5V9_10hyper_util6client6legacy6clientINtBe_6ClientppE10connect_to0s_00s1_10___CALLSITE4META	<hyper_util::client::legacy::client::Client<_, _>>::connect_to::{closure#0}::{closure#1}::{closure#0}::__CALLSITE::META
 _RNvNvNtCscI6d9CVNmLh_4core3ptr11write_bytes18precondition_checkCsaLzXVI09wWW_14icu_normalizer	core::ptr::write_bytes::precondition_check
@@ -659,14 +659,14 @@ _RNvNvNtNtNtCsk7NdiBuBipI_6memchr4arch6x86_646memchr11memchr2_raw9find_sse2	memc
 _RNvNvNvMs2_NtNtNtCsizX5SLfpuPZ_10hyper_util6client6legacy4poolINtB9_10IdlePopperppE3pop10___CALLSITE4META	<hyper_util::client::legacy::pool::IdlePopper<_, _>>::pop::__CALLSITE::META
 _RNvNvNvNtNtNtNtCsePSvpdEU5V9_10hyper_util6client6legacy7connect4http7connect10___CALLSITE4META	hyper_util::client::legacy::connect::http::connect::__CALLSITE::META
 _RNvNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB7_10SliceIndexSpE17get_unchecked_mut18precondition_checkCs1wQTQaEylLk_6rustls	<usize as core::slice::index::SliceIndex<[_]>>::get_unchecked_mut::precondition_check
-_RNvNvXs1_NtCs67IJIvVi8Yx_8execdump4argsNtB7_4ArgsNtNtCsgGCgxbnbytj_12clap_builder6derive4Args12augment_argss9_13DEFAULT_VALUE	<execdump::args::Args as clap_builder::derive::Args>::augment_args::DEFAULT_VALUE
+_RNvNvXs1_NtCs67IJIvVi8Yx_8daedale4argsNtB7_4ArgsNtNtCsgGCgxbnbytj_12clap_builder6derive4Args12augment_argss9_13DEFAULT_VALUE	<daedale::args::Args as clap_builder::derive::Args>::augment_args::DEFAULT_VALUE
 _RNvXCs6Aeisi0YSCC_10equivalentNtNtCsTAmH6ypzh9_7kasuari3row6SymbolINtB2_10EquivalentBs_E10equivalentBw_	<kasuari::row::Symbol as equivalent::Equivalent<kasuari::row::Symbol>>::equivalent
 _RNvXNtCs3uHBugZQ3J8_8clap_lex3extNtNtNtCsgczF5crJ4sT_3std3ffi6os_str5OsStrNtB2_8OsStrExt10split_once	<std::ffi::os_str::OsStr as clap_lex::ext::OsStrExt>::split_once
 _RNvXNtCscI6d9CVNmLh_4core3anyNtNtCs7Nlq7QplZZi_5hyper7upgrade9OnUpgradeNtB2_3Any7type_idCslgq7c4DYF9G_7reqwest	<hyper::upgrade::OnUpgrade as core::any::Any>::type_id
-_RNvXNtCscI6d9CVNmLh_4core6borrowmINtB2_6BorrowmE6borrowCslUhSaoMDPHK_13execdump_core	<u32 as core::borrow::Borrow<u32>>::borrow
+_RNvXNtCscI6d9CVNmLh_4core6borrowmINtB2_6BorrowmE6borrowCslUhSaoMDPHK_13daedale_core	<u32 as core::borrow::Borrow<u32>>::borrow
 _RNvXNtCsduXJbRkUHPt_4ring4bitsNtB2_9BitLengthINtB2_11FromByteLenjE13from_byte_lenB4_	<ring::bits::BitLength as ring::bits::FromByteLen<usize>>::from_byte_len
 _RNvXNtNtCs40k4W9msRzi_5alloc3vec10partial_eqINtB4_3VechENtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eqCshxJnpmSp82F_6lang_c	<alloc::vec::Vec<u8> as core::cmp::PartialEq>::eq
-_RNvXNtNtCscI6d9CVNmLh_4core3ops12control_flowINtB2_11ControlFlowIBI_RNtNtCslUhSaoMDPHK_13execdump_core7program6RegionEENtNtB4_9try_trait3Try11from_outputB19_	<core::ops::control_flow::ControlFlow<core::ops::control_flow::ControlFlow<&execdump_core::program::Region>> as core::ops::try_trait::Try>::from_output
+_RNvXNtNtCscI6d9CVNmLh_4core3ops12control_flowINtB2_11ControlFlowIBI_RNtNtCslUhSaoMDPHK_13daedale_core7program6RegionEENtNtB4_9try_trait3Try11from_outputB19_	<core::ops::control_flow::ControlFlow<core::ops::control_flow::ControlFlow<&daedale_core::program::Region>> as core::ops::try_trait::Try>::from_output
 _RNvXNtNtCscI6d9CVNmLh_4core3ops12control_flowINtB2_11ControlFlowRNtNtNtNtCsdYsl3qRwY1p_4toml3ser8document6buffer5TableENtNtB4_9try_trait3Try11from_outputB19_	<core::ops::control_flow::ControlFlow<&toml::ser::document::buffer::Table> as core::ops::try_trait::Try>::from_output
 _RNvXNtNtCscI6d9CVNmLh_4core3ops12control_flowINtB2_11ControlFlowuENtNtB4_9try_trait3Try11from_outputCsdg2E0CmAnsZ_11toml_parser	<core::ops::control_flow::ControlFlow<()> as core::ops::try_trait::Try>::from_output
 _RNvXNtNtCscI6d9CVNmLh_4core5array8equalityAhj20_NtNtB6_3cmp9PartialEq2neCsduXJbRkUHPt_4ring	<[u8; 32] as core::cmp::PartialEq>::ne
@@ -674,7 +674,7 @@ _RNvXNtNtCscJZUg2pyjiG_5tokio6signal8registryNtB2_9EventInfoNtNtCscI6d9CVNmLh_4c
 _RNvXNtNtCsjX1Vte1kdzx_16parking_lot_core13thread_parker3impNtB2_12ThreadParkerNtB4_13ThreadParkerT11unpark_lockB6_	<parking_lot_core::thread_parker::imp::ThreadParker as parking_lot_core::thread_parker::ThreadParkerT>::unpark_lock
 _RNvXNtNtNtCsa1F4it94aAK_6rustls6crypto4ring2kxNtB2_7KxGroupNtB6_16SupportedKxGroup4name.llvm.5603296112872083320	<rustls::crypto::ring::kx::KxGroup as rustls::crypto::SupportedKxGroup>::name (.llvm.5603296112872083320)
 _RNvXNtNtNtCscI6d9CVNmLh_4core4iter6traits7collectINtNtNtB8_3ops5range5RangejENtB2_12IntoIterator9into_iterCskQp7oO5Fp7v_12aho_corasick	<core::ops::range::Range<usize> as core::iter::traits::collect::IntoIterator>::into_iter
-_RNvXNtNtNtCscI6d9CVNmLh_4core4iter6traits7collectINtNtNtB8_5slice4iter7IterMutNtCsfDOcEdXGwyf_12execdump_tui4ViewENtB2_12IntoIterator9into_iterB1g_	<core::slice::iter::IterMut<execdump_tui::View> as core::iter::traits::collect::IntoIterator>::into_iter
+_RNvXNtNtNtCscI6d9CVNmLh_4core4iter6traits7collectINtNtNtB8_5slice4iter7IterMutNtCsfDOcEdXGwyf_12daedale_tui4ViewENtB2_12IntoIterator9into_iterB1g_	<core::slice::iter::IterMut<daedale_tui::View> as core::iter::traits::collect::IntoIterator>::into_iter
 _RNvXNtNtNtCscI6d9CVNmLh_4core4iter7sources6repeatINtB2_6RepeatcENtNtNtB6_6traits8iterator8Iterator9size_hintCscWJlcMzi19H_12regex_syntax	<core::iter::sources::repeat::Repeat<char> as core::iter::traits::iterator::Iterator>::size_hint
 _RNvXNvNtCsgczF5crJ4sT_3std2io17default_write_fmtINtB2_7AdapterNtNtNtNtB6_3sys5stdio4unix6StderrENtNtCscI6d9CVNmLh_4core3fmt5Write9write_strCsaGa943HH00r_4git2	<std::io::default_write_fmt::Adapter<std::sys::stdio::unix::Stderr> as core::fmt::Write>::write_str
 _RNvXs0_NtCs1wQTQaEylLk_6rustls12record_layerNtB5_14DirectionStateNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eqB7_	<rustls::record_layer::DirectionState as core::cmp::PartialEq>::eq
@@ -685,8 +685,8 @@ _RNvXs0_NtNtCs3wpE2xUYJ1V_14regex_automata4meta8strategyINtB5_3PreNtNtNtNtB9_4ut
 _RNvXs0_NtNtCs4pOvFVUq0Vr_14regex_automata4meta8strategyINtB5_3PreNtNtNtNtB9_4util9prefilter6memchr7Memchr2ENtB5_8Strategy11search_halfB9_	<regex_automata::meta::strategy::Pre<regex_automata::util::prefilter::memchr::Memchr2> as regex_automata::meta::strategy::Strategy>::search_half
 _RNvXs0_NtNtCs9KeADrciNZy_6chrono5naive8datetimeNtB5_13NaiveDateTimeNtNtB9_6traits8Datelike4yearB9_	<chrono::naive::datetime::NaiveDateTime as chrono::traits::Datelike>::year
 _RNvXs0_NtNtCscI6d9CVNmLh_4core3net6parserNtNtB7_7ip_addr6IpAddrNtNtNtB9_3str6traits7FromStr8from_str	<core::net::ip_addr::IpAddr as core::str::traits::FromStr>::from_str
-_RNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB5_10SliceIndexSINtNtCs40k4W9msRzi_5alloc3vec3VecjEE9index_mutCs5DRV6yAd14J_19execdump_decompiler	<usize as core::slice::index::SliceIndex<[alloc::vec::Vec<usize>]>>::index_mut
-_RNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB5_10SliceIndexSNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c2ir5BlockE9index_mutB14_	<usize as core::slice::index::SliceIndex<[execdump_decompiler::c::ir::Block]>>::index_mut
+_RNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB5_10SliceIndexSINtNtCs40k4W9msRzi_5alloc3vec3VecjEE9index_mutCs5DRV6yAd14J_19daedale_decompiler	<usize as core::slice::index::SliceIndex<[alloc::vec::Vec<usize>]>>::index_mut
+_RNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB5_10SliceIndexSNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c2ir5BlockE9index_mutB14_	<usize as core::slice::index::SliceIndex<[daedale_decompiler::c::ir::Block]>>::index_mut
 _RNvXs0_NtNtCscI6d9CVNmLh_4core5slice5indexjINtB5_10SliceIndexSNtNtNtNtCs4pOvFVUq0Vr_14regex_automata3nfa8thompson7builder5StateE9index_mutB16_	<usize as core::slice::index::SliceIndex<[regex_automata::nfa::thompson::builder::State]>>::index_mut
 _RNvXs0_NtNtCscI6d9CVNmLh_4core9core_arch3x86NtB5_7___m128iNtNtB9_3fmt5Debug3fmt	<core::core_arch::x86::__m128i as core::fmt::Debug>::fmt
 _RNvXs0_NtNtCshbHma4O2AXc_3llm8backends6googleNtB5_25GoogleFunctionDeclarationINtNtCscI6d9CVNmLh_4core7convert4FromRNtNtNtB9_4chat4tool4ToolE4from	<llm::backends::google::GoogleFunctionDeclaration as core::convert::From<&llm::chat::tool::Tool>>::from
@@ -697,12 +697,12 @@ _RNvXs14_NtNtCs7fllHZsMb0X_4http6header3mapNtB6_14MaxSizeReachedNtNtCscI6d9CVNmL
 _RNvXs19_NtNtCscI6d9CVNmLh_4core4sync6atomicINtB6_6AtomicyENtNtBa_7default7Default7defaultCscJZUg2pyjiG_5tokio	<core::sync::atomic::Atomic<u64> as core::default::Default>::default
 _RNvXs1G_NtCscI6d9CVNmLh_4core3fmtTNtNtNtCs7fllHZsMb0X_4http3uri6scheme6SchemeNtNtBA_9authority9AuthorityENtB6_5Debug3fmtCs7cMPnhEfzsh_7reqwest	<(http::uri::scheme::Scheme, http::uri::authority::Authority) as core::fmt::Debug>::fmt
 _RNvXs1R_NtNtCs7fllHZsMb0X_4http6header3mapNtB6_4LinkNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs7cMPnhEfzsh_7reqwest	<http::header::map::Link as core::clone::Clone>::clone
-_RNvXs1_CsadtEA1PXqHv_12execdump_tuiNtB5_12ExplorerItemNtNtCscI6d9CVNmLh_4core5clone5Clone5clone	<execdump_tui::ExplorerItem as core::clone::Clone>::clone
+_RNvXs1_CsadtEA1PXqHv_12daedale_tuiNtB5_12ExplorerItemNtNtCscI6d9CVNmLh_4core5clone5Clone5clone	<daedale_tui::ExplorerItem as core::clone::Clone>::clone
 _RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCs1wQTQaEylLk_6rustls5enums15CertificateTypeENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBQ_	<alloc::raw_vec::RawVec<rustls::enums::CertificateType> as core::ops::drop::Drop>::drop
-_RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCslUhSaoMDPHK_13execdump_core3elf13ELFRelocationENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBQ_	<alloc::raw_vec::RawVec<execdump_core::elf::ELFRelocation> as core::ops::drop::Drop>::drop
+_RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtCslUhSaoMDPHK_13daedale_core3elf13ELFRelocationENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBQ_	<alloc::raw_vec::RawVec<daedale_core::elf::ELFRelocation> as core::ops::drop::Drop>::drop
 _RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecNtNtNtCsdVZ58MxQ2zx_15ratatui_widgets4list4item8ListItemENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBS_	<alloc::raw_vec::RawVec<ratatui_widgets::list::item::ListItem> as core::ops::drop::Drop>::drop
 _RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecRNtNtNtCsgLg2E8rH6Za_12clap_builder7builder3arg3ArgENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBT_	<alloc::raw_vec::RawVec<&clap_builder::builder::arg::Arg> as core::ops::drop::Drop>::drop
-_RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecjENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCs67IJIvVi8Yx_8execdump	<alloc::raw_vec::RawVec<usize> as core::ops::drop::Drop>::drop
+_RNvXs1_NtCs40k4W9msRzi_5alloc7raw_vecINtB5_6RawVecjENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCs67IJIvVi8Yx_8daedale	<alloc::raw_vec::RawVec<usize> as core::ops::drop::Drop>::drop
 _RNvXs1_NtCs6SNfn0C6VBe_4http10extensionsNtNtCslgq7c4DYF9G_7reqwest3tls7TlsInfoNtB5_8AnyClone9clone_boxBG_	<reqwest::tls::TlsInfo as http::extensions::AnyClone>::clone_box
 _RNvXs1_NtCs8twXtZXsKcc_11toml_parser7decoderINtNtCs40k4W9msRzi_5alloc6borrow3CoweENtB5_13StringBuilder5clear	<alloc::borrow::Cow<str> as toml_parser::decoder::StringBuilder>::clear
 _RNvXs1_NtCscI6d9CVNmLh_4core7convertNtCsfqFS1WGhHQg_6subtle6ChoiceINtB5_4IntobE4intoCs1wQTQaEylLk_6rustls	<subtle::Choice as core::convert::Into<bool>>::into
@@ -722,7 +722,7 @@ _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRINtNtNtNtCsQx7QROqyUr_12aho_corasick6packed5t
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtCs1wQTQaEylLk_6rustls5error16CertificateErrorNtB6_5Debug3fmtBA_	<&rustls::error::CertificateError as core::fmt::Debug>::fmt
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtCsa1F4it94aAK_6rustls5error16PeerIncompatibleNtB6_5Debug3fmtBA_	<&rustls::error::PeerIncompatible as core::fmt::Debug>::fmt
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtCsiVHNuMzTYSy_16rustls_pki_types6alg_id19AlgorithmIdentifierNtB6_5Debug3fmtCsa1F4it94aAK_6rustls	<&rustls_pki_types::alg_id::AlgorithmIdentifier as core::fmt::Debug>::fmt
-_RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtNtCs1mKOsRm1Wga_7inkwell6values9int_value8IntValueNtB6_5Debug3fmtCs9gee9duVEzI_19execdump_decompiler	<&inkwell::values::int_value::IntValue as core::fmt::Debug>::fmt
+_RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtNtCs1mKOsRm1Wga_7inkwell6values9int_value8IntValueNtB6_5Debug3fmtCs9gee9duVEzI_19daedale_decompiler	<&inkwell::values::int_value::IntValue as core::fmt::Debug>::fmt
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtNtCs4pOvFVUq0Vr_14regex_automata4meta8wrappers9DFAEngineNtB6_5Debug3fmtBC_	<&regex_automata::meta::wrappers::DFAEngine as core::fmt::Debug>::fmt
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtNtCsd3LqYXMFFHi_6webpki3crl5types16OwnedRevokedCertNtB6_5Debug3fmtCs1wQTQaEylLk_6rustls	<&webpki::crl::types::OwnedRevokedCert as core::fmt::Debug>::fmt
 _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRNtNtNtCshbHma4O2AXc_3llm8backends9anthropic16AnthropicContentNtB6_5Debug3fmtBC_	<&llm::backends::anthropic::AnthropicContent as core::fmt::Debug>::fmt
@@ -732,27 +732,27 @@ _RNvXs1g_NtCscI6d9CVNmLh_4core3fmtRuNtB6_5Debug3fmtCsfAVWYmlWizY_15icu_collectio
 _RNvXs1i_NtCscI6d9CVNmLh_4core3fmtRNtNtCs1EAQJhbGAzg_13toml_datetime8datetime6OffsetNtB6_7Display3fmtBA_	<&toml_datetime::datetime::Offset as core::fmt::Display>::fmt
 _RNvXs1i_NtCscI6d9CVNmLh_4core3fmtRbNtB6_7Display3fmtCsk6hyM9KQup5_10serde_json	<&bool as core::fmt::Display>::fmt
 _RNvXs1i_NtNtCscI6d9CVNmLh_4core3ops5arithRjNtB6_3Sub3subCs1wQTQaEylLk_6rustls	<&usize as core::ops::arith::Sub>::sub
-_RNvXs1o_NtCscI6d9CVNmLh_4core3fmtRyNtB6_8LowerHex3fmtCseH0mWYnU2OD_13execdump_core	<&u64 as core::fmt::LowerHex>::fmt
+_RNvXs1o_NtCscI6d9CVNmLh_4core3fmtRyNtB6_8LowerHex3fmtCseH0mWYnU2OD_13daedale_core	<&u64 as core::fmt::LowerHex>::fmt
 _RNvXs1w_NtNtCs1wQTQaEylLk_6rustls4msgs5enumsNtB6_10NamedGroupNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmt	<rustls::msgs::enums::NamedGroup as core::fmt::Debug>::fmt
 _RNvXs28_CsasIVapJg4Ba_16rustls_pki_typesNtB6_3DerNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs1wQTQaEylLk_6rustls	<rustls_pki_types::Der as core::clone::Clone>::clone
 _RNvXs2J_NtNtCscI6d9CVNmLh_4core5slice4iterINtB6_4IterNtNtCs1wQTQaEylLk_6rustls5enums11CipherSuiteENtNtNtNtBa_4iter6traits8iterator8Iterator9size_hintBT_	<core::slice::iter::Iter<rustls::enums::CipherSuite> as core::iter::traits::iterator::Iterator>::size_hint
-_RNvXs2J_NtNtCscI6d9CVNmLh_4core5slice4iterINtB6_4IterNtNtCslUhSaoMDPHK_13execdump_core3elf15ELFDynamicEntryENtNtNtNtBa_4iter6traits8iterator8Iterator4nextBT_	<core::slice::iter::Iter<execdump_core::elf::ELFDynamicEntry> as core::iter::traits::iterator::Iterator>::next
+_RNvXs2J_NtNtCscI6d9CVNmLh_4core5slice4iterINtB6_4IterNtNtCslUhSaoMDPHK_13daedale_core3elf15ELFDynamicEntryENtNtNtNtBa_4iter6traits8iterator8Iterator4nextBT_	<core::slice::iter::Iter<daedale_core::elf::ELFDynamicEntry> as core::iter::traits::iterator::Iterator>::next
 _RNvXs2J_NtNtCscI6d9CVNmLh_4core5slice4iterINtB6_4IterReENtNtNtNtBa_4iter6traits8iterator8Iterator4nextCsfkJhO7nUixW_10serde_core	<core::slice::iter::Iter<&str> as core::iter::traits::iterator::Iterator>::next
 _RNvXs2J_NtNtCscI6d9CVNmLh_4core5slice4iterINtB6_4IterhENtNtNtNtBa_4iter6traits8iterator8Iterator4nextCsfkJhO7nUixW_10serde_core	<core::slice::iter::Iter<u8> as core::iter::traits::iterator::Iterator>::next
-_RNvXs2O_NtCslUhSaoMDPHK_13execdump_core3elfNtB6_15DynamicFlagIterNtNtNtNtCscI6d9CVNmLh_4core4iter6traits8iterator8Iterator9size_hintB8_	<execdump_core::elf::DynamicFlagIter as core::iter::traits::iterator::Iterator>::size_hint
-_RNvXs2_NtCs1WztaLyfR2E_7inkwell11basic_blockNtB5_10BasicBlockNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eqCs5DRV6yAd14J_19execdump_decompiler	<inkwell::basic_block::BasicBlock as core::cmp::PartialEq>::eq
+_RNvXs2O_NtCslUhSaoMDPHK_13daedale_core3elfNtB6_15DynamicFlagIterNtNtNtNtCscI6d9CVNmLh_4core4iter6traits8iterator8Iterator9size_hintB8_	<daedale_core::elf::DynamicFlagIter as core::iter::traits::iterator::Iterator>::size_hint
+_RNvXs2_NtCs1WztaLyfR2E_7inkwell11basic_blockNtB5_10BasicBlockNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eqCs5DRV6yAd14J_19daedale_decompiler	<inkwell::basic_block::BasicBlock as core::cmp::PartialEq>::eq
 _RNvXs2_NtCs40k4W9msRzi_5alloc5allocNtB5_6GlobalNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCshxJnpmSp82F_6lang_c	<alloc::alloc::Global as core::clone::Clone>::clone
 _RNvXs2_NtCsaGa943HH00r_4git25errorNtB5_5ErrorINtNtCscI6d9CVNmLh_4core7convert4FromNtNtNtBM_3str5error9Utf8ErrorE4from	<git2::error::Error as core::convert::From<core::str::error::Utf8Error>>::from
 _RNvXs2_NtCsjX1Vte1kdzx_16parking_lot_core11parking_lotNtB5_10ThreadDataNtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4drop	<parking_lot_core::parking_lot::ThreadData as core::ops::drop::Drop>::drop
 _RNvXs2_NtNtCs52ylLKyFTQX_6base646engine15general_purposeNtB5_20GeneralPurposeConfigNtB7_6Config14encode_padding	<base64::engine::general_purpose::GeneralPurposeConfig as base64::engine::Config>::encode_padding
-_RNvXs2_NtNtCscI6d9CVNmLh_4core3str6traitseINtNtNtB9_3ops5index5IndexINtNtBJ_5range14RangeInclusivejEE5indexCs5DRV6yAd14J_19execdump_decompiler	<str as core::ops::index::Index<core::ops::range::RangeInclusive<usize>>>::index
+_RNvXs2_NtNtCscI6d9CVNmLh_4core3str6traitseINtNtNtB9_3ops5index5IndexINtNtBJ_5range14RangeInclusivejEE5indexCs5DRV6yAd14J_19daedale_decompiler	<str as core::ops::index::Index<core::ops::range::RangeInclusive<usize>>>::index
 _RNvXs2_NtNtCscI6d9CVNmLh_4core3str7patterncNtB5_7Pattern15is_contained_inCsgLg2E8rH6Za_12clap_builder	<char as core::str::pattern::Pattern>::is_contained_in
 _RNvXs2_NtNtCscI6d9CVNmLh_4core5slice5indexINtNtNtB9_3ops5range5RangejEINtB5_10SliceIndexSmE9index_mutCskQp7oO5Fp7v_12aho_corasick	<core::ops::range::Range<usize> as core::slice::index::SliceIndex<[u32]>>::index_mut
 _RNvXs2_NtNtCsgLg2E8rH6Za_12clap_builder4util2idNtB5_2IdINtNtCscI6d9CVNmLh_4core7convert4FromReE4from	<clap_builder::util::id::Id as core::convert::From<&str>>::from
 _RNvXs2_NtNtNtCs1wQTQaEylLk_6rustls6crypto4ring5tls13NtB5_21Tls13MessageEncrypterNtNtB9_6cipher16MessageEncrypter7encrypt	<rustls::crypto::ring::tls13::Tls13MessageEncrypter as rustls::crypto::cipher::MessageEncrypter>::encrypt
 _RNvXs2_NtNtNtNtCsduXJbRkUHPt_4ring2ec7suite_b5ecdsa7signingNtB5_11NonceRandomNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmt	<ring::ec::suite_b::ecdsa::signing::NonceRandom as core::fmt::Debug>::fmt
 _RNvXs2o_NtNtCs1wQTQaEylLk_6rustls4msgs5enumshINtNtCscI6d9CVNmLh_4core7convert4FromNtB6_16KeyUpdateRequestE4from	<u8 as core::convert::From<rustls::msgs::enums::KeyUpdateRequest>>::from
-_RNvXs3Q_NtCslUhSaoMDPHK_13execdump_core3elfNtB6_3ELFNtNtCscI6d9CVNmLh_4core7default7Default7defaultB8_	<execdump_core::elf::ELF as core::default::Default>::default
+_RNvXs3Q_NtCslUhSaoMDPHK_13daedale_core3elfNtB6_3ELFNtNtCscI6d9CVNmLh_4core7default7Default7defaultB8_	<daedale_core::elf::ELF as core::default::Default>::default
 _RNvXs3_NtCscI6d9CVNmLh_4core3strNtB5_8LinesMapINtNtNtB7_3ops8function2FnTReEE4callCs4WrJ2ea1NkX_12ratatui_core	<core::str::LinesMap as core::ops::function::Fn<(&str,)>>::call
 _RNvXs3_NtNtCs1WztaLyfR2E_7inkwell6values8fn_valueNtB5_14ParamValueIterNtNtNtNtCscI6d9CVNmLh_4core4iter6traits8iterator8Iterator4next	<inkwell::values::fn_value::ParamValueIter as core::iter::traits::iterator::Iterator>::next
 _RNvXs3_NtNtCsa1F4it94aAK_6rustls6webpki15server_verifierNtB5_20WebPkiServerVerifierNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmt.llvm.15013202121528681202	<rustls::webpki::server_verifier::WebPkiServerVerifier as core::fmt::Debug>::fmt (.llvm.15013202121528681202)
@@ -777,40 +777,40 @@ _RNvXs5_NtNtCs40k4W9msRzi_5alloc3vec5drainINtB5_5DrainhENtNtNtCscI6d9CVNmLh_4cor
 _RNvXs5_NtNtCsa1F4it94aAK_6rustls4msgs5codecINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtB9_5enums15CertificateTypeENtB5_5Codec6encodeB9_	<alloc::vec::Vec<rustls::enums::CertificateType> as rustls::msgs::codec::Codec>::encode
 _RNvXs5_NtNtCscI6d9CVNmLh_4core5slice5indexINtNtNtB9_3ops5range9RangeFromjEINtB5_10SliceIndexScE9index_mutCs4NgJ8KamjkS_4idna	<core::ops::range::RangeFrom<usize> as core::slice::index::SliceIndex<[char]>>::index_mut
 _RNvXs5_NtNtCsgczF5crJ4sT_3std3ffi6os_strNtB5_8OsStringNtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefCsg7KiFt1rSOb_8anstream	<std::ffi::os_str::OsString as core::ops::deref::Deref>::deref
-_RNvXs5_NtNtNtNtCscI6d9CVNmLh_4core5slice4sort6shared9smallsortINtB5_10CopyOnDropjENtNtNtBd_3ops4drop4Drop4dropCs5DRV6yAd14J_19execdump_decompiler	<core::slice::sort::shared::smallsort::CopyOnDrop<usize> as core::ops::drop::Drop>::drop
+_RNvXs5_NtNtNtNtCscI6d9CVNmLh_4core5slice4sort6shared9smallsortINtB5_10CopyOnDropjENtNtNtBd_3ops4drop4Drop4dropCs5DRV6yAd14J_19daedale_decompiler	<core::slice::sort::shared::smallsort::CopyOnDrop<usize> as core::ops::drop::Drop>::drop
 _RNvXs6_NtCscWJlcMzi19H_12regex_syntax3astNtB5_8PositionNtNtCscI6d9CVNmLh_4core3cmp3Ord3cmp	<regex_syntax::ast::Position as core::cmp::Ord>::cmp
 _RNvXs6_NtNtCsa1F4it94aAK_6rustls6client5tls13NtB5_23ExpectCertificateVerifyINtNtB9_12common_state5StateNtNtB7_11client_conn20ClientConnectionDataE6handle	<rustls::client::tls13::ExpectCertificateVerify as rustls::common_state::State<rustls::client::client_conn::ClientConnectionData>>::handle
 _RNvXs6_NtNtCsgczF5crJ4sT_3std2io5implsRShNtB7_4Read13read_vectoredCs7cMPnhEfzsh_7reqwest	<&[u8] as std::io::Read>::read_vectored
 _RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecINtNtB7_6borrow3CoweEENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefCsgLg2E8rH6Za_12clap_builder	<alloc::vec::Vec<alloc::borrow::Cow<str>> as core::ops::deref::Deref>::deref
-_RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13execdump_core4dump4DumpENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefBJ_	<alloc::vec::Vec<execdump_core::dump::Dump> as core::ops::deref::Deref>::deref
+_RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13daedale_core4dump4DumpENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefBJ_	<alloc::vec::Vec<daedale_core::dump::Dump> as core::ops::deref::Deref>::deref
 _RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCsgLg2E8rH6Za_12clap_builder5error7context11ContextKindENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefBL_	<alloc::vec::Vec<clap_builder::error::context::ContextKind> as core::ops::deref::Deref>::deref
-_RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VeccENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefCsfDOcEdXGwyf_12execdump_tui	<alloc::vec::Vec<char> as core::ops::deref::Deref>::deref
+_RNvXs7_NtCs40k4W9msRzi_5alloc3vecINtB5_3VeccENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefCsfDOcEdXGwyf_12daedale_tui	<alloc::vec::Vec<char> as core::ops::deref::Deref>::deref
 _RNvXs7_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionINtNtCs40k4W9msRzi_5alloc3vec3VecNtNtNtCsdqijrRiej1g_3llm4chat4tool4ToolEENtNtB7_7default7Default7defaultB1n_	<core::option::Option<alloc::vec::Vec<llm::chat::tool::Tool>> as core::default::Default>::default
 _RNvXs7_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionNtNtNtCsgLg2E8rH6Za_12clap_builder7builder3str3StrENtNtB7_7default7Default7defaultBQ_	<core::option::Option<clap_builder::builder::str::Str> as core::default::Default>::default
-_RNvXs7_NtNtCs40k4W9msRzi_5alloc3vec7is_zerolNtB5_6IsZero7is_zeroCsfDOcEdXGwyf_12execdump_tui	<i32 as alloc::vec::is_zero::IsZero>::is_zero
+_RNvXs7_NtNtCs40k4W9msRzi_5alloc3vec7is_zerolNtB5_6IsZero7is_zeroCsfDOcEdXGwyf_12daedale_tui	<i32 as alloc::vec::is_zero::IsZero>::is_zero
 _RNvXs7_NtNtCscI6d9CVNmLh_4core3cmp5implsRNtNtCs6jb4KdjraBi_7anstyle5color8RgbColorNtB7_9PartialEq2eqCsg7KiFt1rSOb_8anstream	<&anstyle::color::RgbColor as core::cmp::PartialEq>::eq
 _RNvXs7_NtNtCscI6d9CVNmLh_4core3cmp5implsRNtNtNtCs7fllHZsMb0X_4http6method9extension15InlineExtensionNtB7_9PartialEq2eqCs7cMPnhEfzsh_7reqwest	<&http::method::extension::InlineExtension as core::cmp::PartialEq>::eq
 _RNvXs7_NtNtCscI6d9CVNmLh_4core3cmp5implsReNtB7_9PartialEq2neCsdNI21rGWSb_4mime	<&str as core::cmp::PartialEq>::ne
-_RNvXs7_NtNtCscI6d9CVNmLh_4core5array8equalityhINtB5_11SpecArrayEqhKj2_E7spec_eqCslUhSaoMDPHK_13execdump_core	<u8 as core::array::equality::SpecArrayEq<u8, 2>>::spec_eq
+_RNvXs7_NtNtCscI6d9CVNmLh_4core5array8equalityhINtB5_11SpecArrayEqhKj2_E7spec_eqCslUhSaoMDPHK_13daedale_core	<u8 as core::array::equality::SpecArrayEq<u8, 2>>::spec_eq
 _RNvXs7_NtNtNtCs1wQTQaEylLk_6rustls6crypto4ring4signNtB5_11EcdsaSignerNtNtB9_6signer6Signer6scheme	<rustls::crypto::ring::sign::EcdsaSigner as rustls::crypto::signer::Signer>::scheme
-_RNvXs8_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13execdump_core7program6RegionENtNtNtCscI6d9CVNmLh_4core3ops5deref8DerefMut9deref_mutBJ_	<alloc::vec::Vec<execdump_core::program::Region> as core::ops::deref::DerefMut>::deref_mut
+_RNvXs8_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCslUhSaoMDPHK_13daedale_core7program6RegionENtNtNtCscI6d9CVNmLh_4core3ops5deref8DerefMut9deref_mutBJ_	<alloc::vec::Vec<daedale_core::program::Region> as core::ops::deref::DerefMut>::deref_mut
 _RNvXs8_NtCs40k4W9msRzi_5alloc5boxedINtB5_3BoxINtNtCshxJnpmSp82F_6lang_c4span4NodeNtNtBM_3ast8SizeOfTyEENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBM_	<alloc::boxed::Box<lang_c::span::Node<lang_c::ast::SizeOfTy>> as core::ops::drop::Drop>::drop
 _RNvXs8_NtCs40k4W9msRzi_5alloc5boxedINtB5_3BoxNtNtNtCsgczF5crJ4sT_3std2io5error6CustomENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCs5j4ko3RvOtI_11parking_lot	<alloc::boxed::Box<std::io::error::Custom> as core::ops::drop::Drop>::drop
 _RNvXs8_NtCscI6d9CVNmLh_4core5arrayQAINtNtNtB7_3mem12maybe_uninit11MaybeUninithEj14_INtNtB7_7convert7TryFromQSBy_E8try_fromCslgNNO3csm7k_10serde_json	<&mut [core::mem::maybe_uninit::MaybeUninit<u8>; 20] as core::convert::TryFrom<&mut [core::mem::maybe_uninit::MaybeUninit<u8>]>>::try_from
 _RNvXs8_NtCshxJnpmSp82F_6lang_c4spanINtB5_4NodeNtNtB7_3ast15RangeDesignatorENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneB7_	<lang_c::span::Node<lang_c::ast::RangeDesignator> as core::clone::Clone>::clone
 _RNvXs8_NtCslgq7c4DYF9G_7reqwest3tlsNtB5_10NoVerifierNtNtCsa1F4it94aAK_6rustls6verify18ServerCertVerifier22verify_tls12_signature	<reqwest::tls::NoVerifier as rustls::verify::ServerCertVerifier>::verify_tls12_signature
-_RNvXs8_NtNtCscI6d9CVNmLh_4core3cmp5implsRyNtB7_10PartialOrd13___chaining_ltCsfDOcEdXGwyf_12execdump_tui	<&u64 as core::cmp::PartialOrd>::__chaining_lt
+_RNvXs8_NtNtCscI6d9CVNmLh_4core3cmp5implsRyNtB7_10PartialOrd13___chaining_ltCsfDOcEdXGwyf_12daedale_tui	<&u64 as core::cmp::PartialOrd>::__chaining_lt
 _RNvXs8_NtNtCsgLg2E8rH6Za_12clap_builder7builder3strNtB5_3StrNtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefB9_	<clap_builder::builder::str::Str as core::ops::deref::Deref>::deref
 _RNvXs9_NtCsduXJbRkUHPt_4ring6digestNtB5_12BlockContextNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneB7_	<ring::digest::BlockContext as core::clone::Clone>::clone
 _RNvXs9_NtNtCscI6d9CVNmLh_4core3ops12control_flowINtB5_11ControlFlowuENtNtB9_3cmp9PartialEq2eqCsfAVWYmlWizY_15icu_collections	<core::ops::control_flow::ControlFlow<()> as core::cmp::PartialEq>::eq
 _RNvXs9_NtNtCsgczF5crJ4sT_3std2io5implsINtNtCs40k4W9msRzi_5alloc3vec3VechENtB7_5Write5flushB9_	<alloc::vec::Vec<u8> as std::io::Write>::flush
 _RNvXsB_NtCs40k4W9msRzi_5alloc6stringINtNtB7_6borrow3CoweENtB5_8ToString9to_stringCshHRB4Z1YrKw_9crossterm	<alloc::borrow::Cow<str> as alloc::string::ToString>::to_string
-_RNvXsB_NtCs40k4W9msRzi_5alloc6stringyNtB5_8ToString9to_stringCslUhSaoMDPHK_13execdump_core	<u64 as alloc::string::ToString>::to_string
-_RNvXsC_NtCslUhSaoMDPHK_13execdump_core3elfNtB5_8ELFOsAbiNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmtB7_	<execdump_core::elf::ELFOsAbi as core::fmt::Debug>::fmt
+_RNvXsB_NtCs40k4W9msRzi_5alloc6stringyNtB5_8ToString9to_stringCslUhSaoMDPHK_13daedale_core	<u64 as alloc::string::ToString>::to_string
+_RNvXsC_NtCslUhSaoMDPHK_13daedale_core3elfNtB5_8ELFOsAbiNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmtB7_	<daedale_core::elf::ELFOsAbi as core::fmt::Debug>::fmt
 _RNvXsD_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtNtCscJZUg2pyjiG_5tokio7runtime4park5InnerENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBM_	<alloc::sync::Arc<tokio::runtime::park::Inner> as core::ops::drop::Drop>::drop
 _RNvXsF_NtCs40k4W9msRzi_5alloc6stringbNtB5_12SpecToString14spec_to_stringCsdYsl3qRwY1p_4toml	<bool as alloc::string::SpecToString>::spec_to_string
 _RNvXsH_NtCs1wQTQaEylLk_6rustls5errorNtB5_18ExtendedKeyPurposeNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneB7_	<rustls::error::ExtendedKeyPurpose as core::clone::Clone>::clone
-_RNvXsJ_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionAhj2_ENtNtNtB7_3ops9try_trait3Try6branchCslUhSaoMDPHK_13execdump_core	<core::option::Option<[u8; 2]> as core::ops::try_trait::Try>::branch
+_RNvXsJ_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionAhj2_ENtNtNtB7_3ops9try_trait3Try6branchCslUhSaoMDPHK_13daedale_core	<core::option::Option<[u8; 2]> as core::ops::try_trait::Try>::branch
 _RNvXsJ_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionRINtNtCs40k4W9msRzi_5alloc3vec3VechEENtNtNtB7_3ops9try_trait3Try6branchCskQp7oO5Fp7v_12aho_corasick	<core::option::Option<&alloc::vec::Vec<u8>> as core::ops::try_trait::Try>::branch
 _RNvXsJ_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionjENtNtNtB7_3ops9try_trait3Try11from_outputCs1wQTQaEylLk_6rustls	<core::option::Option<usize> as core::ops::try_trait::Try>::from_output
 _RNvXsK_NtCscI6d9CVNmLh_4core3fmtNtB5_5ErrorNtB5_5Debug3fmt.llvm.12479460613132680760	<core::fmt::Error as core::fmt::Debug>::fmt (.llvm.12479460613132680760)
@@ -825,10 +825,10 @@ _RNvXsX_CsiiDND0zK69H_8smallvecNtB5_18CollectionAllocErrNtNtCscI6d9CVNmLh_4core3
 _RNvXsZ_NtCs40k4W9msRzi_5alloc6stringNtB5_6StringNtNtCscI6d9CVNmLh_4core3fmt5Write10write_char.llvm.17218883801691915405	<alloc::string::String as core::fmt::Write>::write_char (.llvm.17218883801691915405)
 _RNvXsZ_NtCs40k4W9msRzi_5alloc6stringNtB5_6StringNtNtCscI6d9CVNmLh_4core3fmt5Write9write_strCsjwn8bqtLkoi_5regex	<alloc::string::String as core::fmt::Write>::write_str
 _RNvXs_CsgYwSfzbAs7x_4zmijfNtB4_11FloatTraits7to_bitsB4_	<f32 as zmij::FloatTraits>::to_bits
-_RNvXs_NtCs40k4W9msRzi_5alloc3strSReINtNtB6_5slice4JoinBv_E4joinCslUhSaoMDPHK_13execdump_core	<[&str] as alloc::slice::Join<&str>>::join
+_RNvXs_NtCs40k4W9msRzi_5alloc3strSReINtNtB6_5slice4JoinBv_E4joinCslUhSaoMDPHK_13daedale_core	<[&str] as alloc::slice::Join<&str>>::join
 _RNvXs_NtCs40k4W9msRzi_5alloc5allocNtB4_6GlobalNtNtCscI6d9CVNmLh_4core5alloc9Allocator8allocateCs7cMPnhEfzsh_7reqwest	<alloc::alloc::Global as core::alloc::Allocator>::allocate
 _RNvXs_NtCsaGa943HH00r_4git26commitNtB4_6CommitNtNtB6_4util7Binding8from_raw	<git2::commit::Commit as git2::util::Binding>::from_raw
-_RNvXs_NtCsfDOcEdXGwyf_12execdump_tui5themeNtB4_11KeyBindingsNtNtCscI6d9CVNmLh_4core7default7Default7default	<execdump_tui::theme::KeyBindings as core::default::Default>::default
+_RNvXs_NtCsfDOcEdXGwyf_12daedale_tui5themeNtB4_11KeyBindingsNtNtCscI6d9CVNmLh_4core7default7Default7default	<daedale_tui::theme::KeyBindings as core::default::Default>::default
 _RNvXs_NtCssrCvUZVUPr_12tracing_core8callsiteNtB4_15DefaultCallsiteNtB4_8Callsite12set_interest	<tracing_core::callsite::DefaultCallsite as tracing_core::callsite::Callsite>::set_interest
 _RNvXs_NtNtCs40k4W9msRzi_5alloc3vec15set_len_on_dropNtB4_12SetLenOnDropNtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCsaGa943HH00r_4git2	<alloc::vec::set_len_on_drop::SetLenOnDrop as core::ops::drop::Drop>::drop
 _RNvXs_NtNtCs99qQEoXBNQg_11signal_hook8iterator11exfiltratorNtB4_10SignalOnlyNtNtB4_6sealed11Exfiltrator4load	<signal_hook::iterator::exfiltrator::SignalOnly as signal_hook::iterator::exfiltrator::sealed::Exfiltrator>::load
@@ -843,22 +843,22 @@ _RNvXs_NtNtNtCs945LnvxVZUd_3mio3net3uds6streamNtB4_10UnixStreamNtNtCsgczF5crJ4sT
 _RNvXs_NtNtNtCscI6d9CVNmLh_4core7convert3num18ptr_try_from_implstINtB8_7TryFromjE8try_fromCs4pOvFVUq0Vr_14regex_automata	<u16 as core::convert::TryFrom<usize>>::try_from
 _RNvXs_NtNtNtNtCsQx7QROqyUr_12aho_corasick6packed5teddy7builder6x86_64INtB4_9SlimSSSE3Kj3_ENtNtCscI6d9CVNmLh_4core3fmt5Debug3fmtBc_	<aho_corasick::packed::teddy::builder::x86_64::SlimSSSE3<3> as core::fmt::Debug>::fmt
 _RNvXsa_NtCs1EAQJhbGAzg_13toml_datetime8datetimeNtB5_5LexerNtNtNtNtCscI6d9CVNmLh_4core4iter6traits8iterator8Iterator4next	<toml_datetime::datetime::Lexer as core::iter::traits::iterator::Iterator>::next
-_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtB7_6string6StringENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs8hMsTSjfmUR_16execdump_project	<alloc::vec::Vec<alloc::string::String> as core::clone::Clone>::clone
-_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast4CaseENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneBL_	<alloc::vec::Vec<execdump_decompiler::c::ast::Case> as core::clone::Clone>::clone
-_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTjjEENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCsfDOcEdXGwyf_12execdump_tui	<alloc::vec::Vec<(usize, usize)> as core::clone::Clone>::clone
+_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtB7_6string6StringENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs8hMsTSjfmUR_16daedale_project	<alloc::vec::Vec<alloc::string::String> as core::clone::Clone>::clone
+_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast4CaseENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneBL_	<alloc::vec::Vec<daedale_decompiler::c::ast::Case> as core::clone::Clone>::clone
+_RNvXsa_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTjjEENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCsfDOcEdXGwyf_12daedale_tui	<alloc::vec::Vec<(usize, usize)> as core::clone::Clone>::clone
 _RNvXsa_NtCscI6d9CVNmLh_4core5arrayAINtNtNtNtCskQp7oO5Fp7v_12aho_corasick6packed5teddy7generic4MaskNtNtNtB7_9core_arch3x867___m128iEj4_NtNtB7_3fmt5Debug3fmtBG_	<[aho_corasick::packed::teddy::generic::Mask<core::core_arch::x86::__m128i>; 4] as core::fmt::Debug>::fmt
 _RNvXsa_NtNtCs5OZEacqcADO_5tokio4sync6notifyNtB5_8NotifiedNtNtNtCscI6d9CVNmLh_4core6future6future6Future4poll	<tokio::sync::notify::Notified as core::future::future::Future>::poll
 _RNvXsa_NtNtNtCs7Nlq7QplZZi_5hyper5proto2h16decodeNtB5_12ChunkedStateNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmt	<hyper::proto::h1::decode::ChunkedState as core::fmt::Debug>::fmt
-_RNvXsb_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTjuEENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs5DRV6yAd14J_19execdump_decompiler	<hashbrown::raw::RawTable<(usize, ())> as core::clone::Clone>::clone
+_RNvXsb_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTjuEENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCs5DRV6yAd14J_19daedale_decompiler	<hashbrown::raw::RawTable<(usize, ())> as core::clone::Clone>::clone
 _RNvXsb_NtNtCsdqijrRiej1g_3llm9providers17openai_compatibleNtB5_13OpenAIChatMsgNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmtB9_	<llm::providers::openai_compatible::OpenAIChatMsg as core::fmt::Debug>::fmt
-_RNvXsc_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs5DRV6yAd14J_19execdump_decompiler1c3ast3VarEINtNtNtCscI6d9CVNmLh_4core3ops5index5IndexjE5indexBL_	<alloc::vec::Vec<execdump_decompiler::c::ast::Var> as core::ops::index::Index<usize>>::index
-_RNvXsc_NtCs8hMsTSjfmUR_16execdump_project11annotationsNtB5_13FunctionNotesNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eq	<execdump_project::annotations::FunctionNotes as core::cmp::PartialEq>::eq
+_RNvXsc_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs5DRV6yAd14J_19daedale_decompiler1c3ast3VarEINtNtNtCscI6d9CVNmLh_4core3ops5index5IndexjE5indexBL_	<alloc::vec::Vec<daedale_decompiler::c::ast::Var> as core::ops::index::Index<usize>>::index
+_RNvXsc_NtCs8hMsTSjfmUR_16daedale_project11annotationsNtB5_13FunctionNotesNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2eq	<daedale_project::annotations::FunctionNotes as core::cmp::PartialEq>::eq
 _RNvXsc_NtNtCscI6d9CVNmLh_4core4iter5rangeINtNtNtB9_3ops5range14RangeInclusivejENtB5_26RangeInclusiveIteratorImpl9spec_nextCsddFQlSbhWdr_9itertools	<core::ops::range::RangeInclusive<usize> as core::iter::range::RangeInclusiveIteratorImpl>::spec_next
 _RNvXsc_NtNtCsgLg2E8rH6Za_12clap_builder7builder12value_parserNtB5_17StringValueParserNtB5_14AnyValueParser7type_idB9_	<clap_builder::builder::value_parser::StringValueParser as clap_builder::builder::value_parser::AnyValueParser>::type_id
 _RNvXsd_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTlNtCsieDaWI6pf9Q_20signal_hook_registry4SlotEEINtNtNtCscI6d9CVNmLh_4core3ops5index8IndexMutjE9index_mutBJ_	<alloc::vec::Vec<(i32, signal_hook_registry::Slot)> as core::ops::index::IndexMut<usize>>::index_mut
 _RNvXsd_NtCscI6d9CVNmLh_4core5arrayANtCsdQK0EcqYxby_12capstone_sys8cs_sh_opj3_INtNtNtB7_3ops5index5IndexINtNtB1i_5range7RangeTojEE5indexCs8iozIJOV3y1_8capstone	<[capstone_sys::cs_sh_op; 3] as core::ops::index::Index<core::ops::range::RangeTo<usize>>>::index
-_RNvXsd_NtCscI6d9CVNmLh_4core6markerINtB5_11PhantomDataNtNtCs3c2gDx2JVYI_8execdump4args15DecompileOutputENtNtB7_7default7Default7defaultBU_	<core::marker::PhantomData<execdump::args::DecompileOutput> as core::default::Default>::default
-_RNvXsd_NtNtCscI6d9CVNmLh_4core4iter5rangeINtNtNtB9_3ops5range14RangeInclusivejENtNtNtB7_6traits8iterator8Iterator4nextCslUhSaoMDPHK_13execdump_core	<core::ops::range::RangeInclusive<usize> as core::iter::traits::iterator::Iterator>::next
+_RNvXsd_NtCscI6d9CVNmLh_4core6markerINtB5_11PhantomDataNtNtCs3c2gDx2JVYI_8daedale4args15DecompileOutputENtNtB7_7default7Default7defaultBU_	<core::marker::PhantomData<daedale::args::DecompileOutput> as core::default::Default>::default
+_RNvXsd_NtNtCscI6d9CVNmLh_4core4iter5rangeINtNtNtB9_3ops5range14RangeInclusivejENtNtNtB7_6traits8iterator8Iterator4nextCslUhSaoMDPHK_13daedale_core	<core::ops::range::RangeInclusive<usize> as core::iter::traits::iterator::Iterator>::next
 _RNvXse_NtCs40k4W9msRzi_5alloc5boxedINtB5_3BoxShENtNtCscI6d9CVNmLh_4core5clone5Clone5cloneCsbmo0FHMV5Xy_5hyper	<alloc::boxed::Box<[u8]> as core::clone::Clone>::clone
 _RNvXse_NtNtCs1wQTQaEylLk_6rustls4msgs5enumsNtB5_21ClientCertificateTypeNtNtB7_5codec5Codec6encode	<rustls::msgs::enums::ClientCertificateType as rustls::msgs::codec::Codec>::encode
 _RNvXse_NtNtCs7cMPnhEfzsh_7reqwest10async_impl6clientNtB5_14PendingRequestNtNtNtCscI6d9CVNmLh_4core6future6future6Future4poll	<reqwest::async_impl::client::PendingRequest as core::future::future::Future>::poll
@@ -866,8 +866,8 @@ _RNvXse_NtNtNtCsbmo0FHMV5Xy_5hyper5proto2h16encodeNtB5_6NotEofNtNtCscI6d9CVNmLh_
 _RNvXsf_NtCscI6d9CVNmLh_4core3fmtbNtB5_5Debug3fmtCskQp7oO5Fp7v_12aho_corasick	<bool as core::fmt::Debug>::fmt
 _RNvXsf_NtCscI6d9CVNmLh_4core6optionINtB5_6OptionhENtNtB7_3cmp9PartialEq2eqCskQp7oO5Fp7v_12aho_corasick	<core::option::Option<u8> as core::cmp::PartialEq>::eq
 _RNvXsf_NtNtCscI6d9CVNmLh_4core5slice3cmpRNtNtNtCsgLg2E8rH6Za_12clap_builder4util2id2IdNtB5_13SliceContains14slice_containsBJ_	<&clap_builder::util::id::Id as core::slice::cmp::SliceContains>::slice_contains
-_RNvXsg_NtCs40k4W9msRzi_5alloc3vecRINtB5_3VecyENtNtNtNtCscI6d9CVNmLh_4core4iter6traits7collect12IntoIterator9into_iterCslp0Ck2LHuWu_16execdump_project	<&alloc::vec::Vec<u64> as core::iter::traits::collect::IntoIterator>::into_iter
-_RNvXsg_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTybEENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCs9gee9duVEzI_19execdump_decompiler	<hashbrown::raw::RawTable<(u64, bool)> as core::ops::drop::Drop>::drop
+_RNvXsg_NtCs40k4W9msRzi_5alloc3vecRINtB5_3VecyENtNtNtNtCscI6d9CVNmLh_4core4iter6traits7collect12IntoIterator9into_iterCslp0Ck2LHuWu_16daedale_project	<&alloc::vec::Vec<u64> as core::iter::traits::collect::IntoIterator>::into_iter
+_RNvXsg_NtCsfKiFC1ztrmh_9hashbrown3rawINtB5_8RawTableTybEENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropCs9gee9duVEzI_19daedale_decompiler	<hashbrown::raw::RawTable<(u64, bool)> as core::ops::drop::Drop>::drop
 _RNvXsg_NtNtCskQp7oO5Fp7v_12aho_corasick4util9prefilterNtB5_15StartBytesThreeNtB5_10PrefilterI7find_in	<aho_corasick::util::prefilter::StartBytesThree as aho_corasick::util::prefilter::PrefilterI>::find_in
 _RNvXsh_NtNtCs9KeADrciNZy_6chrono5naive8datetimeNtB5_13NaiveDateTimeNtNtCscI6d9CVNmLh_4core3fmt5Debug3fmt	<chrono::naive::datetime::NaiveDateTime as core::fmt::Debug>::fmt
 _RNvXsi_NtCse9565iEWUFB_5bytes9bytes_mutNtB5_8BytesMutNtNtCscI6d9CVNmLh_4core3fmt5Write9write_strCs7fllHZsMb0X_4http	<bytes::bytes_mut::BytesMut as core::fmt::Write>::write_str
@@ -878,15 +878,15 @@ _RNvXsl_NtCs1wQTQaEylLk_6rustls5errorNtB5_16InconsistentKeysNtNtCscI6d9CVNmLh_4c
 _RNvXsl_NtNtCsdqijrRiej1g_3llm8backends6ollamaNtB5_6OllamaNtNtNtB9_4chat6traits12ChatProvider15chat_with_tools	<llm::backends::ollama::Ollama as llm::chat::traits::ChatProvider>::chat_with_tools
 _RNvXsm_NtNtCs4pOvFVUq0Vr_14regex_automata4util8capturesNtB5_14GroupInfoInnerNtNtCscI6d9CVNmLh_4core7default7Default7defaultB9_	<regex_automata::util::captures::GroupInfoInner as core::default::Default>::default
 _RNvXsm_NtNtNtCskQp7oO5Fp7v_12aho_corasick6packed5teddy7genericINtB5_4SlimNtNtNtCscI6d9CVNmLh_4core9core_arch3x867___m256iKj1_ENtNtB1f_3fmt5Debug3fmtBb_	<aho_corasick::packed::teddy::generic::Slim<core::core_arch::x86::__m256i, 1> as core::fmt::Debug>::fmt
-_RNvXsn_NtNtCseH0mWYnU2OD_13execdump_core8demangle4msvcNtB5_8TypeKindNtNtCscI6d9CVNmLh_4core5clone5Clone5clone.llvm.10188775266510568833	<execdump_core::demangle::msvc::TypeKind as core::clone::Clone>::clone (.llvm.10188775266510568833)
+_RNvXsn_NtNtCseH0mWYnU2OD_13daedale_core8demangle4msvcNtB5_8TypeKindNtNtCscI6d9CVNmLh_4core5clone5Clone5clone.llvm.10188775266510568833	<daedale_core::demangle::msvc::TypeKind as core::clone::Clone>::clone (.llvm.10188775266510568833)
 _RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecINtNtNtCscI6d9CVNmLh_4core4sync6atomic6AtomiciEENtNtNtBM_3ops4drop4Drop4dropCs6K9LwUcmB6r_5tower	<alloc::vec::Vec<core::sync::atomic::Atomic<isize>> as core::ops::drop::Drop>::drop
 _RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCscWJlcMzi19H_12regex_syntax3ast11CaptureNameENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBJ_	<alloc::vec::Vec<regex_syntax::ast::CaptureName> as core::ops::drop::Drop>::drop
 _RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCs1WztaLyfR2E_7inkwell5types5enums21BasicMetadataTypeEnumENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBL_	<alloc::vec::Vec<inkwell::types::enums::BasicMetadataTypeEnum> as core::ops::drop::Drop>::drop
 _RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCsdqijrRiej1g_3llm8backends3xai14XAIChatMessageENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBL_	<alloc::vec::Vec<llm::backends::xai::XAIChatMessage> as core::ops::drop::Drop>::drop
-_RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCslUhSaoMDPHK_13execdump_core8demangle6symbol4TypeENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBL_	<alloc::vec::Vec<execdump_core::demangle::symbol::Type> as core::ops::drop::Drop>::drop
+_RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtNtCslUhSaoMDPHK_13daedale_core8demangle6symbol4TypeENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBL_	<alloc::vec::Vec<daedale_core::demangle::symbol::Type> as core::ops::drop::Drop>::drop
 _RNvXso_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTjNtNtNtCskQp7oO5Fp7v_12aho_corasick4util10primitives9PatternIDEENtNtNtCscI6d9CVNmLh_4core3ops4drop4Drop4dropBN_	<alloc::vec::Vec<(usize, aho_corasick::util::primitives::PatternID)> as core::ops::drop::Drop>::drop
 _RNvXso_NtCscI6d9CVNmLh_4core5arrayINtB5_5GuardRDNtNtB7_3fmt5DebugEL_ENtNtNtB7_3ops4drop4Drop4dropCskQp7oO5Fp7v_12aho_corasick	<core::array::Guard<&dyn core::fmt::Debug> as core::ops::drop::Drop>::drop
-_RNvXsp_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCs5DRV6yAd14J_19execdump_decompiler3llm18VariableSuggestionENtNtCscI6d9CVNmLh_4core7default7Default7defaultBJ_	<alloc::vec::Vec<execdump_decompiler::llm::VariableSuggestion> as core::default::Default>::default
+_RNvXsp_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecNtNtCs5DRV6yAd14J_19daedale_decompiler3llm18VariableSuggestionENtNtCscI6d9CVNmLh_4core7default7Default7defaultBJ_	<alloc::vec::Vec<daedale_decompiler::llm::VariableSuggestion> as core::default::Default>::default
 _RNvXsp_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecTNtNtNtCsgLg2E8rH6Za_12clap_builder7builder3str3StrbEENtNtCscI6d9CVNmLh_4core7default7Default7defaultBM_	<alloc::vec::Vec<(clap_builder::builder::str::Str, bool)> as core::default::Default>::default
 _RNvXsp_NtCscI6d9CVNmLh_4core6resultINtB5_6ResultNtNtCscWJlcMzi19H_12regex_syntax3ast14ClassBracketedNtBM_5ErrorENtNtNtB7_3ops9try_trait3Try6branchBO_	<core::result::Result<regex_syntax::ast::ClassBracketed, regex_syntax::ast::Error> as core::ops::try_trait::Try>::branch
 _RNvXsp_NtCscI6d9CVNmLh_4core6resultINtB5_6ResultTRehENtNtCs9KeADrciNZy_6chrono6format10ParseErrorENtNtNtB7_3ops9try_trait3Try6branchBT_	<core::result::Result<(&str, u8), chrono::format::ParseError> as core::ops::try_trait::Try>::branch
@@ -896,10 +896,10 @@ _RNvXsq_NtCs40k4W9msRzi_5alloc3vecINtB5_3VecIBw_NtNtNtCskQp7oO5Fp7v_12aho_corasi
 _RNvXsq_NtCs40k4W9msRzi_5alloc3vecINtB5_3VechENtNtCscI6d9CVNmLh_4core3fmt5Debug3fmtCseD7bwMwBkoP_12regex_syntax	<alloc::vec::Vec<u8> as core::fmt::Debug>::fmt
 _RNvXsq_NtNtCscI6d9CVNmLh_4core3ops5rangeTINtB5_5BoundxEBD_EINtB5_11RangeBoundsxE9end_boundCsgLg2E8rH6Za_12clap_builder	<(core::ops::range::Bound<i64>, core::ops::range::Bound<i64>) as core::ops::range::RangeBounds<i64>>::end_bound
 _RNvXsr_NtCscI6d9CVNmLh_4core3fmtSNtNtNtCsdqijrRiej1g_3llm8backends6google18GoogleFunctionCallNtB5_5Debug3fmtBB_	<[llm::backends::google::GoogleFunctionCall] as core::fmt::Debug>::fmt
-_RNvXsr_NtNtCscI6d9CVNmLh_4core3str7patternNCNvNtNtCs5DRV6yAd14J_19execdump_decompiler6typedb5parse8sanitizes1_0NtB5_7Pattern13into_searcherBM_	<execdump_decompiler::typedb::parse::sanitize::{closure#3} as core::str::pattern::Pattern>::into_searcher
+_RNvXsr_NtNtCscI6d9CVNmLh_4core3str7patternNCNvNtNtCs5DRV6yAd14J_19daedale_decompiler6typedb5parse8sanitizes1_0NtB5_7Pattern13into_searcherBM_	<daedale_decompiler::typedb::parse::sanitize::{closure#3} as core::str::pattern::Pattern>::into_searcher
 _RNvXss_NtNtCscI6d9CVNmLh_4core3cmp5implslNtB7_9PartialEq2neCs9KeADrciNZy_6chrono	<i32 as core::cmp::PartialEq>::ne
 _RNvXst_NtNtCscI6d9CVNmLh_4core3ops3bitmNtB5_6BitAnd6bitandCsgYwSfzbAs7x_4zmij	<u32 as core::ops::bit::BitAnd>::bitand
-_RNvXsu_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcINtNtNtCscI6d9CVNmLh_4core4sync6atomic6AtomicjEENtNtBN_5clone5Clone5cloneCsfDOcEdXGwyf_12execdump_tui	<alloc::sync::Arc<core::sync::atomic::Atomic<usize>> as core::clone::Clone>::clone
+_RNvXsu_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcINtNtNtCscI6d9CVNmLh_4core4sync6atomic6AtomicjEENtNtBN_5clone5Clone5cloneCsfDOcEdXGwyf_12daedale_tui	<alloc::sync::Arc<core::sync::atomic::Atomic<usize>> as core::clone::Clone>::clone
 _RNvXsu_NtNtCsdqijrRiej1g_3llm9providers17openai_compatibleNtB5_18OpenAIToolUseStateNtNtCscI6d9CVNmLh_4core7default7Default7defaultB9_	<llm::providers::openai_compatible::OpenAIToolUseState as core::default::Default>::default
 _RNvXsv_NtNtCscI6d9CVNmLh_4core3str7patternNtB5_11StrSearcherNtB5_8Searcher4nextCscWJlcMzi19H_12regex_syntax	<core::str::pattern::StrSearcher as core::str::pattern::Searcher>::next
 _RNvXsw_NtCs40k4W9msRzi_5alloc4syncINtB5_3ArcNtNtNtCs1wQTQaEylLk_6rustls6webpki7anchors13RootCertStoreENtNtNtCscI6d9CVNmLh_4core3ops5deref5Deref5derefBM_	<alloc::sync::Arc<rustls::webpki::anchors::RootCertStore> as core::ops::deref::Deref>::deref
@@ -912,13 +912,13 @@ _RNvYINtNtNtCscI6d9CVNmLh_4core5slice4iter4IterNtNtNtCscWJlcMzi19H_12regex_synta
 _RNvYINtNtNtCscI6d9CVNmLh_4core5slice4iter7IterMuthENtNtNtNtB9_4iter6traits8iterator8Iterator9enumerateCsasIVapJg4Ba_16rustls_pki_types	<core::slice::iter::IterMut<u8> as core::iter::traits::iterator::Iterator>::enumerate
 _RNvYINvNtCs7cMPnhEfzsh_7reqwest5error7builderNtNtCs1wQTQaEylLk_6rustls5error5ErrorEINtNtNtCscI6d9CVNmLh_4core3ops8function6FnOnceTBH_EE9call_onceB7_	<reqwest::error::builder<rustls::error::Error> as core::ops::function::FnOnce<(rustls::error::Error,)>>::call_once
 _RNvYNCNvNtNtNtCs1wQTQaEylLk_6rustls6crypto4ring2kx6X255190INtNtNtCscI6d9CVNmLh_4core3ops8function6FnOnceTRShEE9call_onceBc_	<rustls::crypto::ring::kx::X25519::{closure#0} as core::ops::function::FnOnce<(&[u8],)>>::call_once
-_RNvYNcNtNtNtNtCs5DRV6yAd14J_19execdump_decompiler8analysis4insn8RegValue5Const0INtNtNtCscI6d9CVNmLh_4core3ops8function6FnOnceTyEE9call_onceBc_	<execdump_decompiler::analysis::insn::RegValue::Const as core::ops::function::FnOnce<(u64,)>>::call_once
+_RNvYNcNtNtNtNtCs5DRV6yAd14J_19daedale_decompiler8analysis4insn8RegValue5Const0INtNtNtCscI6d9CVNmLh_4core3ops8function6FnOnceTyEE9call_onceBc_	<daedale_decompiler::analysis::insn::RegValue::Const as core::ops::function::FnOnce<(u64,)>>::call_once
 _RNvYNtNtCs2lfjhq9A1rP_12tracing_core10subscriber12NoSubscriberNtB4_10Subscriber10clone_spanB6_.llvm.1417930385099900289	<tracing_core::subscriber::NoSubscriber as tracing_core::subscriber::Subscriber>::clone_span (.llvm.1417930385099900289)
 _RNvYNtNtCs4NgJ8KamjkS_4idna5uts467HyphensNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2neB6_	<idna::uts46::Hyphens as core::cmp::PartialEq>::ne
 _RNvYNtNtCs7cMPnhEfzsh_7reqwest5error9BadSchemeNtNtCscI6d9CVNmLh_4core5error5Error6sourceB6_	<reqwest::error::BadScheme as core::error::Error>::source
 _RNvYNtNtCsbmo0FHMV5Xy_5hyper5error5ErrorNtNtCscI6d9CVNmLh_4core5error5Error11descriptionCsePSvpdEU5V9_10hyper_util	<hyper::error::Error as core::error::Error>::description
 _RNvYNtNtCsduXJbRkUHPt_4ring9agreement9AlgorithmNtNtCscI6d9CVNmLh_4core3cmp9PartialEq2neCs1wQTQaEylLk_6rustls	<ring::agreement::Algorithm as core::cmp::PartialEq>::ne
-_RNvYNtNtCslbFIj66k93A_8capstone5error5ErrorNtNtCscI6d9CVNmLh_4core5error5Error7provideCs9gee9duVEzI_19execdump_decompiler	<capstone::error::Error as core::error::Error>::provide
+_RNvYNtNtCslbFIj66k93A_8capstone5error5ErrorNtNtCscI6d9CVNmLh_4core5error5Error7provideCs9gee9duVEzI_19daedale_decompiler	<capstone::error::Error as core::error::Error>::provide
 _RNvYNtNtNtCs1WztaLyfR2E_7inkwell6values11array_value10ArrayValueNtNtB6_6traits8AnyValue15print_to_stringB8_	<inkwell::values::array_value::ArrayValue as inkwell::values::traits::AnyValue>::print_to_string
 _RNvYNtNtNtCs1wQTQaEylLk_6rustls6client5tls1217ExpectCertificateINtNtB8_12common_state5StateNtNtB6_11client_conn20ClientConnectionDataE19into_external_stateB8_	<rustls::client::tls12::ExpectCertificate as rustls::common_state::State<rustls::client::client_conn::ClientConnectionData>>::into_external_state
 _RNvYNtNtNtCs7fllHZsMb0X_4http6header3map14MaxSizeReachedNtNtCscI6d9CVNmLh_4core5error5Error11descriptionB8_	<http::header::map::MaxSizeReached as core::error::Error>::description
@@ -932,5 +932,5 @@ _RNvYNtNtNtNtCsdqijrRiej1g_3llm6memory12chat_wrapper7wrapper14ChatWithMemoryNtNt
 _RNvYNtNtNtNtCsizX5SLfpuPZ_10hyper_util6client6legacy4pool5ErrorNtNtCscI6d9CVNmLh_4core5error5Error6sourceCslgq7c4DYF9G_7reqwest	<hyper_util::client::legacy::pool::Error as core::error::Error>::source
 _RNvYNvMNtNtCscI6d9CVNmLh_4core4char7methodsc13is_whitespaceINtNtNtB9_3ops8function5FnMutTcEE8call_mutCsbmo0FHMV5Xy_5hyper	<<char>::is_whitespace as core::ops::function::FnMut<(char,)>>::call_mut
 _RNvYNvNtNtCs9KeADrciNZy_6chrono6format4scan14colon_or_spaceINtNtNtCscI6d9CVNmLh_4core3ops8function5FnMutTReEE8call_mutB8_	<chrono::format::scan::colon_or_space as core::ops::function::FnMut<(&str,)>>::call_mut
-_RNvYNvYyNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneINtNtNtBa_3ops8function5FnMutTRyEE8call_mutCslp0Ck2LHuWu_16execdump_project	<<u64 as core::clone::Clone>::clone as core::ops::function::FnMut<(&u64,)>>::call_mut
+_RNvYNvYyNtNtCscI6d9CVNmLh_4core5clone5Clone5cloneINtNtNtBa_3ops8function5FnMutTRyEE8call_mutCslp0Ck2LHuWu_16daedale_project	<<u64 as core::clone::Clone>::clone as core::ops::function::FnMut<(&u64,)>>::call_mut
 _RNvYjNtNtCscI6d9CVNmLh_4core3cmp3Ord3maxCs2TX4EAD2P6e_9writeable	<usize as core::cmp::Ord>::max

@@ -1,25 +1,16 @@
+<p align="center">
+  <img src="res/logo.svg" width="160" alt="daedale">
+</p>
+
 # daedale
 
-daedale (formerly execdump) is named after Daedalus, the architect of the labyrinth: a binary is a labyrinth of code,
-and daedale is made to find your way through it.
-
-daedale is a command-line tool that helps you analyze Windows's PE, Linux's ELF and macOS's Mach-O files (x86, x86_64 and aarch64) by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
+daedale is a command-line tool that helps you analyze and decompile Windows's PE, Linux's ELF and macOS's Mach-O files (x86, x86_64 and aarch64) by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
 
 This project is currently a work in progress so not everything is supported, and it might be broken.
 
 The goal is to provide a fast, reliable and cross-platform reverse-engineering application.
 
 daedale might evolve into a library later, instead of just being a standalone command-line tool.
-
-### Coming from execdump
-
-The binary is now `daedale` and the crates `daedale-*`. What execdump left on disk keeps working:
-
-- `~/.daedalerc` is the configuration, `~/.execdumprc` is read when it is the only one: rename it when you like
-- a binary's project is `<binary>.ddproj`, an existing `<binary>.edproj` is opened when there is no `.ddproj`
-- the decompilation cache moves to `~/.cache/daedale` (rebuilt on the first open), `~/.cache/execdump` can be deleted
-- `EXECDUMP_DEBUGGER_LOG` is now `DAEDALE_DEBUGGER_LOG`, the exported headers are `daedale.h`, `daedale_imports.h` and
-  `daedale_globals.h`
 
 ## Building
 
@@ -158,7 +149,7 @@ Options:
           Improves the decompiled C code with the LLM of the [llm] section of ~/.daedalerc
 
       --project <PROJECT>
-          Project directory (annotations, modules, edited code and their history), next to the binary by default (<FILE_PATH>.ddproj, or the <FILE_PATH>.edproj of execdump when only it exists)
+          Project directory (annotations, modules, edited code and their history), next to the binary by default (<FILE_PATH>.ddproj)
       --export <EXPORT>
           Decompiles every function with the annotations of the project and writes the C code as a source tree
           (one file per module in src/, their headers in include/)
@@ -591,7 +582,7 @@ The C code of the whole program is a project: every function is decompiled in th
   functions), `include/daedale.h` (`undefined` types), `include/daedale_imports.h` and `include/daedale_globals.h`.
   The tree is meant to be read and built upon, it does not always compile as it is.
 
-The project directory (`<binary>.ddproj` by default, the `<binary>.edproj` of execdump when only it exists, `--project` or `:w <dir>` to choose another one) holds a bare git repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
+The project directory (`<binary>.ddproj` by default, `--project` or `:w <dir>` to choose another one) holds a bare git repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
 
 | Branch | Content |
 |---|---|

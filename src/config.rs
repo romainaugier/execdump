@@ -21,13 +21,16 @@ pub struct Config {
 }
 
 impl Config {
-    /// ~/.daedalerc, or the ~/.execdumprc of execdump when only it exists
+    /// ~/.daedalerc
     pub fn path() -> Option<PathBuf> {
         let home = dirs::home_dir()?;
         let path = home.join(".daedalerc");
-        let legacy = home.join(".execdumprc");
 
-        return Some(if !path.exists() && legacy.is_file() { legacy } else { path });
+        if path.exists() {
+            return Some(path);
+        } else {
+            return None;
+        }
     }
 
     pub fn load() -> Result<Self> {

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="512" height="512">
+  <title>daedale</title>
+  <rect width="300" height="300" fill="#0b0d0e"/>
+  <path d="M 35 120 V 30 H 145 A 120 120 0 0 1 145 270 H 35 V 150 H 75 V 70 H 145 A 80 80 0 0 1 145 230 H 75 V 190 H 145 A 40 40 0 0 0 145 110 H 115 V 150 H 155" fill="none" stroke="#f0eeeb" stroke-width="20"/>
+</svg>

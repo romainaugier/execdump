@@ -201,7 +201,7 @@ pub fn default_workers() -> usize {
     return std::thread::available_parallelism().map_or(2, |n| n.get()).saturating_sub(1).clamp(1, 8);
 }
 
-/// Default project directory of a binary: next to it, with .ddproj appended (the .edproj of execdump when only it exists)
+/// Default project directory of a binary: next to it, with .ddproj appended
 pub fn default_location(binary: &Path) -> PathBuf {
     let next_to_binary = |extension: &str| {
         let mut name = binary.file_name().map(|n| n.to_os_string()).unwrap_or_default();
@@ -1400,23 +1400,6 @@ pub(crate) mod tests {
 
     fn text(project: &mut Project, addr: u64) -> String {
         return project.shown(addr).map(|(r, _)| r.text.to_string()).unwrap_or_default();
-    }
-
-    #[test]
-    fn default_location_keeps_execdump_projects() {
-        let dir = temporary("project-location");
-        let binary = dir.join("a.out");
-        std::fs::create_dir_all(&dir).unwrap();
-
-        assert_eq!(default_location(&binary), dir.join("a.out.ddproj"));
-
-        std::fs::create_dir(dir.join("a.out.edproj")).unwrap();
-        assert_eq!(default_location(&binary), dir.join("a.out.edproj"));
-
-        std::fs::create_dir(dir.join("a.out.ddproj")).unwrap();
-        assert_eq!(default_location(&binary), dir.join("a.out.ddproj"));
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

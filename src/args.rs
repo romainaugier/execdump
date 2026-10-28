@@ -183,7 +183,7 @@ pub struct Args {
      */
 
     /// Project directory (annotations, modules, edited code and their history), next to the binary
-    /// by default (<FILE_PATH>.ddproj, or the <FILE_PATH>.edproj of execdump when only it exists)
+    /// by default (<FILE_PATH>.ddproj)
     #[arg(long)]
     pub project: Option<PathBuf>,
 
