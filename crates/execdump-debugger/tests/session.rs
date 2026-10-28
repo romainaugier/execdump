@@ -64,17 +64,15 @@ fn symbol(program: &Program, name: &str) -> u64 {
     return program.symbols.values().find(|s| s.name == name).unwrap_or_else(|| panic!("no symbol {}", name)).addr;
 }
 
+#[cfg(unix)]
 fn session(kind: Kind) {
     for pie in [true, false] {
         session_on(kind, pie);
     }
 }
 
+#[cfg(unix)]
 fn session_on(kind: Kind, pie: bool) {
-    if !cfg!(target_os = "linux") {
-        return;
-    }
-
     let Some((kind, debugger)) = find(Some(kind), None) else {
         eprintln!("{} is not installed, skipped", kind.name());
         return;
