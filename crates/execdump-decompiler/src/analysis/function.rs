@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Function and control flow graph recovery (recursive descent)
  */

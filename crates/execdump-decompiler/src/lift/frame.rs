@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Splitting of the stack frame into local variables, once the optimizations ran
  *

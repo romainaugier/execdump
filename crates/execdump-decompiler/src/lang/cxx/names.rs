@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * C++ to C: demangled symbols become C prototypes, classes become structs and methods take
  * the object as their first parameter (struct Class *this), like cfront did

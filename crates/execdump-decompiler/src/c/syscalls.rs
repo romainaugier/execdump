@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The Linux system calls by number, for the C of the code that makes them itself (assembly, static binaries without
  * libc): syscall(SYS_write, 1, "text", 4) as unistd.h writes it, the paths the calls take are strings.

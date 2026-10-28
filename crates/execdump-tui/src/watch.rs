@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Watches of the debugger: expressions whose value the debug view shows at each stop (:watch), and blocks of memory
  * it shows in hexadecimal (:memory). What changed since the stop before is highlighted.

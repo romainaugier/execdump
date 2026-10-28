@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shared libraries a program needs, found where the system loader would look for them:
  * - ELF: the RPATH (without RUNPATH), LD_LIBRARY_PATH, the RUNPATH, /etc/ld.so.conf, then the default

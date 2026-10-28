@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Background decompilation: worker threads decompile every function of a program, the ones shown
  * on screen first. Each worker owns a decompiler (they are not thread safe, and keep the signatures

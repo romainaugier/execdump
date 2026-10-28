@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * LLM assistance: an improvement pass over the decompiled C code
  *

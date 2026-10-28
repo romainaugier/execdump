@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The registers as SSA values, built while lifting (Braun et al., Simple and Efficient Construction of Static Single
  * Assignment Form): the last value written to each register in each block is noted, a block that reads a register

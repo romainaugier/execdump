@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * DWARF debug information, format neutral: the functions (their names, prototypes and source files), the global
  * variables and the types of the compile units (base types, pointers, qualifiers, typedefs, structs, unions, enums,

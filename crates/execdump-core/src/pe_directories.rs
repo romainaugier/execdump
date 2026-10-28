@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * PE data directories read for the analysis: the delay load imports (the functions of a DLL loaded at their first
  * call), the TLS directory (its callbacks run before the entry point) and the load configuration (the security cookie,

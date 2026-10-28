@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Review of the proposals of the LLM: the diff of each proposal (the C code before and after it, or
  * the moves of functions between modules), accepted or rejected one by one

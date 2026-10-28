@@ -591,16 +591,22 @@ name = "execdump"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "capstone",
  "clap",
+ "crossterm",
  "dirs",
  "execdump-core",
+ "execdump-debugger",
  "execdump-decompiler",
  "execdump-project",
  "execdump-tui",
+ "inkwell",
+ "libc",
  "mimalloc",
  "regex",
  "serde",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

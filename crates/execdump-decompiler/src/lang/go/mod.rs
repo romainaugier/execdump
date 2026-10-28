@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Go: the runtime of Go and its calling conventions
  *

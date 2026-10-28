@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub fn is_aarch64_register(s: &str) -> bool {
     let lower = s.to_ascii_lowercase();
 

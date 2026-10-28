@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Workspace: a tree of splits whose leaves are groups of tabs, as in vim (Ctrl-w to move between
  * the splits, gt/gT between the tabs). Each tab shows a view and has its own jumplist.

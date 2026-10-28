@@ -3,6 +3,8 @@ name = "execdump-core"
 description = "Executable formats (PE, ELF, Mach-O), program model, disassembly helpers and symbol demangling"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

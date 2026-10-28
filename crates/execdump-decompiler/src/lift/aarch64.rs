@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * aarch64 instruction semantics (Capstone prints the aliases: mov, cmp, cset, lsl, ubfx...)
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Lifting of a recovered function to LLVM IR
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The terminal of the program: a pseudo-terminal its input, output and errors go to. On a terminal the C library
  * flushes the output at each line (to a file it keeps it until its buffer is full or the program exits), so the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Panics. A panic inside catch() is an error of what was running (one function of the decompiler), its
  * message is returned and nothing is printed. Any other panic in the TUI is a crash: the terminal is

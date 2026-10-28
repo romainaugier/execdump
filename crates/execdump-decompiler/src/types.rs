@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * C type model used by the decompiler, every recovered or imported type ends up as a CType
  */

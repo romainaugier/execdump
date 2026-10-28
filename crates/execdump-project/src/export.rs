@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Export of the C code as a source tree: one file per module in src/, its header in include/ with
  * the prototypes of its functions, plus headers for the imported functions and the globals.

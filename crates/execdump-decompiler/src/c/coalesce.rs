@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Copies at the joins: a phi is a variable assigned on the edges that lead to it, the value assigned
  * on an edge is often a variable itself (v1 = v7;). A phi and the variables flowing into it that are

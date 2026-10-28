@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * What the user (or the LLM, once accepted) says about the program: names, prototypes, summaries,
  * variables and modules of the functions, names of the globals. One small TOML file per annotated

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Popups: a list of places to go to (the calls of a block, the cross references to a function, the
  * callers of the root of a call graph), Enter opens one

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Architecture-neutral instruction model built on top of Capstone
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Graph view: control flow graph of a function or call graph, rendered with the layered layout
  */

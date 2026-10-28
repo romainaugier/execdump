@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The final function from the discovery of its signature: the function lifted with every register a value can be
  * passed in as a parameter and its return registers stored to sinks, once optimized, becomes the function with the

@@ -4,6 +4,8 @@ members = ["crates/execdump-core", "crates/execdump-debugger", "crates/execdump-
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/romainaugier/execdump"
 
 [workspace.dependencies]
 execdump-core = { path = "crates/execdump-core" }
@@ -32,14 +34,20 @@ toml = "0.9.10"
 name = "execdump"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 execdump-core.workspace = true
+execdump-debugger.workspace = true
 execdump-decompiler.workspace = true
 execdump-project.workspace = true
 execdump-tui.workspace = true
+capstone.workspace = true
 clap.workspace = true
+crossterm.workspace = true
+inkwell.workspace = true
 dirs.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -48,3 +56,9 @@ toml.workspace = true
 # mimalloc replaces malloc for the whole process (LLVM included), the static override is only reliable on Linux
 [target.'cfg(target_os = "linux")'.dependencies]
 mimalloc = { version = "0.1.52", default-features = false, features = ["override"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading"] }

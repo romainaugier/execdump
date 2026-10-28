@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Globals that hold one function: every instruction of the program that writes one writes the address of the
  * same function, or none writes it and it holds a function from the start, and its address is never taken. A call through such a global calls that function, with its

@@ -1,0 +1,69 @@
+name: Decompilation
+description: Wrong, missing or unreadable C code for a function
+labels: [bug, decompiler]
+body:
+  - type: textarea
+    id: binary
+    attributes:
+      label: Binary
+      description: Attach it (zipped) or link it, or give the source and the compiler command that builds it.
+    validations:
+      required: true
+  - type: input
+    id: function
+    attributes:
+      label: Function
+      description: Its name or address.
+      placeholder: main, 0x401130
+    validations:
+      required: true
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Format and architecture
+      options:
+        - ELF x86_64
+        - ELF i386
+        - ELF aarch64
+        - PE x64
+        - PE x86
+        - PE arm64
+        - Mach-O x86_64
+        - Mach-O arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Problem
+      multiple: true
+      options:
+        - Wrong semantics (the C does not do what the machine code does)
+        - Decompilation fails or panics
+        - Readability (gotos, casts, copies, inline assembly)
+        - Types, structs or signature
+        - Language support (C++, Rust, Go)
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Decompiled C
+      description: The output of execdump (`--decompile c --functions-filter <function>` or the TUI).
+      render: c
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: The original source if you have it, or what the code should be.
+      render: c
+  - type: textarea
+    id: specs
+    attributes:
+      label: Specs
+      description: The output of `execdump --specs` (build, machine and platform).
+      render: text
+    validations:
+      required: true

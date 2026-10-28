@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::args::Args;
 use crate::config::Config;
 use crate::dump::dump_exec;
@@ -16,25 +18,27 @@ use execdump_project::{default_workers, Project};
 
 use clap::Parser;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod args;
 mod config;
 mod dump;
+mod specs;
 
 // Linked for its malloc: the decompiler (LLVM above all) makes many small short lived allocations
 #[cfg(target_os = "linux")]
 use mimalloc as _;
 
 /// Decompiles every function of the programs with their project and writes the source trees
-fn export(exec: &Exec, args: &Args, dir: &std::path::Path) -> Result<()> {
+fn export(exec: &Exec, path: &PathBuf, args: &Args, dir: &Path) -> Result<()> {
     let programs: Vec<Arc<Program>> = programs_from_exec(exec).into_iter().map(Arc::new).collect();
     let count = programs.len();
 
     for (index, program) in programs.into_iter().enumerate() {
         let analysis = Arc::new(analyze(&program, None)?);
         let name = program.name.clone();
-        let mut project = Project::open(index, count, program, analysis, &args.file_path, args.project.clone(), default_workers() + 1);
+        let mut project = Project::open(index, count, program, analysis, path, args.project.clone(), default_workers() + 1);
         let out = if count > 1 { dir.join(format!("p{}", index)) } else { dir.to_path_buf() };
 
         let (_, total) = project.progress();
@@ -71,7 +75,11 @@ fn main() {
 fn run() -> Result<()> {
     let args = Args::parse();
 
-    let path = &args.file_path;
+    if args.specs {
+        return specs::print();
+    }
+
+    let path = args.file_path.as_ref().context("missing FILE_PATH")?;
 
     let exec = match guess_exectype(path).with_context(|| path.display().to_string())? {
         ExecType::PE => parse_pe(path).map(Exec::PE),
@@ -83,13 +91,13 @@ fn run() -> Result<()> {
     let config = Config::load()?;
 
     if args.tui {
-        return execdump_tui::main(&args.file_path, exec, config.keys, config.llm, config.debugger, args.project.clone());
+        return execdump_tui::main(path, exec, config.keys, config.llm, config.debugger, args.project.clone());
     } else {
         dump_exec(&exec, &args, &config);
     }
 
     if let Some(dir) = args.export.as_ref() {
-        export(&exec, &args, dir)?;
+        export(&exec, path, &args, dir)?;
     }
 
     return Ok(());

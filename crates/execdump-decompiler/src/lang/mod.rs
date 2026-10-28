@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Languages: what the decompiler knows of the code a compiler of a language makes and of its runtime
  *

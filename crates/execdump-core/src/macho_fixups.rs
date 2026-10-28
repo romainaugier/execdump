@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The pointers dyld writes in a Mach-O binary and the symbols it exports.
  *

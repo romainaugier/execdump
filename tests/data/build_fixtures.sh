@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Rebuilds the test fixtures, requires clang and lld (ld.lld, ld64.lld, lld-link, llvm-lipo), gcc for x86_64 and rustc
 
 set -e

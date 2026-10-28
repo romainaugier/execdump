@@ -3,6 +3,8 @@ name = "execdump-debugger"
 description = "Runs a program under gdb (GDB/MI) or lldb, its breakpoints, steps, registers and memory"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

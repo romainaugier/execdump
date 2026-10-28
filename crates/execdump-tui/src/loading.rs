@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Background work: the analysis and the project of each program (and of each shared library), then
  * what the projects decompiled and answered

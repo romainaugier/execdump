@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Layered graph layout (Sugiyama style) for terminal rendering, with orthogonal edge routing
  *

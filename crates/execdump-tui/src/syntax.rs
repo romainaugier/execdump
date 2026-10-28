@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Syntax highlighting of the code: a language is a table (its keywords, its types, its comments and its strings), one
  * highlighter reads them all. A line is cut into tokens, the theme colors them as VS Code does (Dark+ with the

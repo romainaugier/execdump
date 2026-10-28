@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * FNV-1a: stable across runs and Rust versions (the fingerprints are stored on disk)
  */

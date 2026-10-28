@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Table view (functions, strings, imports, modules, memory map)
  */

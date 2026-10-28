@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Type inference on the IR: pointers are found from the memory accesses they address (their
  * pointee is the accessed type) and propagated through arithmetic, phis and casts, signedness

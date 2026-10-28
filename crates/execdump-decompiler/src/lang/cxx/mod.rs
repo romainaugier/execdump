@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * C++: the prototypes of the demangled names, the classes they name (names.rs), the functions of the C++ runtimes that
  * do not return, the modules of the namespaces and classes

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * aarch64 jump tables. The compilers load an entry of a table at the index the bound check before allows, then add it
  * to a base (or jump to it):

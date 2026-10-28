@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Tests of the interface on the fixtures: navigation, splits and tabs, editing
  */

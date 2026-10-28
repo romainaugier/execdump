@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Global configuration, loaded from ~/.execdumprc (TOML), one section per feature
  */

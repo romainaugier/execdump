@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 pub fn is_x86_64_register(s: &str) -> bool {
     if s.is_empty() || s.len() > 4 {
         return false;

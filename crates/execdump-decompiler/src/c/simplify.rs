@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Statement level simplifications: temporaries used once in the next statement are inlined
  */

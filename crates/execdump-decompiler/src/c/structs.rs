@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Structs from the access patterns: the offsets, sizes and types accessed through a pointer (and the
  * values joined with it by phis) make a struct when they are not the elements of an array (a single type,

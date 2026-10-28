@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Timings of the stages of a project on a binary: analysis, background decompilation, cache reload,
  * module grouping, fingerprints and export.

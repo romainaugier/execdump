@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Clients of the LLM APIs, in three formats: OpenAI chat completions (OpenAI, DeepSeek, Mistral, Groq, xAI,
  * OpenRouter, Ollama and any compatible server), Anthropic messages and Google Gemini.

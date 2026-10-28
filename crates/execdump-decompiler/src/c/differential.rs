@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Differential test of the C backend: random programs on a few integer variables, with branches and
  * loops, are built as LLVM IR (the variables in allocas), optimized like the lifted code (the phis and

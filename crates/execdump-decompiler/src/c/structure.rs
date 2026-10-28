@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Control flow structuring: the blocks become if/else, loops and switches
  *

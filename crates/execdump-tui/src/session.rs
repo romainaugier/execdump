@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Sessions: the splits and tabs, with what each tab shows, saved with the project and restored when it
  * is opened again

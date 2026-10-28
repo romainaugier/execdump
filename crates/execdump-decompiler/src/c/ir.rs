@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Read-only view of an optimized LLVM function, in plain data for the C backend
  * (values in an arena, constant expressions like ptrtoint (ptr @g to i64) are values too)

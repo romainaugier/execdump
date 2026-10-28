@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Projects: the whole program decompiled in the background, organized in modules, annotated and
  * edited by the user (and the LLM), kept in a git repository and exported as a source tree

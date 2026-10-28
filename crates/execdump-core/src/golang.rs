@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Go binaries: the pclntab every Go binary keeps for its runtime (stack traces, the garbage collector) names
  * every function, gives its bounds and the source file it was compiled from, stripped binaries included.

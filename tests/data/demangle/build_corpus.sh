@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Rebuilds the demangling corpus from symbols.cpp compiled for every supported ABI/OS,
 # the expected output comes from llvm-cxxfilt (Itanium, Rust v0) and llvm-undname (MSVC).
 # Requires clang and LLVM 18 tools (llvm-nm, llvm-cxxfilt, llvm-undname).

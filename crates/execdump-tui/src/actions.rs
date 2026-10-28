@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Actions on the projects: saving, exporting, annotations of the functions, the LLM
  */

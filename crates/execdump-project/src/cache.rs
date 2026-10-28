@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Decompilation cache: the C code of every function with the address of each line and where its
  * variables are while it runs, kept on disk so that reopening a binary does not decompile it again.

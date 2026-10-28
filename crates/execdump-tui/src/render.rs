@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Drawing of the interface: the title bar with the progress of the background work, the explorer, the
  * splits, the status or command line, the popups and the help

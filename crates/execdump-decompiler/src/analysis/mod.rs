@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Program analysis: function discovery, control flow graphs, call graph and strings
  */

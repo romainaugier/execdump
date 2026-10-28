@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * A debugging session: a backend on a thread of its own, driven by requests, its stops sent back as events. The
  * interface never waits for the program: a request that runs it returns once it stops, an interrupt (a SIGINT to

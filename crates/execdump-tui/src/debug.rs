@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Debugging: the program runs under gdb or lldb (execdump-debugger). Each stop moves the C code to the line the
  * program is at, in the module of its function (another module when a step leaves it), the linear disassembly and

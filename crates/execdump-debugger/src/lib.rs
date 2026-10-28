@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Debugger: runs a program under gdb (GDB/MI) or lldb (its command line driven with formats of its own), stops it
  * at breakpoints, steps it by instructions, reads its registers, its memory and its call stack.

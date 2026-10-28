@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Type database: prototypes, typedefs, structs, unions and enums parsed from C headers
  *

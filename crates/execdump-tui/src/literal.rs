@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The string literal under the cursor of the C code in the forms it is used in: its text, a C literal of
  * ASCII characters, its bytes, a shell argument and a Python bytes object. The C code shows the UTF-8 text,

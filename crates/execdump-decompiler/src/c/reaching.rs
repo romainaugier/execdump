@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Reaching conditions: the condition under which the control reaches a block from the start of a
  * region, from the branch conditions along the paths to it (the disjunction of the conjunctions of

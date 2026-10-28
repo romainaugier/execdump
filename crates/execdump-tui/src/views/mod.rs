@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Views of the content: one module per kind of view, with the commands it handles and how it is drawn.
  * The commands a view does not handle go to the splits and the application (see commands).

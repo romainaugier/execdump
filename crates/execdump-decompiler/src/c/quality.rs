@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Quality counts of a decompiled function, to measure the effect of the changes to the decompiler:
  * fewer copies, gotos, casts, declarations, unlifted instructions and lines is more readable code

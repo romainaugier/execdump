@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use clap::{Parser, ValueEnum};
 
 use std::path::PathBuf;
@@ -8,6 +10,10 @@ pub struct Args {
     /// Opens the executable in the terminal-based user interface for exploration
     #[arg(long, short, default_value_t = false)]
     pub tui: bool,
+
+    /// Prints the build, machine and platform specs to paste in bug reports, then exits
+    #[arg(long, default_value_t = false)]
+    pub specs: bool,
 
     /*
      * PE
@@ -194,7 +200,8 @@ pub struct Args {
     #[arg(long, default_value_t = 4)]
     pub padding_size: usize,
 
-    pub file_path: PathBuf,
+    #[arg(required_unless_present = "specs")]
+    pub file_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

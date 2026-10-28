@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * gdb through GDB/MI: each command has a token its result record repeats (^done, ^running, ^error), the stops
  * of the program are *stopped records. gdb runs synchronously: after ^running it reads nothing until the program

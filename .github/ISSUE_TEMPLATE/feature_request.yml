@@ -1,0 +1,27 @@
+name: Feature request
+description: A new format, architecture, language, view or command
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The task you are trying to do on a binary, and what stops you today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How it could work in execdump (command line, TUI keys or command, output).
+  - type: textarea
+    id: samples
+    attributes:
+      label: Samples
+      description: Binaries that need it, or how to build them.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to implement it

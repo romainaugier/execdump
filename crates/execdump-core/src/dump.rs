@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 #[derive(Clone, Debug, Default)]
 pub struct DumpField {
     pub key: &'static str,

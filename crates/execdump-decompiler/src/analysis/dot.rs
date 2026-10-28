@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Graphviz (dot) export of the control flow graphs and of the call graph
  */

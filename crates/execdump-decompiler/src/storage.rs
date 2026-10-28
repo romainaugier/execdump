@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Runtime storage of the variables: where each one is (a register, a stack slot) over ranges of the
  * addresses of its function, to read their values while the program runs.

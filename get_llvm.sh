@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # Fetch static LLVM 18 libraries for execdump.
 #
@@ -39,7 +40,7 @@ die() { echo "error: $*" >&2; exit 1; }
 log() { echo "==> $*" >&2; }
 
 usage() {
-    sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '4,24p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 

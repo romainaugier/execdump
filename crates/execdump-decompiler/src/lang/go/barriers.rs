@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Idioms of the Go compiler in the C of a Go program
  *

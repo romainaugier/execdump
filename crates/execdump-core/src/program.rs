@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Program: a format-agnostic view of an executable (memory map, symbols, imports, function hints)
  * built once from the parsed PE/ELF/Mach-O and used by the analysis and the TUI.

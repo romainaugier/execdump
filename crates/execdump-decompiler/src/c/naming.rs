@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Variable names from their use: loop counters, results of well known functions, and the names
  * of the parameters they are passed to (fputs(s, stream) names its arguments s and stream)

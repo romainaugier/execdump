@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Decompiler: lifts the recovered functions to LLVM IR and optimizes them
  *

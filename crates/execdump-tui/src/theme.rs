@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 

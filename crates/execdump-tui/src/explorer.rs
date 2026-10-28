@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Explorer: the tree of what can be opened, one node per program (its analysis, modules, headers,
  * sections and tables) and the shared libraries

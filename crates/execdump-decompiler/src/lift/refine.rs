@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Signature refinement: the parameters and return values of a discovery lifting that are used,
  * with the width they are used with (an int passed in rdi is only used through its low 32 bits)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Clipboard: what is copied goes to the clipboard of the terminal (OSC 52: kitty, WezTerm, iTerm2, foot, xterm,
  * tmux with set-clipboard, through ssh) and to the one of the system, which the terminals without OSC 52 (GNOME

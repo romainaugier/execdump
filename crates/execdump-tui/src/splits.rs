@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Splits and tabs: the workspace of the content, the jumplist of each tab (Ctrl-o / Ctrl-i), the links
  * between splits (their cursors follow each other)

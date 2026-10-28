@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Project of a program: its decompiled C code (decompiled in the background, cached on disk), what
  * the user says about it (annotations, modules, edited functions), the proposals of the LLM, and

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Sessions with the debuggers found on the machine (gdb, lldb) on a program built with the C compiler: the tests
  * of a debugger that is not installed are skipped

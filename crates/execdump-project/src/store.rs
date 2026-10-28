@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * History of a project, in a bare git repository (libgit2), following the vendor branch pattern:
  * - generated: the C code as the decompiler renders it, only for the functions the user edited

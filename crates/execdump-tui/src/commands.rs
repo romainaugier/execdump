@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Commands: everything the interface does is a command, run from the command line (:name arguments) or
  * from the keys bound to it.

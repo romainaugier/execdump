@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * A debugger process: commands written to its input, its output and errors read from one pipe by a thread (so
  * that their order is kept), until a pattern (a prompt, the end of a line)

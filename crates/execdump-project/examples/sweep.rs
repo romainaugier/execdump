@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Decompiles every function of binaries and reports the panics (by location), the errors and the
  * quality of the C code (lines, copies, gotos, casts, declarations, inline assembly). Built with

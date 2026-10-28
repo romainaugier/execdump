@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * C declarations to the type database, the parsing itself is done by lang-c on preprocessed source
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * C: the default of every hook, and the functions of the C libraries that do not return
  */

@@ -125,7 +125,7 @@ jobs:
           name="execdump-${{ needs.check-version.outputs.tag }}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
-          cp README.md "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
           cd dist
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             7z a "$name.zip" "$name" > /dev/null

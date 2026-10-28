@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Scope of the local variables: each one is declared at the start of the narrowest block that holds
  * all its uses, when entering that block always writes it before reading it (a value kept from one

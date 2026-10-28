@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Rust: the panics of core and std, the modules of the paths of the mangled names
  */

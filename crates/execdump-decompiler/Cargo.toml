@@ -3,6 +3,8 @@ name = "execdump-decompiler"
 description = "Function recovery, call graph and decompilation to C"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true

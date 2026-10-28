@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Shared libraries: the ones the binary needs are listed in the explorer. A library is loaded (parsed,
  * analyzed, with its own project in the libs/ directory of the project) when it is opened, or when an

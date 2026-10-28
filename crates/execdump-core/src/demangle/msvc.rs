@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Microsoft Visual C++ demangler (MSVC, clang-cl, Windows x86, x64, ARM64 and ARM64EC)
  * The output follows llvm-undname

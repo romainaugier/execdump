@@ -54,14 +54,16 @@ Errors are `anyhow::Error` across the crates: a failure carries what was being d
 ## Usage
 
 ```
-Usage: execdump.exe [OPTIONS] <FILE_PATH>
+Usage: execdump.exe [OPTIONS] [FILE_PATH]
 
 Arguments:
-  <FILE_PATH>
+  [FILE_PATH]
 
 Options:
   -t, --tui
           Opens the executable in the terminal-based user interface for exploration
+      --specs
+          Prints the build, machine and platform specs to paste in bug reports, then exits
 
       --pe-dos-header
           Dumps the PE legacy MS-DOS compatible header
@@ -886,3 +888,42 @@ This tool is based on several amazing open-source projects (go check them out!) 
  - [Ratatui](https://ratatui.rs/)
  - [LLVM](https://llvm.org/)
  - [libgit2](https://libgit2.org/)
+
+## Reporting a bug
+
+`execdump --specs` prints what a bug report needs to know about the build and the machine, to paste in the issue:
+
+```
+execdump 0.1.0
+commit    724f9bb1c3d2
+build     release, x86_64-unknown-linux-gnu, rustc 1.97.0 (2d8144b78 2026-07-07)
+llvm      18.1.3
+capstone  5.0
+os        Ubuntu 24.04.5 LTS
+kernel    Linux 6.8.0-87-generic
+arch      x86_64
+cpu       AMD Ryzen 9 7950X 16-Core Processor (32 threads)
+memory    62.5 GiB
+terminal  xterm-256color, truecolor, 238x61
+debugger  gdb at /usr/bin/gdb, GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1
+config    ~/.execdumprc
+```
+
+The commit is the one execdump was built from (`unknown` outside a git checkout). `arch` shows an emulated build (an
+x64 build on Windows on ARM, an x86_64 one under Rosetta), the debugger is the one the TUI would run, and `config` says
+whether `~/.execdumprc` parses. The paths under the home directory start with `~`, the report does not give the user name.
+
+## Contributing
+
+Contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md): pull requests target `dev`, and everyone taking part
+follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately, as described in
+[SECURITY.md](SECURITY.md).
+
+## License
+
+execdump is licensed under the [Apache License, Version 2.0](LICENSE). Every source file carries the
+`SPDX-License-Identifier: Apache-2.0` line, except the programs under `tests/data/src` and `examples` that are built into
+fixtures and samples.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in execdump is licensed as
+above, without any additional terms or conditions (section 5 of the license).

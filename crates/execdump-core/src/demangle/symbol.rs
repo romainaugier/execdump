@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Typed description of a demangled symbol, shared by the Itanium, MSVC and Rust demanglers
  * The decompiler maps it to C types, the string demanglers stay the reference for display

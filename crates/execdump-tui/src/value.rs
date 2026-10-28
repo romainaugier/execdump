@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * A value of the debugger in the forms it is used in (:value): as it is shown, in hexadecimal, as the integers of each
  * size (signed and unsigned) and the floats its bytes make, as a pointer (what it points to: a function, a string),

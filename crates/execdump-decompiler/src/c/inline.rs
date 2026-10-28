@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Trivial functions: a body of one statement with no effect of its own (abort();, return f(a1, a2);,
  * return 42;, return &g;). Their callers show that statement instead of the call, with the arguments

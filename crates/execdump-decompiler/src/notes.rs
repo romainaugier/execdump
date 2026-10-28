@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * User annotations of the decompiled C code: names and types of the variables, summaries and
  * prototypes typed by the user. Like the LLM suggestions, they edit the syntax tree and are validated

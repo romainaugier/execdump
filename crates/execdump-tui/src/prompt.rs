@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Command line and search: the text typed after : or /, run with Enter (the tables are filtered while
  * the search is typed).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * The DWARF debug information of a program in the decompiler: its types become C declarations of the type database
  * (structs, unions, enums, typedefs), its functions get their prototypes, with the names of their parameters.

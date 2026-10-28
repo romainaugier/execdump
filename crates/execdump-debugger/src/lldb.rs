@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * lldb through its command line. lldb reads its commands from a pipe, echoes each one after its prompt, and prints
  * the prompt only when it reads the next line: each command is followed by one lldb does not know, a sync, whose

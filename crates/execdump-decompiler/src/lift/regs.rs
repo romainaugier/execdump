@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Register files: one entry per full register, sub-registers are views on them (al is rax[0..8])
  */

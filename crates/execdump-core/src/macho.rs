@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 use crate::demangle::demangle;
 use crate::disasm::{Architecture, disasm_and_format_code};
 use crate::dump::{Dump, DumpRawData};

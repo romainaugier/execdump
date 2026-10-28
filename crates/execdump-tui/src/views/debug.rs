@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Debug view: the state of the program under the debugger. The variables of the function of the selected frame and
  * their values (Enter shows the forms of a value, as :value), the call stack (Enter selects a frame: the code and the

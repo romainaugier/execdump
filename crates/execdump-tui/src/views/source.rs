@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Source view: the C code of a module, every function of it one after the other.
  *

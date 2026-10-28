@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * GDB/MI output: records of a kind (^ result, * exec, = notify, ~ console) and a class (done, running,
  * stopped...), then results name=value where a value is a C string, a tuple {name=value,...} or a list

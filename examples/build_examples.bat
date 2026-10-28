@@ -1,4 +1,5 @@
 @echo off
+rem SPDX-License-Identifier: Apache-2.0
 setlocal enabledelayedexpansion
 
 if exist build (
