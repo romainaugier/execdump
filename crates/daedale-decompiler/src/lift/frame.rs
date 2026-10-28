@@ -1,0 +1,1008 @@
+// SPDX-License-Identifier: Apache-2.0
+/*
+ * Splitting of the stack frame into local variables, once the optimizations ran
+ *
+ * The frame is a byte array. When the address of a part of it is taken (a buffer passed to a call,
+ * a pointer kept in a local variable, typical of 32-bit and unoptimized code), SROA keeps it whole
+ * and every local is an offset in it. Here each byte array left is cut into slots by how it is
+ * accessed, the optimizations then turn the slots that do not escape into values:
+ *
+ * - an address that escapes (taken, passed, indexed by a variable) is the start of an object that
+ *   extends to the next escaping address, or to the end of the frame (unless the callee it is passed to is known
+ *   to access a number of bytes from it: a sized buffer, the buffers of a runtime): what it points to may be
+ *   reached from it, the slot keeps it whole. The slot of the stack protector canary (removed
+ *   before, see protector.rs) ends the objects below it too: the buffers it protects end there, and
+ *   the return address ends the locals (the arguments are above it)
+ * - below the first escaping address, the loads and stores make the slots (overlapping accesses
+ *   share one)
+ *
+ * Strings written by consecutive stores of constants (mov dword [ebp-0x25], 0x4763305f...) are one
+ * slot, written by one memcpy of the string.
+ */
+
+use super::text_bytes;
+use crate::storage::Loc;
+
+use inkwell::llvm_sys::core::*;
+use inkwell::llvm_sys::prelude::{LLVMBasicBlockRef, LLVMBuilderRef, LLVMContextRef, LLVMModuleRef, LLVMTypeRef, LLVMValueRef};
+use inkwell::llvm_sys::target::{LLVMGetModuleDataLayout, LLVMSizeOfTypeInBits, LLVMStoreSizeOfType, LLVMTargetDataRef};
+use inkwell::llvm_sys::{LLVMLinkage, LLVMOpcode, LLVMTypeKind, LLVMUnnamedAddr};
+use inkwell::module::Module;
+use inkwell::llvm_sys::debuginfo::*;
+use inkwell::values::{AsValueRef, FunctionValue};
+
+use std::collections::BTreeSet;
+
+#[derive(Clone, Debug, PartialEq)]
+enum Kind {
+    Load,
+    Store(Option<Vec<u8>>),
+    /// Read or written with an unknown extent (the address escapes)
+    Escape,
+}
+
+#[derive(Clone, Debug)]
+struct Access {
+    offset: u64,
+    size: u64,
+    kind: Kind,
+    /// Type of the loaded or stored value
+    ty: Option<LLVMTypeRef>,
+}
+
+#[derive(Clone, Debug)]
+struct Slot {
+    start: u64,
+    end: u64,
+    /// Indices of its accesses
+    accesses: Vec<usize>,
+}
+
+/// Splits the byte arrays of the stack frame of a function, true when one was split. The bounds are
+/// offsets in frames where the objects end (the slots of the stack protector canary), the saved slots are
+/// offsets from the stack pointer at the entry where they end too.
+pub fn split_frame(module: &Module, function: FunctionValue, bounds: &[(LLVMValueRef, u64)], saved: &[i64], extent: &dyn Fn(&str, u32) -> Option<u64>) -> bool {
+    let mut split = false;
+
+    unsafe {
+        let module = module.as_mut_ptr();
+
+        for frame in frames(function) {
+            let mut ends: BTreeSet<u64> = bounds.iter().filter(|(f, _)| *f == frame).map(|(_, offset)| *offset).collect();
+
+            // The objects of the frame end at the return address (the arguments are above it) and at the slots the
+            // prologue saves registers to
+            if let (Some(start), Some(size)) = (stack_offset(frame), byte_array(LLVMGetAllocatedType(frame))) {
+                ends.extend([0].iter().chain(saved.iter()).map(|&offset| offset - start).filter(|&index| index > 0 && (index as u64) < size).map(|index| index as u64));
+            }
+
+            split |= split_one(module, frame, &ends, extent);
+        }
+    }
+
+    return split;
+}
+
+const STACK_OFFSET: &str = "daedale.stack";
+
+/// Offset of a part of the stack frame (an alloca) from the stack pointer at the entry, kept in metadata
+pub fn set_stack_offset(alloca: LLVMValueRef, offset: i64) {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, STACK_OFFSET.as_ptr() as *const _, STACK_OFFSET.len() as u32);
+        let mut value = [LLVMValueAsMetadata(LLVMConstInt(LLVMInt64TypeInContext(context), offset as u64, 1))];
+        let node = LLVMMDNodeInContext2(context, value.as_mut_ptr(), 1);
+        LLVMSetMetadata(alloca, kind, LLVMMetadataAsValue(context, node));
+    }
+}
+
+pub fn stack_offset(alloca: LLVMValueRef) -> Option<i64> {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, STACK_OFFSET.as_ptr() as *const _, STACK_OFFSET.len() as u32);
+        let node = LLVMGetMetadata(alloca, kind);
+
+        if node.is_null() || LLVMGetMDNodeNumOperands(node) != 1 {
+            return None;
+        }
+
+        let mut value = std::ptr::null_mut();
+        LLVMGetMDNodeOperands(node, &mut value);
+
+        return (!value.is_null() && !LLVMIsAConstantInt(value).is_null()).then(|| LLVMConstIntGetSExtValue(value));
+    }
+}
+
+/// The parts of the stack frame split into scalars are debug variables of their stack slot: mem2reg notes
+/// the values stored to them and their phis
+pub fn declare_slots(module: &Module, function: FunctionValue) {
+    unsafe {
+        let raw = function.as_value_ref();
+        let subprogram = LLVMGetSubprogram(raw);
+
+        let Some(entry) = function.get_first_basic_block().filter(|_| !subprogram.is_null()) else {
+            return;
+        };
+
+        let mut slots: Vec<(LLVMValueRef, i64)> = Vec::new();
+        let mut instruction = LLVMGetFirstInstruction(entry.as_mut_ptr());
+
+        while !instruction.is_null() {
+            if LLVMGetInstructionOpcode(instruction) == LLVMOpcode::LLVMAlloca && byte_array(LLVMGetAllocatedType(instruction)).is_none() && !declared(instruction) {
+                if let Some(offset) = stack_offset(instruction) {
+                    slots.push((instruction, offset));
+                }
+            }
+
+            instruction = LLVMGetNextInstruction(instruction);
+        }
+
+        if slots.is_empty() {
+            return;
+        }
+
+        let debug = LLVMCreateDIBuilderDisallowUnresolved(module.as_mut_ptr());
+        let file = LLVMDIScopeGetFile(subprogram);
+        let layout = LLVMGetModuleDataLayout(module.as_mut_ptr());
+        let expression = LLVMDIBuilderCreateExpression(debug, std::ptr::null_mut(), 0);
+        let location = LLVMDIBuilderCreateDebugLocation(LLVMGetTypeContext(LLVMTypeOf(raw)), 0, 0, subprogram, std::ptr::null_mut());
+
+        for (alloca, offset) in slots {
+            let line = Loc::stack(offset).map_or(0, |l| l.0) | super::ENTRY_NOTE;
+            let name = format!("loc_{:x}", line);
+            let ty = LLVMDIBuilderCreateBasicType(debug, c"value".as_ptr(), 5, LLVMSizeOfTypeInBits(layout, LLVMGetAllocatedType(alloca)), 0x07, 0);
+            let variable = LLVMDIBuilderCreateAutoVariable(debug, subprogram, name.as_ptr() as *const _, name.len(), file, line, ty, 1, 0, 0);
+            LLVMDIBuilderInsertDeclareBefore(debug, alloca, variable, expression, location, LLVMGetBasicBlockTerminator(entry.as_mut_ptr()));
+            set_declared(alloca);
+        }
+
+        LLVMDIBuilderFinalize(debug);
+        LLVMDisposeDIBuilder(debug);
+    }
+}
+
+const DECLARED: &str = "daedale.declared";
+
+/// The slot has its debug variable (the frame is split again after optimizations)
+unsafe fn set_declared(alloca: LLVMValueRef) {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, DECLARED.as_ptr() as *const _, DECLARED.len() as u32);
+        LLVMSetMetadata(alloca, kind, LLVMMetadataAsValue(context, LLVMMDNodeInContext2(context, std::ptr::null_mut(), 0)));
+    }
+}
+
+unsafe fn declared(alloca: LLVMValueRef) -> bool {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(alloca));
+        let kind = LLVMGetMDKindIDInContext(context, DECLARED.as_ptr() as *const _, DECLARED.len() as u32);
+        return !LLVMGetMetadata(alloca, kind).is_null();
+    }
+}
+
+/// Byte array allocas of the entry block
+unsafe fn frames(function: FunctionValue) -> Vec<LLVMValueRef> {
+    let mut frames = Vec::new();
+
+    unsafe {
+        let Some(entry) = function.get_first_basic_block() else {
+            return frames;
+        };
+
+        let mut instruction = LLVMGetFirstInstruction(entry.as_mut_ptr());
+
+        while !instruction.is_null() {
+            if LLVMGetInstructionOpcode(instruction) == LLVMOpcode::LLVMAlloca && byte_array(LLVMGetAllocatedType(instruction)).is_some() {
+                frames.push(instruction);
+            }
+
+            instruction = LLVMGetNextInstruction(instruction);
+        }
+    }
+
+    return frames;
+}
+
+/// Addresses of the stack frames computed on integers become addresses in the frames (before the other
+/// passes that look at how the frames are accessed)
+pub fn fold_frame_addresses(function: FunctionValue) {
+    unsafe {
+        for frame in frames(function) {
+            fold_integer_addresses(frame, byte_array(LLVMGetAllocatedType(frame)).unwrap_or(0));
+        }
+    }
+}
+
+/// Length of an array of bytes
+pub(super) unsafe fn byte_array(ty: LLVMTypeRef) -> Option<u64> {
+    unsafe {
+        if LLVMGetTypeKind(ty) != LLVMTypeKind::LLVMArrayTypeKind {
+            return None;
+        }
+
+        let element = LLVMGetElementType(ty);
+        let byte = LLVMGetTypeKind(element) == LLVMTypeKind::LLVMIntegerTypeKind && LLVMGetIntTypeWidth(element) == 8;
+
+        return byte.then(|| LLVMGetArrayLength2(ty));
+    }
+}
+
+pub(super) unsafe fn users(value: LLVMValueRef) -> Vec<LLVMValueRef> {
+    let mut users = Vec::new();
+
+    unsafe {
+        let mut used = LLVMGetFirstUse(value);
+
+        while !used.is_null() {
+            users.push(LLVMGetUser(used));
+            used = LLVMGetNextUse(used);
+        }
+    }
+
+    return users;
+}
+
+pub(super) unsafe fn constant(value: LLVMValueRef) -> Option<i64> {
+    unsafe {
+        return (!LLVMIsAConstantInt(value).is_null() && LLVMGetIntTypeWidth(LLVMTypeOf(value)) <= 64).then(|| LLVMConstIntGetSExtValue(value));
+    }
+}
+
+pub(super) unsafe fn callee_name(call: LLVMValueRef) -> String {
+    unsafe {
+        let callee = LLVMGetCalledValue(call);
+
+        if callee.is_null() || LLVMIsAFunction(callee).is_null() {
+            return String::new();
+        }
+
+        let mut length = 0;
+        let pointer = LLVMGetValueName2(callee, &mut length);
+        return String::from_utf8_lossy(std::slice::from_raw_parts(pointer as *const u8, length)).to_string();
+    }
+}
+
+/// Constant offset of a GEP of the frame (i8 with one index, or the array with 0 and an index)
+pub(super) unsafe fn gep_offset(gep: LLVMValueRef, frame: LLVMValueRef) -> Option<u64> {
+    unsafe {
+        if LLVMGetInstructionOpcode(gep) != LLVMOpcode::LLVMGetElementPtr || LLVMGetOperand(gep, 0) != frame {
+            return None;
+        }
+
+        let indices: Vec<i64> = (1..LLVMGetNumOperands(gep) as u32).map(|i| constant(LLVMGetOperand(gep, i))).collect::<Option<_>>()?;
+        let source = LLVMGetGEPSourceElementType(gep);
+
+        let offset = match indices.as_slice() {
+            [index] if byte_array(source).is_none() && LLVMGetTypeKind(source) == LLVMTypeKind::LLVMIntegerTypeKind && LLVMGetIntTypeWidth(source) == 8 => *index,
+            [0, index] if byte_array(source).is_some() => *index,
+            _ => return None,
+        };
+
+        return u64::try_from(offset).ok();
+    }
+}
+
+/// Bytes of a constant integer (little endian)
+unsafe fn constant_bytes(value: LLVMValueRef) -> Option<Vec<u8>> {
+    unsafe {
+        if LLVMIsAConstantInt(value).is_null() {
+            return None;
+        }
+
+        let bits = LLVMGetIntTypeWidth(LLVMTypeOf(value));
+
+        if bits % 8 != 0 || bits > 64 {
+            return None;
+        }
+
+        return Some(LLVMConstIntGetZExtValue(value).to_le_bytes()[..bits as usize / 8].to_vec());
+    }
+}
+
+/// How an instruction accesses the frame through a pointer at an offset
+unsafe fn access(user: LLVMValueRef, pointer: LLVMValueRef, offset: u64, layout: LLVMTargetDataRef, extent: &dyn Fn(&str, u32) -> Option<u64>) -> Access {
+    let escape = Access { offset, size: 1, kind: Kind::Escape, ty: None };
+
+    unsafe {
+        match LLVMGetInstructionOpcode(user) {
+            LLVMOpcode::LLVMLoad if LLVMGetVolatile(user) == 0 => {
+                let ty = LLVMTypeOf(user);
+                return Access { offset, size: LLVMStoreSizeOfType(layout, ty).max(1), kind: Kind::Load, ty: Some(ty) };
+            }
+            LLVMOpcode::LLVMStore if LLVMGetVolatile(user) == 0 && LLVMGetOperand(user, 1) == pointer && LLVMGetOperand(user, 0) != pointer => {
+                let value = LLVMGetOperand(user, 0);
+                let ty = LLVMTypeOf(value);
+                return Access { offset, size: LLVMStoreSizeOfType(layout, ty).max(1), kind: Kind::Store(constant_bytes(value)), ty: Some(ty) };
+            }
+            LLVMOpcode::LLVMCall => {
+                let name = callee_name(user);
+                let memory = name.starts_with("llvm.memset") || name.starts_with("llvm.memcpy") || name.starts_with("llvm.memmove");
+
+                // The length of a memory intrinsic is its third operand
+                if let Some(length) = memory.then(|| constant(LLVMGetOperand(user, 2))).flatten() {
+                    let source = LLVMGetOperand(user, 1) == pointer && !name.starts_with("llvm.memset");
+                    let kind = if source { Kind::Load } else { Kind::Store(None) };
+                    return Access { offset, size: (length.max(1)) as u64, kind, ty: None };
+                }
+
+                // The functions given a buffer and its size read or write that many bytes (fgets(buf, 9, ...)): the
+                // buffer ends there, the variables after it are not part of it
+                for &(_, buffer, length, writes) in SIZED_BUFFERS.iter().filter(|(f, ..)| *f == name) {
+                    if LLVMGetOperand(user, buffer) == pointer {
+                        if let Some(length) = constant(LLVMGetOperand(user, length)).filter(|&n| n > 0) {
+                            return Access { offset, size: length as u64, kind: if writes { Kind::Store(None) } else { Kind::Load }, ty: None };
+                        }
+                    }
+                }
+
+                // The bytes the language knows a function accesses from an argument (the 32 bytes of the buffers of the
+                // runtime of Go): the object ends there
+                let arguments = LLVMGetNumArgOperands(user);
+
+                if let Some(index) = (0..arguments).find(|&i| LLVMGetOperand(user, i) == pointer) {
+                    if let Some(size) = extent(&name, index).filter(|&n| n > 0) {
+                        return Access { offset, size, kind: Kind::Store(None), ty: None };
+                    }
+                }
+
+                return escape;
+            }
+            _ => return escape,
+        }
+    }
+}
+
+/// Functions given a buffer and its size: the buffer argument, the size argument, whether they write it
+const SIZED_BUFFERS: &[(&str, u32, u32, bool)] = &[
+    ("fgets", 0, 1, true),
+    ("_IO_fgets", 0, 1, true),
+    ("read", 1, 2, true),
+    ("__read", 1, 2, true),
+    ("pread", 1, 3, true),
+    ("recv", 1, 2, true),
+    ("readlink", 1, 2, true),
+    ("getcwd", 0, 1, true),
+    ("gethostname", 0, 1, true),
+    ("snprintf", 0, 1, true),
+    ("strncpy", 0, 2, true),
+    ("memset", 0, 2, true),
+    ("memcpy", 0, 2, true),
+    ("memmove", 0, 2, true),
+    ("bzero", 0, 1, true),
+    ("explicit_bzero", 0, 1, true),
+    ("write", 1, 2, false),
+    ("__write", 1, 2, false),
+    ("send", 1, 2, false),
+];
+
+/// Text written in a slot: at least 4 characters, the NULs at its end only
+fn is_text(bytes: &[u8]) -> bool {
+    let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    let text = &bytes[..end];
+
+    return text.len() >= 4 && !text.contains(&0) && text_bytes(text);
+}
+
+/// Slots of a frame of a size from its accesses, the objects also end at the bounds
+fn layout(accesses: &[Access], size: u64, bounds: &BTreeSet<u64>) -> Vec<Slot> {
+    let bases: BTreeSet<u64> = accesses.iter().filter(|a| a.kind == Kind::Escape).map(|a| a.offset).collect();
+    let end = |b: u64| bases.range(b + 1..).chain(bounds.range(b + 1..)).min().copied().unwrap_or(size);
+
+    // Objects from each escaping address to the next, then the accesses
+    let mut intervals: Vec<(u64, u64, Vec<usize>)> = bases.iter().map(|&b| (b, end(b), Vec::new())).collect();
+
+    for (index, access) in accesses.iter().enumerate() {
+        intervals.push((access.offset, (access.offset + access.size).min(size).max(access.offset + 1), vec![index]));
+    }
+
+    intervals.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
+
+    let mut slots: Vec<Slot> = Vec::new();
+
+    for (start, end, indices) in intervals {
+        match slots.last_mut() {
+            Some(last) if start < last.end => {
+                last.end = last.end.max(end);
+                last.accesses.extend(indices);
+            }
+            _ => slots.push(Slot { start, end, accesses: indices }),
+        }
+    }
+
+    // Strings written piece by piece: adjacent slots that are only one store of a constant each
+    let written = |slot: &Slot| -> Option<Vec<u8>> {
+        match slot.accesses.as_slice() {
+            [index] => match &accesses[*index].kind {
+                Kind::Store(Some(bytes)) if accesses[*index].offset == slot.start && bytes.len() as u64 == slot.end - slot.start => Some(bytes.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+
+    let mut merged: Vec<Slot> = Vec::new();
+    let mut index = 0;
+
+    while index < slots.len() {
+        let mut run = vec![];
+
+        while let Some(bytes) = slots.get(index + run.len()).filter(|s| run.is_empty() || s.start == slots[index + run.len() - 1].end).and_then(|s| written(s)) {
+            run.push(bytes);
+        }
+
+        // The longest string at the start of the run
+        let length = (2..=run.len()).rev().find(|&n| is_text(&run[..n].concat())).unwrap_or(1);
+        let accesses = slots[index..index + length].iter().flat_map(|s| s.accesses.iter().copied()).collect();
+
+        merged.push(Slot { start: slots[index].start, end: slots[index + length - 1].end, accesses });
+        index += length;
+    }
+
+    return merged;
+}
+
+/// Addresses of the frame computed on integers (the stack pointer copied to a register, then offset:
+/// inttoptr(ptrtoint(frame + a) + c)) become addresses in the frame (frame + a + c)
+unsafe fn fold_integer_addresses(frame: LLVMValueRef, size: u64) {
+    unsafe {
+        let context = LLVMGetTypeContext(LLVMTypeOf(frame));
+        let (i8, i64) = (LLVMInt8TypeInContext(context), LLVMInt64TypeInContext(context));
+        let builder = LLVMCreateBuilderInContext(context);
+
+        let mut bases: Vec<(LLVMValueRef, u64)> = vec![(frame, 0)];
+        bases.extend(users(frame).into_iter().filter_map(|u| Some((u, gep_offset(u, frame)?))));
+
+        for (base, offset) in bases {
+            for integer in users(base).into_iter().filter(|&u| LLVMGetInstructionOpcode(u) == LLVMOpcode::LLVMPtrToInt) {
+                for sum in users(integer) {
+                    let delta = match LLVMGetInstructionOpcode(sum) {
+                        LLVMOpcode::LLVMAdd if LLVMGetOperand(sum, 0) == integer => constant(LLVMGetOperand(sum, 1)),
+                        LLVMOpcode::LLVMAdd => constant(LLVMGetOperand(sum, 0)),
+                        LLVMOpcode::LLVMSub if LLVMGetOperand(sum, 0) == integer => constant(LLVMGetOperand(sum, 1)).map(|c| -c),
+                        _ => None,
+                    };
+
+                    let Some(target) = delta.and_then(|d| offset.checked_add_signed(d)).filter(|&t| t < size) else {
+                        continue;
+                    };
+
+                    LLVMPositionBuilderBefore(builder, sum);
+                    let mut index = [LLVMConstInt(i64, target, 0)];
+                    let address = LLVMBuildInBoundsGEP2(builder, i8, frame, index.as_mut_ptr(), 1, c"".as_ptr());
+
+                    for pointer in users(sum).into_iter().filter(|&u| LLVMGetInstructionOpcode(u) == LLVMOpcode::LLVMIntToPtr && LLVMTypeOf(u) == LLVMTypeOf(address)) {
+                        LLVMReplaceAllUsesWith(pointer, address);
+                        LLVMInstructionEraseFromParent(pointer);
+                    }
+
+                    // The other uses keep the integer
+                    if !LLVMGetFirstUse(sum).is_null() {
+                        let value = LLVMBuildPtrToInt(builder, address, LLVMTypeOf(sum), c"".as_ptr());
+                        LLVMReplaceAllUsesWith(sum, value);
+                    }
+
+                    LLVMInstructionEraseFromParent(sum);
+                }
+
+                if LLVMGetFirstUse(integer).is_null() {
+                    LLVMInstructionEraseFromParent(integer);
+                }
+            }
+
+            // The address of the top of the frame (the stack pointer at the entry) is out of it
+            if base != frame && LLVMGetFirstUse(base).is_null() {
+                LLVMInstructionEraseFromParent(base);
+            }
+        }
+
+        LLVMDisposeBuilder(builder);
+    }
+}
+
+unsafe fn split_one(module: LLVMModuleRef, frame: LLVMValueRef, bounds: &BTreeSet<u64>, extent: &dyn Fn(&str, u32) -> Option<u64>) -> bool {
+    unsafe {
+        let Some(size) = byte_array(LLVMGetAllocatedType(frame)) else {
+            return false;
+        };
+
+
+        let layout_data = LLVMGetModuleDataLayout(module);
+        let mut accesses = Vec::new();
+        // Pointer (the frame or a GEP of it), its offset, the access of each user
+        let mut pointers: Vec<(LLVMValueRef, u64, Vec<usize>)> = Vec::new();
+
+        for user in users(frame) {
+            if let Some(offset) = gep_offset(user, frame) {
+                if pointers.iter().any(|(p, ..)| *p == user) {
+                    continue;
+                }
+
+                if offset > size {
+                    return false;
+                }
+
+                if LLVMGetFirstUse(user).is_null() {
+                    LLVMInstructionEraseFromParent(user);
+                    continue;
+                }
+
+                // The end of the frame (the address of the arguments a realigned frame keeps) is no access of it
+                if offset == size {
+                    pointers.push((user, offset, Vec::new()));
+                    continue;
+                }
+
+                let mut indices = Vec::new();
+
+                for inner in users(user) {
+                    accesses.push(access(inner, user, offset, layout_data, extent));
+                    indices.push(accesses.len() - 1);
+                }
+
+                pointers.push((user, offset, indices));
+            } else {
+                accesses.push(access(user, frame, 0, layout_data, extent));
+            }
+        }
+
+        let slots = layout(&accesses, size, bounds);
+
+        if slots.len() <= 1 && slots.first().is_none_or(|s| s.start == 0 && s.end == size) {
+            return false;
+        }
+
+        let context = LLVMGetTypeContext(LLVMTypeOf(frame));
+        let builder = LLVMCreateBuilderInContext(context);
+        LLVMPositionBuilderBefore(builder, frame);
+
+        let i8 = LLVMInt8TypeInContext(context);
+        let i64 = LLVMInt64TypeInContext(context);
+
+        // A slot accessed with a single type of its size is of that type, the others are byte arrays
+        let allocas: Vec<LLVMValueRef> = slots
+            .iter()
+            .map(|slot| {
+                let types: BTreeSet<usize> = slot.accesses.iter().filter_map(|&i| accesses[i].ty).map(|t| t as usize).collect();
+                let whole = slot.accesses.iter().all(|&i| accesses[i].offset == slot.start && accesses[i].size == slot.end - slot.start && accesses[i].ty.is_some());
+
+                let ty = match (types.len(), whole) {
+                    (1, true) => *types.iter().next().unwrap() as LLVMTypeRef,
+                    _ => LLVMArrayType2(i8, slot.end - slot.start),
+                };
+
+                let alloca = LLVMBuildAlloca(builder, ty, c"".as_ptr());
+                LLVMSetAlignment(alloca, LLVMGetAlignment(frame).max(1));
+
+                if let Some(offset) = stack_offset(frame) {
+                    set_stack_offset(alloca, offset + slot.start as i64);
+                }
+
+                alloca
+            })
+            .collect();
+
+        let slot_of = |offset: u64| slots.iter().position(|s| s.start <= offset && offset < s.end || offset == size && s.end == size);
+
+        for (pointer, offset, _) in pointers.iter() {
+            let Some(slot) = slot_of(*offset) else {
+                continue;
+            };
+
+            let replacement = if *offset == slots[slot].start {
+                allocas[slot]
+            } else {
+                LLVMPositionBuilderBefore(builder, *pointer);
+                let mut index = [LLVMConstInt(i64, offset - slots[slot].start, 0)];
+                LLVMBuildInBoundsGEP2(builder, i8, allocas[slot], index.as_mut_ptr(), 1, c"".as_ptr())
+            };
+
+            LLVMReplaceAllUsesWith(*pointer, replacement);
+            LLVMInstructionEraseFromParent(*pointer);
+        }
+
+        // The frame itself is the slot at its start
+        if let Some(slot) = slot_of(0).filter(|&s| slots[s].start == 0) {
+            LLVMReplaceAllUsesWith(frame, allocas[slot]);
+        }
+
+        if LLVMGetFirstUse(frame).is_null() {
+            LLVMInstructionEraseFromParent(frame);
+        }
+
+        for (slot, &alloca) in slots.iter().zip(allocas.iter()) {
+            write_strings(module, context, builder, alloca, slot.end - slot.start);
+        }
+
+        LLVMDisposeBuilder(builder);
+    }
+
+    return true;
+}
+
+/// Store of a constant in a slot: the store, its offset and its bytes
+unsafe fn constant_store(instruction: LLVMValueRef, alloca: LLVMValueRef) -> Option<(u64, Vec<u8>)> {
+    unsafe {
+        if LLVMGetInstructionOpcode(instruction) != LLVMOpcode::LLVMStore || LLVMGetVolatile(instruction) != 0 {
+            return None;
+        }
+
+        let pointer = LLVMGetOperand(instruction, 1);
+        let bytes = constant_bytes(LLVMGetOperand(instruction, 0))?;
+
+        if pointer == alloca {
+            return Some((0, bytes));
+        }
+
+        if LLVMIsAInstruction(pointer).is_null() || LLVMGetInstructionOpcode(pointer) != LLVMOpcode::LLVMGetElementPtr || LLVMGetOperand(pointer, 0) != alloca || LLVMGetNumOperands(pointer) != 2 {
+            return None;
+        }
+
+        return Some((u64::try_from(constant(LLVMGetOperand(pointer, 1))?).ok()?, bytes));
+    }
+}
+
+/// Runs of stores of constants that write a string in a slot become one memcpy of the string (volatile:
+/// the string stays in the code when nothing reads it), and the runs of overlapping stores one memcpy of their bytes
+unsafe fn write_strings(module: LLVMModuleRef, context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, size: u64) {
+    unsafe {
+        if byte_array(LLVMGetAllocatedType(alloca)).is_none() || size < 4 {
+            return;
+        }
+
+        let mut blocks = BTreeSet::new();
+
+        for user in users(alloca) {
+            blocks.insert(LLVMGetInstructionParent(user) as usize);
+
+            for inner in users(user) {
+                if !LLVMIsAInstruction(inner).is_null() {
+                    blocks.insert(LLVMGetInstructionParent(inner) as usize);
+                }
+            }
+        }
+
+        for block in blocks {
+            let mut run = Run::default();
+            let mut instruction = LLVMGetFirstInstruction(block as LLVMBasicBlockRef);
+
+            while !instruction.is_null() {
+                let next = LLVMGetNextInstruction(instruction);
+
+                match constant_store(instruction, alloca) {
+                    Some((offset, bytes)) => {
+                        if !run.extend(instruction, offset, &bytes) {
+                            replace_run(module, context, builder, alloca, &run);
+                            run = Run::default();
+                            run.extend(instruction, offset, &bytes);
+                        }
+                    }
+                    // Address computations do not end a run, anything that touches memory does
+                    None if matches!(LLVMGetInstructionOpcode(instruction), LLVMOpcode::LLVMGetElementPtr | LLVMOpcode::LLVMPtrToInt) || !LLVMIsADbgInfoIntrinsic(instruction).is_null() => {}
+                    None => {
+                        replace_run(module, context, builder, alloca, &run);
+                        run = Run::default();
+                    }
+                }
+
+                instruction = next;
+            }
+
+            replace_run(module, context, builder, alloca, &run);
+        }
+    }
+}
+
+/// The byte arrays of the variables of a function (the frame split by the optimizations or here) copied from a global
+/// by overlapping loads and stores are written by one copy of it
+pub fn copy_global_arrays(function: FunctionValue) {
+    unsafe {
+        let function = function.as_value_ref();
+        let entry = LLVMGetEntryBasicBlock(function);
+        let context = LLVMGetModuleContext(LLVMGetGlobalParent(function));
+        let builder = LLVMCreateBuilderInContext(context);
+        let mut instruction = LLVMGetFirstInstruction(entry);
+
+        while !instruction.is_null() {
+            let next = LLVMGetNextInstruction(instruction);
+
+            if !LLVMIsAAllocaInst(instruction).is_null() && byte_array(LLVMGetAllocatedType(instruction)).is_some() {
+                let mut blocks = BTreeSet::new();
+
+                for user in users(instruction) {
+                    blocks.insert(LLVMGetInstructionParent(user) as usize);
+
+                    for inner in users(user) {
+                        if !LLVMIsAInstruction(inner).is_null() {
+                            blocks.insert(LLVMGetInstructionParent(inner) as usize);
+                        }
+                    }
+                }
+
+                for block in blocks {
+                    copy_globals(context, builder, instruction, block as LLVMBasicBlockRef);
+                }
+            }
+
+            instruction = next;
+        }
+
+        LLVMDisposeBuilder(builder);
+    }
+}
+
+/// Store to a slot of a value loaded from a global: the store, its offset, the global and the offset read in it, the
+/// load and the size
+struct Copied {
+    store: LLVMValueRef,
+    offset: u64,
+    global: LLVMValueRef,
+    from: u64,
+    load: LLVMValueRef,
+    bytes: u64,
+}
+
+unsafe fn copied_store(instruction: LLVMValueRef, alloca: LLVMValueRef) -> Option<Copied> {
+    unsafe {
+        if LLVMGetInstructionOpcode(instruction) != LLVMOpcode::LLVMStore || LLVMGetVolatile(instruction) != 0 {
+            return None;
+        }
+
+        let pointer = LLVMGetOperand(instruction, 1);
+        let value = LLVMGetOperand(instruction, 0);
+
+        let offset = if pointer == alloca {
+            0
+        } else if !LLVMIsAInstruction(pointer).is_null() && LLVMGetInstructionOpcode(pointer) == LLVMOpcode::LLVMGetElementPtr && LLVMGetOperand(pointer, 0) == alloca && LLVMGetNumOperands(pointer) == 2 {
+            u64::try_from(constant(LLVMGetOperand(pointer, 1))?).ok()?
+        } else {
+            return None;
+        };
+
+        if LLVMIsALoadInst(value).is_null() || LLVMGetVolatile(value) != 0 || LLVMGetInstructionParent(value) != LLVMGetInstructionParent(instruction) {
+            return None;
+        }
+
+        let source = LLVMGetOperand(value, 0);
+
+        let (global, from) = if !LLVMIsAGlobalVariable(source).is_null() {
+            (source, 0)
+        } else if !LLVMIsAConstantExpr(source).is_null() && LLVMGetConstOpcode(source) == LLVMOpcode::LLVMGetElementPtr && LLVMGetNumOperands(source) == 2 && !LLVMIsAGlobalVariable(LLVMGetOperand(source, 0)).is_null() {
+            (LLVMGetOperand(source, 0), u64::try_from(constant(LLVMGetOperand(source, 1))?).ok()?)
+        } else {
+            return None;
+        };
+
+        let ty = LLVMTypeOf(value);
+
+        if LLVMGetTypeKind(ty) != LLVMTypeKind::LLVMIntegerTypeKind {
+            return None;
+        }
+
+        return Some(Copied { store: instruction, offset, global, from, load: value, bytes: LLVMGetIntTypeWidth(ty) as u64 / 8 });
+    }
+}
+
+/// Overlapping copies of a global to a slot become one memcpy of the global (Go copies a [14]byte from its static
+/// data with two loads and two stores of eight bytes that overlap). Nothing between the loads and the last store
+/// writes memory.
+unsafe fn copy_globals(context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, block: LLVMBasicBlockRef) {
+    unsafe {
+        let mut instruction = LLVMGetFirstInstruction(block);
+        let mut run: Vec<Copied> = Vec::new();
+
+        while !instruction.is_null() {
+            let next = LLVMGetNextInstruction(instruction);
+
+            if let Some(copied) = copied_store(instruction, alloca) {
+                let follows = run.first().is_some_and(|first| {
+                    let end = run.iter().map(|c| c.offset + c.bytes).max().unwrap_or(0);
+                    copied.global == first.global && copied.offset >= first.offset && copied.offset <= end && copied.offset - first.offset == copied.from.wrapping_sub(first.from)
+                });
+
+                if !follows {
+                    replace_copies(context, builder, alloca, &run);
+                    run.clear();
+                }
+
+                run.push(copied);
+            } else if writes_memory(instruction) {
+                replace_copies(context, builder, alloca, &run);
+                run.clear();
+            }
+
+            instruction = next;
+        }
+
+        replace_copies(context, builder, alloca, &run);
+    }
+}
+
+unsafe fn replace_copies(context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, run: &[Copied]) {
+    let overlaps = run.windows(2).any(|w| w[1].offset < w[0].offset + w[0].bytes);
+
+    if run.len() < 2 || !overlaps {
+        return;
+    }
+
+    unsafe {
+        // Nothing writes memory from the first load on but the copy
+        let first_load = run.iter().map(|c| c.load).min_by_key(|&load| position(load)).unwrap();
+        let last = run.last().unwrap().store;
+        let mut current = first_load;
+
+        while current != last {
+            if writes_memory(current) && !run.iter().any(|c| c.store == current) {
+                return;
+            }
+
+            current = LLVMGetNextInstruction(current);
+        }
+
+        let start = run[0].offset;
+        let size = run.iter().map(|c| c.offset + c.bytes).max().unwrap() - start;
+
+        LLVMPositionBuilderBefore(builder, last);
+
+        let i8 = LLVMInt8TypeInContext(context);
+        let i64 = LLVMInt64TypeInContext(context);
+        let mut index = [LLVMConstInt(i64, start, 0)];
+        let destination = if start == 0 { alloca } else { LLVMBuildInBoundsGEP2(builder, i8, alloca, index.as_mut_ptr(), 1, c"".as_ptr()) };
+        let mut from = [LLVMConstInt(i64, run[0].from, 0)];
+        let source = if run[0].from == 0 { run[0].global } else { LLVMConstInBoundsGEP2(i8, run[0].global, from.as_mut_ptr(), 1) };
+
+        let call = LLVMBuildMemCpy(builder, destination, 1, source, 1, LLVMConstInt(i64, size, 0));
+        LLVMSetOperand(call, 3, LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0));
+        LLVMInstructionSetDebugLoc(call, LLVMInstructionGetDebugLoc(last));
+
+        for copied in run.iter() {
+            let pointer = LLVMGetOperand(copied.store, 1);
+            LLVMInstructionEraseFromParent(copied.store);
+
+            if pointer != alloca && LLVMGetFirstUse(pointer).is_null() {
+                LLVMInstructionEraseFromParent(pointer);
+            }
+
+            if LLVMGetFirstUse(copied.load).is_null() {
+                LLVMInstructionEraseFromParent(copied.load);
+            }
+        }
+    }
+}
+
+/// Stores and calls (but the debug information)
+unsafe fn writes_memory(instruction: LLVMValueRef) -> bool {
+    unsafe {
+        return !LLVMIsAStoreInst(instruction).is_null() || (!LLVMIsACallInst(instruction).is_null() && LLVMIsADbgInfoIntrinsic(instruction).is_null());
+    }
+}
+
+/// Position of an instruction in its block
+unsafe fn position(instruction: LLVMValueRef) -> usize {
+    unsafe {
+        let mut count = 0;
+        let mut current = LLVMGetPreviousInstruction(instruction);
+
+        while !current.is_null() {
+            count += 1;
+            current = LLVMGetPreviousInstruction(current);
+        }
+
+        return count;
+    }
+}
+
+/// Stores of constants that follow each other in a slot: the bytes they write from the first one, which the
+/// next ones extend or overlap with the same bytes (gcc copies "secret" with two overlapping stores of four
+/// bytes: "secr" at 0 and "ret\0" at 3)
+#[derive(Default)]
+struct Run {
+    stores: Vec<LLVMValueRef>,
+    start: u64,
+    bytes: Vec<u8>,
+    /// A store wrote some of the bytes of the one before again: the run is a copy of bytes, not fields set one by one
+    overlaps: bool,
+}
+
+impl Run {
+    fn extend(&mut self, store: LLVMValueRef, offset: u64, bytes: &[u8]) -> bool {
+        if self.stores.is_empty() {
+            *self = Run { stores: vec![store], start: offset, bytes: bytes.to_vec(), overlaps: false };
+            return true;
+        }
+
+        let end = self.start + self.bytes.len() as u64;
+
+        if offset < self.start || offset > end {
+            return false;
+        }
+
+        let at = (offset - self.start) as usize;
+        let overlap = self.bytes.len().saturating_sub(at).min(bytes.len());
+
+        if self.bytes[at..at + overlap] != bytes[..overlap] {
+            return false;
+        }
+
+        self.bytes.extend_from_slice(&bytes[overlap..]);
+        self.stores.push(store);
+        self.overlaps |= overlap > 0;
+        return true;
+    }
+}
+
+unsafe fn replace_run(module: LLVMModuleRef, context: LLVMContextRef, builder: LLVMBuilderRef, alloca: LLVMValueRef, run: &Run) {
+    let bytes = &run.bytes;
+
+    // Bytes copied with overlapping stores are an array too (Go copies [14]byte{...} with two stores of eight bytes)
+    let copied = run.overlaps && bytes.iter().any(|&b| b != 0);
+
+    if run.stores.len() < 2 || !(is_text(bytes) || copied) {
+        return;
+    }
+
+    unsafe {
+        let data = LLVMConstStringInContext(context, bytes.as_ptr() as *const _, bytes.len() as u32, 1);
+        let global = LLVMAddGlobal(module, LLVMTypeOf(data), c"stack_string".as_ptr());
+        LLVMSetInitializer(global, data);
+        LLVMSetGlobalConstant(global, 1);
+        LLVMSetLinkage(global, LLVMLinkage::LLVMPrivateLinkage);
+        LLVMSetUnnamedAddress(global, LLVMUnnamedAddr::LLVMGlobalUnnamedAddr);
+
+        let last = run.stores.last().unwrap();
+        LLVMPositionBuilderBefore(builder, *last);
+
+        let i8 = LLVMInt8TypeInContext(context);
+        let i64 = LLVMInt64TypeInContext(context);
+        let mut index = [LLVMConstInt(i64, run.start, 0)];
+        let destination = if run.start == 0 { alloca } else { LLVMBuildInBoundsGEP2(builder, i8, alloca, index.as_mut_ptr(), 1, c"".as_ptr()) };
+
+        let call = LLVMBuildMemCpy(builder, destination, 1, global, 1, LLVMConstInt(i64, bytes.len() as u64, 0));
+        LLVMSetOperand(call, 3, LLVMConstInt(LLVMInt1TypeInContext(context), 1, 0));
+        LLVMInstructionSetDebugLoc(call, LLVMInstructionGetDebugLoc(*last));
+
+        for store in run.stores.iter() {
+            let pointer = LLVMGetOperand(*store, 1);
+            LLVMInstructionEraseFromParent(*store);
+
+            if pointer != alloca && LLVMGetFirstUse(pointer).is_null() {
+                LLVMInstructionEraseFromParent(pointer);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(offset: u64, bytes: &[u8]) -> Access {
+        return Access { offset, size: bytes.len() as u64, kind: Kind::Store(Some(bytes.to_vec())), ty: None };
+    }
+
+    fn load(offset: u64, size: u64) -> Access {
+        return Access { offset, size, kind: Kind::Load, ty: None };
+    }
+
+    fn escape(offset: u64) -> Access {
+        return Access { offset, size: 1, kind: Kind::Escape, ty: None };
+    }
+
+    fn spans(slots: &[Slot]) -> Vec<(u64, u64)> {
+        return slots.iter().map(|s| (s.start, s.end)).collect();
+    }
+
+    #[test]
+    fn slots() {
+        // Scalars below the first escaping address, objects from each escaping address to the next
+        let accesses = vec![load(4, 4), store(4, &[1, 0, 0, 0]), store(8, &[0; 4]), load(10, 2), escape(16), store(20, &[0; 4]), escape(32), load(40, 4)];
+        assert_eq!(spans(&layout(&accesses, 48, &BTreeSet::new())), vec![(4, 8), (8, 12), (16, 32), (32, 48)]);
+
+        // The canary slot ends the buffer below it
+        let accesses = vec![load(4, 4), escape(8)];
+        assert_eq!(spans(&layout(&accesses, 64, &BTreeSet::from([40]))), vec![(4, 8), (8, 40)]);
+
+        // A string written 4 bytes at a time is one slot, not numbers
+        let accesses = vec![store(0, b"libe"), store(4, b"rt\xc3\xa9"), store(8, b"!\0\0\0"), store(12, &[1, 0, 0, 0]), store(16, &[2, 0, 0, 0])];
+        assert_eq!(spans(&layout(&accesses, 20, &BTreeSet::new())), vec![(0, 12), (12, 16), (16, 20)]);
+    }
+}

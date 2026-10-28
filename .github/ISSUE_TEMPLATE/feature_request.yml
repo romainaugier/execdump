@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposal
-      description: How it could work in execdump (command line, TUI keys or command, output).
+      description: How it could work in daedale (command line, TUI keys or command, output).
   - type: textarea
     id: samples
     attributes:

@@ -1,18 +1,18 @@
 [workspace]
-members = ["crates/execdump-core", "crates/execdump-debugger", "crates/execdump-decompiler", "crates/execdump-project", "crates/execdump-tui"]
+members = ["crates/daedale-core", "crates/daedale-debugger", "crates/daedale-decompiler", "crates/daedale-project", "crates/daedale-tui"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/romainaugier/execdump"
+repository = "https://github.com/romainaugier/daedale"
 
 [workspace.dependencies]
-execdump-core = { path = "crates/execdump-core" }
-execdump-debugger = { path = "crates/execdump-debugger" }
-execdump-decompiler = { path = "crates/execdump-decompiler" }
-execdump-project = { path = "crates/execdump-project" }
-execdump-tui = { path = "crates/execdump-tui" }
+daedale-core = { path = "crates/daedale-core" }
+daedale-debugger = { path = "crates/daedale-debugger" }
+daedale-decompiler = { path = "crates/daedale-decompiler" }
+daedale-project = { path = "crates/daedale-project" }
+daedale-tui = { path = "crates/daedale-tui" }
 anyhow = "1.0"
 arboard = { version = "3.7.0", default-features = false }
 capstone = "0.14.0"
@@ -31,7 +31,7 @@ strum_macros = "0.27.2"
 toml = "0.9.10"
 
 [package]
-name = "execdump"
+name = "daedale"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -39,11 +39,11 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-execdump-core.workspace = true
-execdump-debugger.workspace = true
-execdump-decompiler.workspace = true
-execdump-project.workspace = true
-execdump-tui.workspace = true
+daedale-core.workspace = true
+daedale-debugger.workspace = true
+daedale-decompiler.workspace = true
+daedale-project.workspace = true
+daedale-tui.workspace = true
 capstone.workspace = true
 clap.workspace = true
 crossterm.workspace = true

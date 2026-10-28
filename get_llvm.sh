@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fetch static LLVM 18 libraries for execdump.
+# Fetch static LLVM 18 libraries for daedale.
 #
 #   linux-x86_64, linux-arm64, macos-arm64   prebuilt release tarballs (any host)
 #   macos-x86_64                             built from source (macOS host)
@@ -19,7 +19,7 @@
 #
 # Environment:
 #   LLVM_VERSION            default 18.1.8
-#   LLVM_TARGETS            backends for source builds (default: X86;AArch64, the ones execdump initializes)
+#   LLVM_TARGETS            backends for source builds (default: X86;AArch64, the ones daedale initializes)
 #   LLVM_MSVC_RUNTIME       CMAKE_MSVC_RUNTIME_LIBRARY for windows targets (default: MultiThreadedDLL, /MD like rustc)
 #   LLVM_NATIVE_TOOL_DIR    dir with host llvm-tblgen etc. when cross-compiling a windows target
 

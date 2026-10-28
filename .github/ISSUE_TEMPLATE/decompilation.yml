@@ -49,7 +49,7 @@ body:
     id: output
     attributes:
       label: Decompiled C
-      description: The output of execdump (`--decompile c --functions-filter <function>` or the TUI).
+      description: The output of daedale (`--decompile c --functions-filter <function>` or the TUI).
       render: c
     validations:
       required: true
@@ -63,7 +63,7 @@ body:
     id: specs
     attributes:
       label: Specs
-      description: The output of `execdump --specs` (build, machine and platform).
+      description: The output of `daedale --specs` (build, machine and platform).
       render: text
     validations:
       required: true

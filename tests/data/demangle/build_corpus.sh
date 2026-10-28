@@ -71,7 +71,7 @@ LIBSTDCXX=$(find /usr/lib -name 'libstdc++.so.6' | head -1)
 "$LLVM_BIN"/llvm-nm -D --defined-only "$LIBSTDCXX" | awk '{print $NF}' | grep '^_Z' | sort -u | awk 'NR % 8 == 0' > "$TMP/libstdcxx.sym"
 paste "$TMP/libstdcxx.sym" <("$LLVM_BIN"/llvm-cxxfilt < "$TMP/libstdcxx.sym") | awk -F'\t' '$1 != $2' > libstdcxx.tsv
 
-# Rust v0 symbols of a Rust binary (execdump itself by default)
-RUST_BINARY=${RUST_BINARY:-../../../target/release/execdump}
+# Rust v0 symbols of a Rust binary (daedale itself by default)
+RUST_BINARY=${RUST_BINARY:-../../../target/release/daedale}
 "$LLVM_BIN"/llvm-nm "$RUST_BINARY" | awk '{print $NF}' | grep -E '^_R' | sort -u | awk 'length($0) < 160' > "$TMP/rust.sym"
 paste "$TMP/rust.sym" <("$LLVM_BIN"/llvm-cxxfilt < "$TMP/rust.sym") | awk -F'\t' '$1 != $2' | awk 'NR % 60 == 0' > rust-v0.tsv

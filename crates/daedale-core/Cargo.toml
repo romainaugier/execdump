@@ -1,0 +1,19 @@
+[package]
+name = "daedale-core"
+description = "Executable formats (PE, ELF, Mach-O), program model, disassembly helpers and symbol demangling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+capstone.workspace = true
+chrono.workspace = true
+gimli = { version = "0.31", default-features = false, features = ["read", "std"] }
+miniz_oxide = "0.8"
+strum.workspace = true
+strum_macros.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

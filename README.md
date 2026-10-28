@@ -1,12 +1,25 @@
-# execdump
+# daedale
 
-execdump is a command-line tool that helps you analyze Windows's PE, Linux's ELF and macOS's Mach-O files (x86, x86_64 and aarch64) by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
+daedale (formerly execdump) is named after Daedalus, the architect of the labyrinth: a binary is a labyrinth of code,
+and daedale is made to find your way through it.
+
+daedale is a command-line tool that helps you analyze Windows's PE, Linux's ELF and macOS's Mach-O files (x86, x86_64 and aarch64) by parsing and printing the required information about them, or navigate through them using a terminal-based ui.
 
 This project is currently a work in progress so not everything is supported, and it might be broken.
 
 The goal is to provide a fast, reliable and cross-platform reverse-engineering application.
 
-execdump might evolve into a library later, instead of just being a standalone command-line tool.
+daedale might evolve into a library later, instead of just being a standalone command-line tool.
+
+### Coming from execdump
+
+The binary is now `daedale` and the crates `daedale-*`. What execdump left on disk keeps working:
+
+- `~/.daedalerc` is the configuration, `~/.execdumprc` is read when it is the only one: rename it when you like
+- a binary's project is `<binary>.ddproj`, an existing `<binary>.edproj` is opened when there is no `.ddproj`
+- the decompilation cache moves to `~/.cache/daedale` (rebuilt on the first open), `~/.cache/execdump` can be deleted
+- `EXECDUMP_DEBUGGER_LOG` is now `DAEDALE_DEBUGGER_LOG`, the exported headers are `daedale.h`, `daedale_imports.h` and
+  `daedale_globals.h`
 
 ## Building
 
@@ -27,34 +40,34 @@ cargo build --release
 The time spent in each stage of a project (analysis, background decompilation, cache, modules, export) on a binary:
 
 ```
-cargo run --release -p execdump-project --example profile -- /usr/bin/python3 [workers] [max seconds of decompilation]
+cargo run --release -p daedale-project --example profile -- /usr/bin/python3 [workers] [max seconds of decompilation]
 ```
 
 Every function of some binaries decompiled with overflow checks, the panics grouped by where they happen (`SWEEP_TRACE=1` prints each function before it is decompiled, `SWEEP_WORKERS` sets the number of threads and `SWEEP_STACK` their stack size, a small one finds the deepest recursions):
 
 ```
 CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS=true CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true \
-    cargo run --release --target-dir target/checked -p execdump-project --example sweep -- /usr/bin/*
+    cargo run --release --target-dir target/checked -p daedale-project --example sweep -- /usr/bin/*
 ```
 
 The sweep also measures the C code of each binary: its lines, the copies between variables (`v1 = v2;`), the `goto`s, the memory accesses through a cast pointer (`*(int *)((char *)p + 8)`), the local variables and the instructions kept as inline assembly. With `SWEEP_COMPILE=1` it checks which functions compile (`SWEEP_CC` sets the compiler, `cc` by default): every function goes in one translation unit after the types of the type database and the prototypes it uses, its globals declared with the type it accesses them with. `SWEEP_REPORT=file.tsv` saves the counts of every function, `SWEEP_BASELINE=file.tsv` compares a run with a saved one, the totals and the functions that got worse:
 
 ```
-SWEEP_COMPILE=1 SWEEP_REPORT=before.tsv cargo run --release -p execdump-project --example sweep -- /usr/bin/tar
+SWEEP_COMPILE=1 SWEEP_REPORT=before.tsv cargo run --release -p daedale-project --example sweep -- /usr/bin/tar
 # change the decompiler
-SWEEP_COMPILE=1 SWEEP_BASELINE=before.tsv cargo run --release -p execdump-project --example sweep -- /usr/bin/tar
+SWEEP_COMPILE=1 SWEEP_BASELINE=before.tsv cargo run --release -p daedale-project --example sweep -- /usr/bin/tar
 ```
 
 `SWEEP_TEXT=file.c` writes the C code of every function, by binary and address: two runs compared with `diff` show every change of the output, not only the counts.
 
-A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of execdump itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
+A function whose decompilation panics shows the panic as its error (`decompilation failed: panicked at ...`), the other functions are not affected. A crash of daedale itself gives the terminal back before printing the error, the fatal errors that are not panics (stack overflows, invalid memory accesses) included on Unix. The analysis and the decompiler run on threads with large stacks (512 MB reserved, only what is used is allocated): debug builds recurse deeply on big functions, and are much slower, `--release` is the way to explore large binaries.
 
 Errors are `anyhow::Error` across the crates: a failure carries what was being done when it happened (`cannot parse a.out: Unexpected end of file`), the status line and the messages show the whole chain on one line. The typed errors that callers match on stay typed (`ReaderError` of the binary readers) and convert with `?`.
 
 ## Usage
 
 ```
-Usage: execdump.exe [OPTIONS] [FILE_PATH]
+Usage: daedale.exe [OPTIONS] [FILE_PATH]
 
 Arguments:
   [FILE_PATH]
@@ -142,10 +155,10 @@ Options:
       --functions-filter <FUNCTIONS_FILTER>
           Regular expression to filter the functions (by name or hexadecimal address) used by --decompile [default: .*]
       --llm
-          Improves the decompiled C code with the LLM of the [llm] section of ~/.execdumprc
+          Improves the decompiled C code with the LLM of the [llm] section of ~/.daedalerc
 
       --project <PROJECT>
-          Project directory (annotations, modules, edited code and their history), next to the binary by default (<FILE_PATH>.edproj)
+          Project directory (annotations, modules, edited code and their history), next to the binary by default (<FILE_PATH>.ddproj, or the <FILE_PATH>.edproj of execdump when only it exists)
       --export <EXPORT>
           Decompiles every function with the annotations of the project and writes the C code as a source tree
           (one file per module in src/, their headers in include/)
@@ -256,7 +269,7 @@ Disassembly:
 ### Core
 
 Utilities:
-  - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of execdump)
+  - :heavy_check_mark: Symbol Demangler: Itanium C++ ABI (GCC/Clang on Linux, macOS, MinGW), MSVC (Windows x86, x64, ARM64, ARM64EC), Rust legacy and Rust v0 (checked against llvm-cxxfilt on the 100k Rust symbols of daedale)
   - :heavy_check_mark: Shared libraries a binary needs, found where the loader looks for them (ELF: RPATH, LD_LIBRARY_PATH, RUNPATH, ld.so.conf, default directories; PE: next to the binary, PATH; Mach-O: @rpath, @loader_path, @executable_path)
   - :heavy_check_mark: Type database parsed from C headers: prototypes, typedefs, structs (with layouts), unions and enums, bundled for glibc and Win32 (mingw-w64). The glibc one has gettext, error, obstack, argp, fts, mntent, statfs, xattr, uchar and the fortified functions compilers call (`__memcpy_chk`...). Each language adds a database of its runtime to the programs that have its code (`data/typedb/go.h`: the strings, slices, interfaces, itabs and types of Go, the allocations, conversions, channels and maps of the runtime, `fmt`, `strings`, `strconv`...; `data/typedb/rust.h`: `&str`, the allocator, the panics). A C or C++ program with debug information adds its own types to it, and its functions get the prototypes it describes (the names of their parameters included); a pointer the function returns is the struct of its prototype
   - :heavy_check_mark: The Linux system calls by their name (`syscall(SYS_write, 1, "text", 4)`, x86_64, x86 and aarch64), the
@@ -291,7 +304,7 @@ Analysis:
     both next to each other (the fields of a `&str`), returns them in a pair of registers, or returns the pointer and
     writes the length to its first result pointer (Go): `write_all(out, "world", 5)`
     instead of `write_all(out, "worldsuccesswarning: low disk space...", 5)`, `return "unknown" | ((__int128)7 << 64);`
-  - :heavy_check_mark: Languages (`crates/execdump-decompiler/src/lang`): what the decompiler knows of each language other
+  - :heavy_check_mark: Languages (`crates/daedale-decompiler/src/lang`): what the decompiler knows of each language other
     than C is a module of its own behind one trait, with a hook per stage (the functions that do not return, the calling
     convention and the signatures of the runtime, the calls the lifter turns into operations of its own, the idioms in
     the C, the modules of the functions, where the debugger stops first and which calls a step goes over). The built-in
@@ -559,9 +572,9 @@ The C code of the whole program is a project: every function is decompiled in th
 
 - :heavy_check_mark: Background decompilation of every function, callees first, the functions on screen before the others
   (one decompiler per core but one, sharing the signatures they discover), progress in the title bar
-- :heavy_check_mark: Decompilation cache on disk (`~/.cache/execdump/<id of the binary>/`): reopening a binary does not
+- :heavy_check_mark: Decompilation cache on disk (`~/.cache/daedale/<id of the binary>/`): reopening a binary does not
   decompile it again, a function is decompiled again only when its annotations, or the names and prototypes of what it
-  calls, change (or when execdump is rebuilt). Another execdump opening the same binary at the same time keeps its cache
+  calls, change (or when daedale is rebuilt). Another daedale opening the same binary at the same time keeps its cache
   in memory.
 - :heavy_check_mark: Modules found automatically: the paths of the Rust items (`crate::module::Type::method` is in
   `crate/module.rs`, impls in the module of their type), ELF FILE symbols (object files of the local functions), functions between
@@ -575,10 +588,10 @@ The C code of the whole program is a project: every function is decompiled in th
 - :heavy_check_mark: LLM proposals (names, types and summary of a function with its code rewritten, organization of the functions in modules),
   reviewed as diffs before being accepted
 - :heavy_check_mark: Export of the modules as a source tree: `src/<module>` and `include/<module>.h` (prototypes of the
-  functions), `include/execdump.h` (`undefined` types), `include/execdump_imports.h` and `include/execdump_globals.h`.
+  functions), `include/daedale.h` (`undefined` types), `include/daedale_imports.h` and `include/daedale_globals.h`.
   The tree is meant to be read and built upon, it does not always compile as it is.
 
-The project directory (`<binary>.edproj` by default, `--project` or `:w <dir>` to choose another one) holds a bare git repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
+The project directory (`<binary>.ddproj` by default, the `<binary>.edproj` of execdump when only it exists, `--project` or `:w <dir>` to choose another one) holds a bare git repository (`repo.git`) and the session (`session.toml`, the splits and tabs, restored when the project is opened again):
 
 | Branch | Content |
 |---|---|
@@ -623,7 +636,7 @@ Everything the interface does is a command: the keys are bound to commands (in t
 
 The command line suggests what can be typed: the commands (with their arguments and help) while the name is typed, then the values of the argument being typed: functions (`:c`, `:cg`, `:sp`...), modules (`:source`, `:mv`), variables and functions (`:rename`, `:retype`), libraries and files (`:lib`, `:w`, `:export`), proposals (`:accept`), the words a command takes (`:open tab`, `:focus-split left`). When there is nothing to suggest, its usage and help show.
 
-Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.execdumprc`):
+Key bindings (vim-like, the main ones can be changed in the `[keys]` section of `~/.daedalerc`):
 
 | Keys | Action |
 |---|---|
@@ -703,7 +716,7 @@ In the C code (a module, every function of it one after the other; functions not
 What is copied (`y`, `:string`) goes to the clipboard of the system and to the one of the terminal. The clipboard of
 the system is the one of X11 (the Wayland sessions of GNOME and KDE share it through XWayland), of macOS or of
 Windows; on Wayland without XWayland `wl-copy` (wl-clipboard) does it, `xclip` or `xsel` when X11 cannot be reached
-directly. On Linux the copied text is served by execdump while it runs, then by the clipboard manager of the desktop
+directly. On Linux the copied text is served by daedale while it runs, then by the clipboard manager of the desktop
 when there is one. The one of the terminal is OSC 52, for the terminals that support it (kitty, WezTerm, iTerm2,
 foot, xterm, tmux with `set-clipboard on`), through ssh too; GNOME Terminal and the other VTE terminals ignore it.
 
@@ -738,11 +751,11 @@ Commands:
 | `:w [directory]` | Save the project (and the session), in another directory when given |
 | `:export <directory>` | Export the C code as a source tree (once everything is decompiled) |
 | `:lib <name or path>` | Load a shared library (one the binary needs, or any file), with its own project |
-| `:q`, `:q!` | Close the tab (the split when it was its last tab, execdump when it was the last split) |
+| `:q`, `:q!` | Close the tab (the split when it was its last tab, daedale when it was the last split) |
 | `:qa`, `:qa!`, `:wq` | Quit, quit without saving, save and quit |
 
 ```toml
-# ~/.execdumprc
+# ~/.daedalerc
 [keys]
 quit = 'q'
 down = 'j'
@@ -759,7 +772,7 @@ detail = 'v'
 The LLM assistance uses the `[llm]` section:
 
 ```toml
-# ~/.execdumprc
+# ~/.daedalerc
 [llm]
 backend = "anthropic"              # openai, anthropic, google, deepseek, mistral, groq, xai, openrouter, ollama, openai-compatible
 model = "..."
@@ -770,7 +783,7 @@ api_key_env = "ANTHROPIC_API_KEY"  # or api_key = "..."
 # timeout = 120                    # seconds
 ```
 
-execdump calls the APIs itself, in three formats: OpenAI chat completions (`openai`, `deepseek`, `mistral`, `groq`,
+daedale calls the APIs itself, in three formats: OpenAI chat completions (`openai`, `deepseek`, `mistral`, `groq`,
 `xai`, `openrouter`, `ollama`, and any compatible server with `backend = "openai-compatible"` and its `base_url`,
 `http://localhost:8080/v1` for llama.cpp for instance), Anthropic messages (`anthropic`) and Google Gemini (`google`).
 `base_url` replaces the default address of a backend (with or without its version path, `/v1`), `ollama` and
@@ -813,7 +826,7 @@ The debug view shows:
 
 Breakpoints are toggled on the line (or the instruction, or the node) under the cursor with `F9` or `gb`, or with
 `:break <function or address>`; they are marked with `●` in the C code and the linear disassembly, kept while
-execdump runs and given to the debugger at the load address of the program (PIE and ASLR).
+daedale runs and given to the debugger at the load address of the program (PIE and ASLR).
 
 | Keys | Command | Action |
 |---|---|---|
@@ -839,7 +852,7 @@ the program, a number, plus or minus a number (`rsp+0x10`, without spaces), with
 (`*rsp`) and `&` for the address of a variable in the stack (`&v18`). `:memory` takes the address of the block: the
 value of a variable or of a register (`:memory a1 32` for the buffer a pointer points to), the address of a global
 (`:memory buffer 256`). The values and the bytes that changed since the stop before are highlighted. On Linux the
-memory is read from the process of the program (`/proc/<pid>/mem`, the program is a child of execdump), so the blocks
+memory is read from the process of the program (`/proc/<pid>/mem`, the program is a child of daedale), so the blocks
 of memory and the values read from memory change live while the program runs (`Watches (live)`, the changes since
 the last stop highlighted); elsewhere they are read at the stops. The watches stay from one run to the next.
 
@@ -867,19 +880,19 @@ Without a pseudo-terminal (Windows) its output goes to a file and its input is e
 `[debugger]` section:
 
 ```toml
-# ~/.execdumprc
+# ~/.daedalerc
 [debugger]
 backend = "lldb"                   # gdb or lldb
 # path = "/usr/bin/lldb-18"        # the executable, found in the PATH without it
 ```
 
 gdb is driven through GDB/MI, lldb through its command line (with formats of its own for its stops and its frames),
-see `crates/execdump-debugger`. `EXECDUMP_DEBUGGER_LOG=<file>` appends what execdump writes to the debugger and what
+see `crates/daedale-debugger`. `DAEDALE_DEBUGGER_LOG=<file>` appends what daedale writes to the debugger and what
 it answers to a file. The program of Go stops at `main.main` (its `main` is the entry of the runtime), a step into the
 calls does not stop in the growth of the stack (`runtime.morestack`). The tests of the debugger build a small C program with `cc` and run it under each
 debugger installed.
 
-![tui](https://github.com/romainaugier/execdump/blob/main/res/tui.png)
+![tui](https://github.com/romainaugier/daedale/blob/main/res/tui.png)
 
 ## Acknowledgement
 
@@ -891,10 +904,10 @@ This tool is based on several amazing open-source projects (go check them out!) 
 
 ## Reporting a bug
 
-`execdump --specs` prints what a bug report needs to know about the build and the machine, to paste in the issue:
+`daedale --specs` prints what a bug report needs to know about the build and the machine, to paste in the issue:
 
 ```
-execdump 0.1.0
+daedale 0.1.0
 commit    724f9bb1c3d2
 build     release, x86_64-unknown-linux-gnu, rustc 1.97.0 (2d8144b78 2026-07-07)
 llvm      18.1.3
@@ -906,12 +919,12 @@ cpu       AMD Ryzen 9 7950X 16-Core Processor (32 threads)
 memory    62.5 GiB
 terminal  xterm-256color, truecolor, 238x61
 debugger  gdb at /usr/bin/gdb, GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1
-config    ~/.execdumprc
+config    ~/.daedalerc
 ```
 
-The commit is the one execdump was built from (`unknown` outside a git checkout). `arch` shows an emulated build (an
+The commit is the one daedale was built from (`unknown` outside a git checkout). `arch` shows an emulated build (an
 x64 build on Windows on ARM, an x86_64 one under Rosetta), the debugger is the one the TUI would run, and `config` says
-whether `~/.execdumprc` parses. The paths under the home directory start with `~`, the report does not give the user name.
+whether `~/.daedalerc` parses. The paths under the home directory start with `~`, the report does not give the user name.
 
 ## Contributing
 
@@ -921,9 +934,9 @@ follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privat
 
 ## License
 
-execdump is licensed under the [Apache License, Version 2.0](LICENSE). Every source file carries the
+daedale is licensed under the [Apache License, Version 2.0](LICENSE). Every source file carries the
 `SPDX-License-Identifier: Apache-2.0` line, except the programs under `tests/data/src` and `examples` that are built into
 fixtures and samples.
 
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in execdump is licensed as
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in daedale is licensed as
 above, without any additional terms or conditions (section 5 of the license).

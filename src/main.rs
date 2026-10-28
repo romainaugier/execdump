@@ -6,15 +6,15 @@ use crate::dump::dump_exec;
 
 use anyhow::{Context, Result};
 
-use execdump_core::crash;
-use execdump_core::elf::parse_elf;
-use execdump_core::exec::{ExecType, guess_exectype, Exec};
-use execdump_core::macho::parse_macho;
-use execdump_core::pe::parse_pe;
+use daedale_core::crash;
+use daedale_core::elf::parse_elf;
+use daedale_core::exec::{ExecType, guess_exectype, Exec};
+use daedale_core::macho::parse_macho;
+use daedale_core::pe::parse_pe;
 
-use execdump_core::program::{programs_from_exec, Program};
-use execdump_decompiler::analysis::analyze;
-use execdump_project::{default_workers, Project};
+use daedale_core::program::{programs_from_exec, Program};
+use daedale_decompiler::analysis::analyze;
+use daedale_project::{default_workers, Project};
 
 use clap::Parser;
 
@@ -91,7 +91,7 @@ fn run() -> Result<()> {
     let config = Config::load()?;
 
     if args.tui {
-        return execdump_tui::main(path, exec, config.keys, config.llm, config.debugger, args.project.clone());
+        return daedale_tui::main(path, exec, config.keys, config.llm, config.debugger, args.project.clone());
     } else {
         dump_exec(&exec, &args, &config);
     }

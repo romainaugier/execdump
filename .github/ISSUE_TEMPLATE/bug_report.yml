@@ -4,7 +4,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Check that it still happens on `dev`. A crafted binary that crashes or hangs execdump may be a security issue, see SECURITY.md.
+      value: Check that it still happens on `dev`. A crafted binary that crashes or hangs daedale may be a security issue, see SECURITY.md.
   - type: textarea
     id: what
     attributes:
@@ -31,7 +31,7 @@ body:
     id: specs
     attributes:
       label: Specs
-      description: The output of `execdump --specs` (build, machine and platform).
+      description: The output of `daedale --specs` (build, machine and platform).
       render: text
     validations:
       required: true
@@ -39,4 +39,4 @@ body:
     id: extra
     attributes:
       label: Anything else
-      description: The relevant part of ~/.execdumprc, the LLM backend for LLM issues, a screenshot for TUI issues.
+      description: The relevant part of ~/.daedalerc, the LLM backend for LLM issues, a screenshot for TUI issues.

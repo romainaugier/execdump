@@ -39,8 +39,8 @@ fn main() {
         watch_git();
     }
 
-    println!("cargo:rustc-env=EXECDUMP_COMMIT={}", commit.as_deref().unwrap_or("unknown"));
-    println!("cargo:rustc-env=EXECDUMP_RUSTC={}", command(&rustc, &["-V"]).as_deref().unwrap_or("unknown"));
-    println!("cargo:rustc-env=EXECDUMP_PROFILE={}", std::env::var("PROFILE").unwrap_or_default());
-    println!("cargo:rustc-env=EXECDUMP_TARGET={}", std::env::var("TARGET").unwrap_or_default());
+    println!("cargo:rustc-env=DAEDALE_COMMIT={}", commit.as_deref().unwrap_or("unknown"));
+    println!("cargo:rustc-env=DAEDALE_RUSTC={}", command(&rustc, &["-V"]).as_deref().unwrap_or("unknown"));
+    println!("cargo:rustc-env=DAEDALE_PROFILE={}", std::env::var("PROFILE").unwrap_or_default());
+    println!("cargo:rustc-env=DAEDALE_TARGET={}", std::env::var("TARGET").unwrap_or_default());
 }

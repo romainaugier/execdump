@@ -31,7 +31,7 @@ jobs:
       - name: Read version from Cargo.toml
         id: version
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "execdump") | .version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "daedale") | .version')
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "Cargo.toml version: $version"
@@ -59,25 +59,25 @@ jobs:
           - name: linux-x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            exe: execdump
+            exe: daedale
           - name: linux-arm64
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            exe: execdump
+            exe: daedale
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             llvm: windows-x86_64
-            exe: execdump.exe
+            exe: daedale.exe
           - name: windows-arm64
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
             llvm: windows-arm64
-            exe: execdump.exe
+            exe: daedale.exe
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            exe: execdump
+            exe: daedale
     steps:
       - name: Disable line ending conversion
         run: git config --global core.autocrlf false
@@ -122,7 +122,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="execdump-${{ needs.check-version.outputs.tag }}-${{ matrix.target }}"
+          name="daedale-${{ needs.check-version.outputs.tag }}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
@@ -155,7 +155,7 @@ jobs:
 
       - name: Package source code
         run: |
-          name="execdump-${{ needs.check-version.outputs.tag }}-source"
+          name="daedale-${{ needs.check-version.outputs.tag }}-source"
           git archive --format=tar.gz --prefix="$name/" -o "dist/$name.tar.gz" HEAD
           git archive --format=zip --prefix="$name/" -o "dist/$name.zip" HEAD
 
@@ -167,7 +167,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check-version.outputs.tag }}
-          name: execdump ${{ needs.check-version.outputs.tag }}
+          name: daedale ${{ needs.check-version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: dist/*

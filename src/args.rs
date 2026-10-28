@@ -173,7 +173,7 @@ pub struct Args {
     #[arg(long, default_value = ".*")]
     pub functions_filter: String,
 
-    /// Improves the decompiled C code with the LLM of the [llm] section of ~/.execdumprc
+    /// Improves the decompiled C code with the LLM of the [llm] section of ~/.daedalerc
     /// (names, types and a summary of each function, the callees first)
     #[arg(long, default_value_t = false)]
     pub llm: bool,
@@ -183,7 +183,7 @@ pub struct Args {
      */
 
     /// Project directory (annotations, modules, edited code and their history), next to the binary
-    /// by default (<FILE_PATH>.edproj)
+    /// by default (<FILE_PATH>.ddproj, or the <FILE_PATH>.edproj of execdump when only it exists)
     #[arg(long)]
     pub project: Option<PathBuf>,
 

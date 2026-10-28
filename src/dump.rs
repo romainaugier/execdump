@@ -2,21 +2,21 @@
 
 use anyhow::Result;
 
-use execdump_core::crash;
-use execdump_core::elf::ELF;
-use execdump_core::exec::Exec;
-use execdump_core::macho::MachO;
+use daedale_core::crash;
+use daedale_core::elf::ELF;
+use daedale_core::exec::Exec;
+use daedale_core::macho::MachO;
 use crate::args::{Args, DecompileOutput};
-use execdump_decompiler::analysis::analyze;
-use execdump_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
-use execdump_decompiler::analysis::function::Function;
-use execdump_decompiler::analysis::insn::Decoder;
-use execdump_decompiler::storage::Place;
-use execdump_decompiler::Decompiler;
+use daedale_decompiler::analysis::analyze;
+use daedale_decompiler::analysis::dot::{callgraph_dot, cfg_dot};
+use daedale_decompiler::analysis::function::Function;
+use daedale_decompiler::analysis::insn::Decoder;
+use daedale_decompiler::storage::Place;
+use daedale_decompiler::Decompiler;
 
 use crate::config::Config;
-use execdump_core::program::{programs_from_exec, Language};
-use execdump_core::pe::PE;
+use daedale_core::program::{programs_from_exec, Language};
+use daedale_core::pe::PE;
 
 use regex::Regex;
 
@@ -386,7 +386,7 @@ pub fn dump_decompile(exec: &Exec, args: &Args, config: &Config) -> Result<()> {
 
 /// The locations of the variables of a function over its addresses, the slots of the stack canary and the offset of the
 /// stack pointer
-fn storage_text(function: &execdump_decompiler::c::ast::CFunction, decompiler: &Decompiler) -> String {
+fn storage_text(function: &daedale_decompiler::c::ast::CFunction, decompiler: &Decompiler) -> String {
     let mut out = String::new();
 
     for (var, ranges) in function.storage.vars.iter() {

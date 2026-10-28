@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * --specs: the build, the machine and the platform execdump runs on, to paste in bug reports.
+ * --specs: the build, the machine and the platform daedale runs on, to paste in bug reports.
  *
  * The machine is read from the system directly (procfs and uname on Linux, sysctl on macOS, the registry and Win32
  * on Windows). The paths under the home directory start with ~ so that a report does not give the user name.
@@ -10,8 +10,8 @@ use crate::config::Config;
 
 use anyhow::Result;
 
-use execdump_debugger::Kind;
-use execdump_tui::DebuggerConfig;
+use daedale_debugger::Kind;
+use daedale_tui::DebuggerConfig;
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -22,8 +22,8 @@ pub fn print() -> Result<()> {
     let (capstone_major, capstone_minor) = capstone::Capstone::lib_version();
 
     let mut specs: Vec<(&str, String)> = vec![
-        ("commit", env!("EXECDUMP_COMMIT").to_string()),
-        ("build", format!("{}, {}, {}", env!("EXECDUMP_PROFILE"), env!("EXECDUMP_TARGET"), env!("EXECDUMP_RUSTC"))),
+        ("commit", env!("DAEDALE_COMMIT").to_string()),
+        ("build", format!("{}, {}, {}", env!("DAEDALE_PROFILE"), env!("DAEDALE_TARGET"), env!("DAEDALE_RUSTC"))),
         ("llvm", format!("{}.{}.{}", llvm_major, llvm_minor, llvm_patch)),
         ("capstone", format!("{}.{}", capstone_major, capstone_minor)),
         ("os", system::os().unwrap_or_else(|| std::env::consts::OS.to_string())),
@@ -42,7 +42,7 @@ pub fn print() -> Result<()> {
 
     let mut out = std::io::stdout().lock();
 
-    writeln!(out, "execdump {}", env!("CARGO_PKG_VERSION"))?;
+    writeln!(out, "daedale {}", env!("CARGO_PKG_VERSION"))?;
 
     for (key, value) in specs {
         writeln!(out, "{:<10}{}", key, value)?;
@@ -52,12 +52,15 @@ pub fn print() -> Result<()> {
 }
 
 fn config() -> (Config, String) {
-    let found = dirs::home_dir().is_some_and(|home| home.join(".execdumprc").is_file());
+    let path = Config::path().filter(|path| path.is_file()).map(|path| tilde(&path.display().to_string()));
 
-    return match Config::load() {
-        Ok(config) if found => (config, "~/.execdumprc".to_string()),
-        Ok(config) => (config, "none".to_string()),
-        Err(error) => (Config::default(), format!("~/.execdumprc is invalid: {}", one_line(&error.root_cause().to_string()))),
+    return match (Config::load(), path) {
+        (Ok(config), Some(path)) => (config, path),
+        (Ok(config), None) => (config, "none".to_string()),
+        (Err(error), path) => {
+            let path = path.unwrap_or_else(|| "~/.daedalerc".to_string());
+            (Config::default(), format!("{} is invalid: {}", path, one_line(&error.root_cause().to_string())))
+        }
     };
 }
 
@@ -121,7 +124,7 @@ fn terminal() -> String {
 fn debugger(config: &DebuggerConfig) -> String {
     let kind = config.backend.as_deref().and_then(Kind::from_name);
 
-    let Some((kind, path)) = execdump_debugger::find(kind, config.path.as_deref()) else {
+    let Some((kind, path)) = daedale_debugger::find(kind, config.path.as_deref()) else {
         return "none found".to_string();
     };
 
@@ -403,9 +406,9 @@ mod tests {
 
     #[test]
     fn arguments() {
-        assert!(Args::try_parse_from(["execdump", "--specs"]).unwrap().specs);
-        assert!(Args::try_parse_from(["execdump"]).is_err());
-        assert!(Args::try_parse_from(["execdump", "a.out"]).unwrap().file_path.is_some());
+        assert!(Args::try_parse_from(["daedale", "--specs"]).unwrap().specs);
+        assert!(Args::try_parse_from(["daedale"]).is_err());
+        assert!(Args::try_parse_from(["daedale", "a.out"]).unwrap().file_path.is_some());
     }
 
     #[test]
@@ -421,6 +424,6 @@ mod tests {
     fn machine() {
         assert!(system::cpu().is_some_and(|cpu| !cpu.is_empty()));
         assert!(system::memory().is_some_and(|bytes| bytes > 0));
-        assert!(!env!("EXECDUMP_TARGET").is_empty());
+        assert!(!env!("DAEDALE_TARGET").is_empty());
     }
 }

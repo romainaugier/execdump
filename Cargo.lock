@@ -418,6 +418,98 @@ dependencies = [
 ]
 
 [[package]]
+name = "daedale"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capstone",
+ "clap",
+ "crossterm",
+ "daedale-core",
+ "daedale-debugger",
+ "daedale-decompiler",
+ "daedale-project",
+ "daedale-tui",
+ "dirs",
+ "inkwell",
+ "libc",
+ "mimalloc",
+ "regex",
+ "serde",
+ "toml",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "daedale-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capstone",
+ "chrono",
+ "gimli",
+ "libc",
+ "miniz_oxide",
+ "strum",
+ "strum_macros",
+]
+
+[[package]]
+name = "daedale-debugger"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "daedale-core",
+ "libc",
+]
+
+[[package]]
+name = "daedale-decompiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "capstone",
+ "daedale-core",
+ "inkwell",
+ "lang-c",
+ "reqwest",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "daedale-project"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "daedale-core",
+ "daedale-decompiler",
+ "dirs",
+ "git2",
+ "mimalloc",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "daedale-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "crossterm",
+ "daedale-core",
+ "daedale-debugger",
+ "daedale-decompiler",
+ "daedale-project",
+ "ratatui",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -584,98 +676,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad9cdb4b747e485a12abb0e6566612956c7a1bafa3bdb8d682c5b6d403589e48"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "execdump"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "capstone",
- "clap",
- "crossterm",
- "dirs",
- "execdump-core",
- "execdump-debugger",
- "execdump-decompiler",
- "execdump-project",
- "execdump-tui",
- "inkwell",
- "libc",
- "mimalloc",
- "regex",
- "serde",
- "toml",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "execdump-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "capstone",
- "chrono",
- "gimli",
- "libc",
- "miniz_oxide",
- "strum",
- "strum_macros",
-]
-
-[[package]]
-name = "execdump-debugger"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "execdump-core",
- "libc",
-]
-
-[[package]]
-name = "execdump-decompiler"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "capstone",
- "execdump-core",
- "inkwell",
- "lang-c",
- "reqwest",
- "rustc-hash",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "execdump-project"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "execdump-core",
- "execdump-decompiler",
- "git2",
- "mimalloc",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "execdump-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "crossterm",
- "execdump-core",
- "execdump-debugger",
- "execdump-decompiler",
- "execdump-project",
- "ratatui",
- "serde",
- "toml",
 ]
 
 [[package]]

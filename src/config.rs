@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Global configuration, loaded from ~/.execdumprc (TOML), one section per feature
+ * Global configuration, loaded from ~/.daedalerc (TOML), one section per feature
  */
 
 use anyhow::{Context, Result};
 
-use execdump_decompiler::llm::LlmConfig;
-use execdump_tui::{DebuggerConfig, KeyBindings};
+use daedale_decompiler::llm::LlmConfig;
+use daedale_tui::{DebuggerConfig, KeyBindings};
 
 use serde::Deserialize;
+
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
@@ -19,8 +21,17 @@ pub struct Config {
 }
 
 impl Config {
+    /// ~/.daedalerc, or the ~/.execdumprc of execdump when only it exists
+    pub fn path() -> Option<PathBuf> {
+        let home = dirs::home_dir()?;
+        let path = home.join(".daedalerc");
+        let legacy = home.join(".execdumprc");
+
+        return Some(if !path.exists() && legacy.is_file() { legacy } else { path });
+    }
+
     pub fn load() -> Result<Self> {
-        let Some(path) = dirs::home_dir().map(|h| h.join(".execdumprc")) else {
+        let Some(path) = Config::path() else {
             return Ok(Config::default());
         };
 

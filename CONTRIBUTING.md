@@ -1,10 +1,10 @@
-# Contributing to execdump
+# Contributing to daedale
 
 Thanks for helping! Bug reports, decompilation samples, fixes and features are all welcome. By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security issues go through [SECURITY.md](SECURITY.md), never a public issue.
 
 ## Issues
 
-Use the templates: a bug, wrong decompiled code, or a feature. Paste the output of `execdump --specs` (the build, the machine and the platform). For anything about a given binary, the more of it you can share the better: the binary itself (or how to build it), its format and architecture, the function address and the exact command. Check that the bug still happens on `dev` first.
+Use the templates: a bug, wrong decompiled code, or a feature. Paste the output of `daedale --specs` (the build, the machine and the platform). For anything about a given binary, the more of it you can share the better: the binary itself (or how to build it), its format and architecture, the function address and the exact command. Check that the bug still happens on `dev` first.
 
 ## Workflow
 
@@ -31,7 +31,7 @@ cargo test --workspace
 
 - Every new source file starts with `// SPDX-License-Identifier: Apache-2.0` (`# ...` in scripts), followed by a block comment saying what the module does, like the existing ones.
 - Prefer explicit code to comments: clear names and small functions. Add a comment only for what the code cannot say (an ABI or format quirk, why an obvious approach does not work).
-- Performance and memory footprint matter: execdump has to stay fast on binaries of any size. Avoid copies, allocations in hot loops and large enum variants that waste memory.
+- Performance and memory footprint matter: daedale has to stay fast on binaries of any size. Avoid copies, allocations in hot loops and large enum variants that waste memory.
 - Errors go through `anyhow`. Data read from the binary is untrusted: a malformed input must give an error, not a panic, so avoid new `unwrap()`s on it.
 - Match the formatting of the code around: the tree is not `rustfmt`-formatted, do not reformat code you do not change.
 - Add a test with the change: a unit test next to the code, or a fixture for format and decompiler work.
@@ -43,4 +43,4 @@ One logical change per commit, a short first line saying what it does (`bugfix: 
 
 ## License
 
-execdump is licensed under the [Apache License 2.0](LICENSE). Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in execdump is licensed the same way, without any additional terms or conditions.
+daedale is licensed under the [Apache License 2.0](LICENSE). Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in daedale is licensed the same way, without any additional terms or conditions.

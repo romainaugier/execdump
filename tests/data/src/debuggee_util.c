@@ -1,6 +1,6 @@
 /* Functions of the debuggee in a source file of their own: its static functions (the first and the last of the file,
  * built with -fno-toplevel-reorder) have FILE symbols, the functions between them are a module of their own in
- * execdump */
+ * daedale */
 
 volatile int spinning = 1;
 /* Counts the turns of spin: memory that changes while the program runs */
